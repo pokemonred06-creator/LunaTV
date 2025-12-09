@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any,no-console */
 
 import { NextRequest, NextResponse } from 'next/server';
+import * as OpenCC from 'opencc-js';
 
 import { getAuthInfoFromCookie } from '@/lib/auth';
 import { getAvailableApiSites, getCacheTime, getConfig } from '@/lib/config';
@@ -16,7 +17,12 @@ export async function GET(request: NextRequest) {
   }
 
   const { searchParams } = new URL(request.url);
-  const query = searchParams.get('q');
+  let query = searchParams.get('q');
+
+  if (query) {
+    const converter = OpenCC.Converter({ from: 'hk', to: 'cn' });
+    query = converter(query);
+  }
 
   if (!query) {
     const cacheTime = await getCacheTime();
