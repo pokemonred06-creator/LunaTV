@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any,no-console */
 
 import { NextRequest, NextResponse } from 'next/server';
+import * as OpenCC from 'opencc-js';
 
 import { AdminConfig } from '@/lib/admin.types';
 import { getAuthInfoFromCookie } from '@/lib/auth';
@@ -20,14 +21,22 @@ export async function GET(request: NextRequest) {
 
     const config = await getConfig();
     const { searchParams } = new URL(request.url);
-    const query = searchParams.get('q')?.trim();
+    let query = searchParams.get('q')?.trim();
 
     if (!query) {
       return NextResponse.json({ suggestions: [] });
     }
 
+    // Convert Traditional to Simplified Chinese
+    try {
+        const converter = OpenCC.Converter({ from: 'hk', to: 'cn' });
+        query = converter(query);
+    } catch (e) {
+        console.error('Conversion failed:', e);
+    }
+
     // 生成建议
-    const suggestions = await generateSuggestions(config, query, authInfo.username);
+    const suggestions = await generateSuggestions(config, query as string, authInfo.username);
 
     // 从配置中获取缓存时间，如果没有配置则使用默认值300秒（5分钟）
     const cacheTime = config.SiteConfig.SiteInterfaceCacheTime || 300;

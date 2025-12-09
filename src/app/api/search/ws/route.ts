@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any,no-console */
 
 import { NextRequest, NextResponse } from 'next/server';
+import * as OpenCC from 'opencc-js';
 
 import { getAuthInfoFromCookie } from '@/lib/auth';
 import { getAvailableApiSites, getConfig } from '@/lib/config';
@@ -16,7 +17,16 @@ export async function GET(request: NextRequest) {
   }
 
   const { searchParams } = new URL(request.url);
-  const query = searchParams.get('q');
+  let query = searchParams.get('q');
+
+  if (query) {
+    try {
+      const converter = OpenCC.Converter({ from: 'hk', to: 'cn' });
+      query = converter(query);
+    } catch (e) {
+      console.error('Conversion error:', e);
+    }
+  }
 
   if (!query) {
     return new Response(
@@ -79,7 +89,7 @@ export async function GET(request: NextRequest) {
         try {
           // 添加超时控制
           const searchPromise = Promise.race([
-            searchFromApi(site, query),
+            searchFromApi(site, query as string),
             new Promise((_, reject) =>
               setTimeout(() => reject(new Error(`${site.name} timeout`)), 20000)
             ),

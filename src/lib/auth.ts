@@ -14,7 +14,11 @@ export function getAuthInfoFromCookie(request: NextRequest): {
   }
 
   try {
-    const decoded = decodeURIComponent(authCookie.value);
+    let decoded = decodeURIComponent(authCookie.value);
+    // If it's still encoded, decode again (handles double encoding from some clients)
+    if (decoded.includes('%')) {
+      decoded = decodeURIComponent(decoded);
+    }
     const authData = JSON.parse(decoded);
     return authData;
   } catch (error) {

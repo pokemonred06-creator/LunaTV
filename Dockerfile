@@ -10,7 +10,7 @@ WORKDIR /app
 COPY package.json pnpm-lock.yaml ./
 
 # 安装所有依赖（含 devDependencies，后续会裁剪）
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --no-frozen-lockfile
 
 # ---- 第 2 阶段：构建项目 ----
 FROM node:20-alpine AS builder
@@ -42,6 +42,7 @@ ENV DOCKER_ENV=true
 
 # 从构建器中复制 standalone 输出
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules/opencc-js ./node_modules/opencc-js
 # 从构建器中复制 scripts 目录
 COPY --from=builder --chown=nextjs:nodejs /app/scripts ./scripts
 # 从构建器中复制 start.js

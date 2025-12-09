@@ -17,11 +17,13 @@ export async function GET(request: NextRequest) {
   }
 
   const { searchParams } = new URL(request.url);
+  console.log('Search Query Original:', searchParams.get('q'));
   let query = searchParams.get('q');
 
   if (query) {
     const converter = OpenCC.Converter({ from: 'hk', to: 'cn' });
     query = converter(query);
+    console.log('Search Query Converted:', query);
   }
 
   if (!query) {
