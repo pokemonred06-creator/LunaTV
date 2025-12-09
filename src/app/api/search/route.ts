@@ -45,7 +45,7 @@ export async function GET(request: NextRequest) {
   // 添加超时控制和错误处理，避免慢接口拖累整体响应
   const searchPromises = apiSites.map((site) =>
     Promise.race([
-      searchFromApi(site, query),
+      searchFromApi(site, query as string),
       new Promise((_, reject) =>
         setTimeout(() => reject(new Error(`${site.name} timeout`)), 20000)
       ),
