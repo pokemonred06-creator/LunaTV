@@ -50,7 +50,7 @@ export interface SiteConfig {
   Announcement: string;
   SearchDownstreamMaxPage: number;
   SiteInterfaceCacheTime: number; // 站点接口缓存时间
-  DoubanProxyType: 'direct' | 'custom';
+  DoubanProxyType: 'direct' | 'custom' | 'cmliussss-cdn-tencent' | 'cmliussss-cdn-ali';
   DoubanProxy: string;
   DoubanImageProxyType: 'direct' | 'cmliussss-cdn-tencent' | 'custom';
   DoubanImageProxy: string;

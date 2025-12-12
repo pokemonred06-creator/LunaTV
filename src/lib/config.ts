@@ -4,8 +4,6 @@ import { db } from '@/lib/db';
 
 import { AdminConfig, ApiSite, LiveCfg } from './admin.types';
 
-export type { ApiSite, LiveCfg };
-
 interface ConfigFileStruct {
   cache_time?: number;
   api_site?: {
@@ -108,13 +106,13 @@ export function refineConfig(adminConfig: AdminConfig): AdminConfig {
     const key = category.query + category.type;
     const existedCategory = currentCustomCategories.get(key);
     if (existedCategory) {
-      existedCategory.name = category.name || category.query; // Fix: Fallback to query if name is undefined
+      existedCategory.name = category.name || category.query;
       existedCategory.query = category.query;
       existedCategory.type = category.type;
       existedCategory.from = 'config';
     } else {
       currentCustomCategories.set(key, {
-        name: category.name || category.query, // Fix: Fallback here too
+        name: category.name || category.query,
         type: category.type,
         query: category.query,
         from: 'config',
@@ -202,17 +200,17 @@ async function getInitConfig(configFile: string, subConfig: {
         Number(process.env.NEXT_PUBLIC_SEARCH_MAX_PAGE) || 5,
       SiteInterfaceCacheTime: cfgFile.cache_time || 7200,
       DoubanProxyType:
-        (process.env.NEXT_PUBLIC_DOUBAN_PROXY_TYPE as 'direct' | 'custom') || 'direct', // Cast type
+        (process.env.NEXT_PUBLIC_DOUBAN_PROXY_TYPE as 'direct' | 'custom' | 'cmliussss-cdn-tencent' | 'cmliussss-cdn-ali') || 'direct', // Updated cast
       DoubanProxy: process.env.NEXT_PUBLIC_DOUBAN_PROXY || '',
       DoubanImageProxyType:
-        (process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE as 'cmliussss-cdn-tencent' | 'custom' | 'direct') || 'cmliussss-cdn-tencent', // Cast type
+        (process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE as 'cmliussss-cdn-tencent' | 'custom' | 'direct') || 'cmliussss-cdn-tencent',
       DoubanImageProxy: process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY || '',
       DisableYellowFilter:
         process.env.NEXT_PUBLIC_DISABLE_YELLOW_FILTER === 'true',
       FluidSearch:
         process.env.NEXT_PUBLIC_FLUID_SEARCH !== 'false',
-      DoubanDataCacheTTL: Number(process.env.DOUBAN_DATA_CACHE_TTL_MINUTES) || cfgFile.douban_data_cache_ttl || DEFAULT_DOUBAN_DATA_CACHE_TTL_MINUTES, // Use env var or cfgFile or default
-      ImageCacheTTL: Number(process.env.IMAGE_CACHE_TTL_DAYS) || cfgFile.image_cache_ttl || DEFAULT_IMAGE_CACHE_TTL_DAYS,     // Use env var or cfgFile or default
+      DoubanDataCacheTTL: Number(process.env.DOUBAN_DATA_CACHE_TTL_MINUTES) || cfgFile.douban_data_cache_ttl || DEFAULT_DOUBAN_DATA_CACHE_TTL_MINUTES,
+      ImageCacheTTL: Number(process.env.IMAGE_CACHE_TTL_DAYS) || cfgFile.image_cache_ttl || DEFAULT_IMAGE_CACHE_TTL_DAYS,
     },
     UserConfig: {
       Users: [],
@@ -464,3 +462,5 @@ export async function getAvailableApiSites(user?: string): Promise<ApiSite[]> {
 export async function setCachedConfig(config: AdminConfig) {
   cachedConfig = config;
 }
+
+export type { ApiSite, LiveCfg };

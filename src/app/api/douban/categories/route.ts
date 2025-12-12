@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { getConfig } from '@/lib/config';
-import { fetchDoubanData } from '@/lib/douban'; // Updated import
+import { fetchDoubanData } from '@/lib/douban';
 import { DoubanItem, DoubanResult } from '@/lib/types';
 
 interface DoubanCategoryApiResponse {
@@ -71,13 +71,19 @@ export async function GET(request: Request) {
   let finalProxyUrl = '';
 
   switch (doubanProxyType) {
+    case 'cmliussss-cdn-tencent':
+      targetBaseUrl = `https://m.douban.cmliussss.net`;
+      break;
+    case 'cmliussss-cdn-ali':
+      targetBaseUrl = `https://m.douban.cmliussss.com`;
+      break;
     case 'custom':
       useProxy = true;
       finalProxyUrl = doubanProxy;
       break;
     case 'direct':
     default:
-      // Direct access from server, no proxy base URL change needed, original targetBaseUrl is fine
+      // Direct access from server
       break;
   }
 
