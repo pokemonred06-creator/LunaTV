@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 
-import { getCacheTime } from '@/lib/config';
-import { fetchDoubanData } from '@/lib/douban';
+import { getConfig } from '@/lib/config';
+import { fetchDoubanData } from '@/lib/douban'; // Updated import
 import { DoubanItem, DoubanResult } from '@/lib/types';
 
 interface DoubanCategoryApiResponse {
@@ -61,7 +61,33 @@ export async function GET(request: Request) {
     );
   }
 
-  const target = `https://m.douban.com/rexxar/api/v2/subject/recent_hot/${kind}?start=${pageStart}&limit=${pageLimit}&category=${category}&type=${type}`;
+  // 获取配置
+  const config = await getConfig();
+  const doubanProxyType = config.SiteConfig.DoubanProxyType;
+  const doubanProxy = config.SiteConfig.DoubanProxy;
+
+  let targetBaseUrl = `https://m.douban.com`;
+  let useProxy = false;
+  let finalProxyUrl = '';
+
+  switch (doubanProxyType) {
+    case 'custom':
+      useProxy = true;
+      finalProxyUrl = doubanProxy;
+      break;
+    case 'direct':
+    default:
+      // Direct access from server, no proxy base URL change needed, original targetBaseUrl is fine
+      break;
+  }
+
+  const doubanApiPath = `/rexxar/api/v2/subject/recent_hot/${kind}?start=${pageStart}&limit=${pageLimit}&category=${category}&type=${type}`;
+  let target = `${targetBaseUrl}${doubanApiPath}`;
+
+  // If using a custom proxy, append the original target URL to the proxy URL
+  if (useProxy && finalProxyUrl) {
+    target = `${finalProxyUrl}${encodeURIComponent(target)}`;
+  }
 
   try {
     // 调用豆瓣 API
@@ -82,7 +108,7 @@ export async function GET(request: Request) {
       list: list,
     };
 
-    const cacheTime = await getCacheTime();
+    const cacheTime = config.SiteConfig.SiteInterfaceCacheTime || 7200; // Use SiteInterfaceCacheTime
     return NextResponse.json(response, {
       headers: {
         'Cache-Control': `public, max-age=${cacheTime}, s-maxage=${cacheTime}`,

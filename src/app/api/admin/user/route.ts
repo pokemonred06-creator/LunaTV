@@ -81,22 +81,22 @@ export async function POST(request: NextRequest) {
     const adminConfig = await getConfig();
 
     // 判定操作者角色
-    let operatorRole: 'owner' | 'admin';
+    let operatorRole: 'owner' | 'admin' | 'user'; // Changed to include 'user'
     if (username === process.env.USERNAME) {
       operatorRole = 'owner';
     } else {
       const userEntry = adminConfig.UserConfig.Users.find(
         (u) => u.username === username
       );
-      if (!userEntry || userEntry.role !== 'admin' || userEntry.banned) {
+      if (!userEntry || (userEntry.role !== 'admin' && userEntry.role !== 'owner') || userEntry.banned) { // Check for admin or owner
         return NextResponse.json({ error: '权限不足' }, { status: 401 });
       }
-      operatorRole = 'admin';
+      operatorRole = userEntry.role; // Assign actual role
     }
 
     // 查找目标用户条目（用户组操作和批量操作不需要）
     let targetEntry: any = null;
-    let isTargetAdmin = false;
+    let isTargetAdmin = false; // Flag to indicate if target is an admin
 
     if (!['userGroup', 'batchUpdateUserGroups'].includes(action) && targetUsername) {
       targetEntry = adminConfig.UserConfig.Users.find(
@@ -112,7 +112,7 @@ export async function POST(request: NextRequest) {
       }
 
       // 权限校验逻辑
-      isTargetAdmin = targetEntry?.role === 'admin';
+      isTargetAdmin = targetEntry?.role === 'admin'; // Check if target is specifically 'admin'
     }
 
     switch (action) {
@@ -156,7 +156,7 @@ export async function POST(request: NextRequest) {
             { status: 404 }
           );
         }
-        if (isTargetAdmin) {
+        if (targetEntry.role === 'admin') { // Check target role here
           // 目标是管理员
           if (operatorRole !== 'owner') {
             return NextResponse.json(
@@ -175,7 +175,7 @@ export async function POST(request: NextRequest) {
             { status: 404 }
           );
         }
-        if (isTargetAdmin) {
+        if (targetEntry.role === 'admin') { // Check target role here
           if (operatorRole !== 'owner') {
             return NextResponse.json(
               { error: '仅站长可操作管理员' },
@@ -193,9 +193,9 @@ export async function POST(request: NextRequest) {
             { status: 404 }
           );
         }
-        if (targetEntry.role === 'admin') {
+        if (targetEntry.role === 'admin' || targetEntry.role === 'owner') { // Already admin or owner
           return NextResponse.json(
-            { error: '该用户已是管理员' },
+            { error: '该用户已是管理员或站长' },
             { status: 400 }
           );
         }
@@ -250,9 +250,9 @@ export async function POST(request: NextRequest) {
         }
 
         if (
-          isTargetAdmin &&
-          operatorRole !== 'owner' &&
-          username !== targetUsername
+          isTargetAdmin && // Target is an admin
+          operatorRole !== 'owner' && // Operator is not owner
+          username !== targetUsername // And operator is not self
         ) {
           return NextResponse.json(
             { error: '仅站长可修改其他管理员密码' },
@@ -279,7 +279,7 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        if (isTargetAdmin && operatorRole !== 'owner') {
+        if (targetEntry.role === 'admin' && operatorRole !== 'owner') { // If target is admin, only owner can delete
           return NextResponse.json(
             { error: '仅站长可删除管理员' },
             { status: 401 }
@@ -310,9 +310,9 @@ export async function POST(request: NextRequest) {
 
         // 权限检查：站长可配置所有人的采集源，管理员可配置普通用户和自己的采集源
         if (
-          isTargetAdmin &&
-          operatorRole !== 'owner' &&
-          username !== targetUsername
+          isTargetAdmin && // Target is admin
+          operatorRole !== 'owner' && // Operator is not owner
+          username !== targetUsername // And operator is not self
         ) {
           return NextResponse.json(
             { error: '仅站长可配置其他管理员的采集源' },
@@ -404,11 +404,14 @@ export async function POST(request: NextRequest) {
 
         // 权限检查：站长可配置所有人的用户组，管理员可配置普通用户和自己的用户组
         if (
-          isTargetAdmin &&
-          operatorRole !== 'owner' &&
-          username !== targetUsername
+          isTargetAdmin && // Target is admin
+          operatorRole !== 'owner' && // Operator is not owner
+          username !== targetUsername // And operator is not self
         ) {
-          return NextResponse.json({ error: '仅站长可配置其他管理员的用户组' }, { status: 400 });
+          return NextResponse.json(
+            { error: '仅站长可配置其他管理员的用户组' },
+            { status: 400 }
+          );
         }
 
         // 更新用户的用户组
@@ -432,7 +435,7 @@ export async function POST(request: NextRequest) {
         if (operatorRole !== 'owner') {
           for (const targetUsername of usernames) {
             const targetUser = adminConfig.UserConfig.Users.find(u => u.username === targetUsername);
-            if (targetUser && targetUser.role === 'admin' && targetUsername !== username) {
+            if (targetUser && targetUser.role === 'admin' && targetUsername !== username) { // Check target role
               return NextResponse.json({ error: `管理员无法操作其他管理员 ${targetUsername}` }, { status: 400 });
             }
           }

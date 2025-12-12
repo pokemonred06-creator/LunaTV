@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getAuthInfoFromCookie } from '@/lib/auth';
-import { getAvailableApiSites, getCacheTime } from '@/lib/config';
+import { getAvailableApiSites, getConfig } from '@/lib/config'; // Modified import
 import { getDetailFromApi } from '@/lib/downstream';
 
 export const runtime = 'nodejs';
@@ -33,7 +33,8 @@ export async function GET(request: NextRequest) {
     }
 
     const result = await getDetailFromApi(apiSite, id);
-    const cacheTime = await getCacheTime();
+    const config = await getConfig(); // Get full config
+    const cacheTime = config.SiteConfig.SiteInterfaceCacheTime || 7200; // Use SiteInterfaceCacheTime
 
     return NextResponse.json(result, {
       headers: {

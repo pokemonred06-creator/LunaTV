@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
       const user = config.UserConfig.Users.find(
         (u) => u.username === username
       );
-      if (!user || user.role !== 'admin' || user.banned) {
+      if (!user || user.role !== 'owner' || user.banned) { // Changed 'admin' to 'owner'
         return NextResponse.json({ error: '权限不足' }, { status: 401 });
       }
     }

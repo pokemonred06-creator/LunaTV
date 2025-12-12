@@ -2,8 +2,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { getCacheTime } from '@/lib/config';
-import { fetchDoubanData } from '@/lib/douban';
+import { getConfig } from '@/lib/config';
+import { fetchDoubanData } from '@/lib/douban'; // Updated import
 import { DoubanResult } from '@/lib/types';
 
 interface DoubanRecommendApiResponse {
@@ -112,7 +112,8 @@ export async function GET(request: NextRequest) {
       list: list,
     };
 
-    const cacheTime = await getCacheTime();
+    const config = await getConfig(); // Get full config
+    const cacheTime = config.SiteConfig.SiteInterfaceCacheTime || 7200; // Use SiteInterfaceCacheTime
     return NextResponse.json(response, {
       headers: {
         'Cache-Control': `public, max-age=${cacheTime}, s-maxage=${cacheTime}`,

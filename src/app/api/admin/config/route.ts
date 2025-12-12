@@ -28,18 +28,21 @@ export async function GET(request: NextRequest) {
   try {
     const config = await getConfig();
     const result: AdminConfigResult = {
-      Role: 'owner',
+      Role: 'user', // Default to 'user'
       Config: config,
     };
+
     if (username === process.env.USERNAME) {
       result.Role = 'owner';
     } else {
       const user = config.UserConfig.Users.find((u) => u.username === username);
-      if (user && user.role === 'admin' && !user.banned) {
-        result.Role = 'admin';
+      if (user && user.role === 'owner' && !user.banned) {
+        result.Role = 'owner';
+      } else if (user && user.role === 'user' && !user.banned) {
+        result.Role = 'user';
       } else {
         return NextResponse.json(
-          { error: '你是管理员吗你就访问？' },
+          { error: '权限不足或用户不存在' },
           { status: 401 }
         );
       }

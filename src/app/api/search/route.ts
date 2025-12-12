@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import * as OpenCC from 'opencc-js';
 
 import { getAuthInfoFromCookie } from '@/lib/auth';
-import { getAvailableApiSites, getCacheTime, getConfig } from '@/lib/config';
+import { getAvailableApiSites, getConfig } from '@/lib/config'; // Modified import
 import { searchFromApi } from '@/lib/downstream';
 import { yellowWords } from '@/lib/yellow';
 
@@ -26,8 +26,10 @@ export async function GET(request: NextRequest) {
     console.log('Search Query Converted:', query);
   }
 
+  const config = await getConfig(); // Get config early
+  const cacheTime = config.SiteConfig.SiteInterfaceCacheTime || 7200; // Use SiteInterfaceCacheTime
+
   if (!query) {
-    const cacheTime = await getCacheTime();
     return NextResponse.json(
       { results: [] },
       {
@@ -41,7 +43,6 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const config = await getConfig();
   const apiSites = await getAvailableApiSites(authInfo.username);
 
   // 添加超时控制和错误处理，避免慢接口拖累整体响应
@@ -69,7 +70,6 @@ export async function GET(request: NextRequest) {
         return !yellowWords.some((word: string) => typeName.includes(word));
       });
     }
-    const cacheTime = await getCacheTime();
 
     if (flattenedResults.length === 0) {
       // no cache if empty

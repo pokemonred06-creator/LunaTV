@@ -1,0 +1,29 @@
+version: '3'
+
+services:
+  lunatv:
+    image: lunatv:custom
+    container_name: lunatv
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./cache:/app/data
+    environment:
+      - NODE_ENV=production
+      # Cache Configuration
+      - DOUBAN_DATA_CACHE_TTL_MINUTES=1440  # 1 day (default)
+      - IMAGE_CACHE_TTL_DAYS=30             # 30 days (default)
+      # App Configuration
+      - NEXT_PUBLIC_SITE_NAME=MoonTV
+      - ANNOUNCEMENT=Welcome to MoonTV!
+      - NEXT_PUBLIC_SEARCH_MAX_PAGE=5
+      - NEXT_PUBLIC_DOUBAN_PROXY_TYPE=direct
+      - NEXT_PUBLIC_DOUBAN_PROXY=
+      - NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE=cmliussss-cdn-tencent
+      - NEXT_PUBLIC_DOUBAN_IMAGE_PROXY=
+      - NEXT_PUBLIC_DISABLE_YELLOW_FILTER=false
+      - NEXT_PUBLIC_FLUID_SEARCH=true
+      # Auth
+      - USERNAME=admin
+      - PASSWORD=wonderpig888

@@ -463,4 +463,19 @@ export abstract class BaseRedisStorage implements IStorage {
       throw new Error('清空数据失败');
     }
   }
+
+  // ---------- 通用缓存 ----------
+  async get(key: string): Promise<any> {
+    const val = await this.withRetry(() => this.client.get(key));
+    return val ? JSON.parse(val) : null;
+  }
+
+  async set(key: string, value: any, ttl?: number): Promise<void> {
+    const strVal = JSON.stringify(value);
+    if (ttl) {
+      await this.withRetry(() => this.client.set(key, strVal, { EX: ttl }));
+    } else {
+      await this.withRetry(() => this.client.set(key, strVal));
+    }
+  }
 }

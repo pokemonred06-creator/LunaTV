@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getAuthInfoFromCookie } from '@/lib/auth';
-import { getAvailableApiSites, getCacheTime, getConfig } from '@/lib/config';
+import { getAvailableApiSites, getConfig } from '@/lib/config'; // Modified import
 import { searchFromApi } from '@/lib/downstream';
 import { yellowWords } from '@/lib/yellow';
 
@@ -18,8 +18,10 @@ export async function GET(request: NextRequest) {
   const query = searchParams.get('q');
   const resourceId = searchParams.get('resourceId');
 
+  const config = await getConfig(); // Get config early
+  const cacheTime = config.SiteConfig.SiteInterfaceCacheTime || 7200; // Use SiteInterfaceCacheTime
+
   if (!query || !resourceId) {
-    const cacheTime = await getCacheTime();
     return NextResponse.json(
       { result: null, error: '缺少必要参数: q 或 resourceId' },
       {
@@ -33,7 +35,6 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const config = await getConfig();
   const apiSites = await getAvailableApiSites(authInfo.username);
 
   try {
@@ -57,7 +58,6 @@ export async function GET(request: NextRequest) {
         return !yellowWords.some((word: string) => typeName.includes(word));
       });
     }
-    const cacheTime = await getCacheTime();
 
     if (result.length === 0) {
       return NextResponse.json(

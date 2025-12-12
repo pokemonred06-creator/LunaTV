@@ -2,21 +2,9 @@
 
 import { db } from '@/lib/db';
 
-import { AdminConfig } from './admin.types';
+import { AdminConfig, ApiSite, LiveCfg } from './admin.types';
 
-export interface ApiSite {
-  key: string;
-  api: string;
-  name: string;
-  detail?: string;
-}
-
-export interface LiveCfg {
-  name: string;
-  url: string;
-  ua?: string;
-  epg?: string; // 节目单
-}
+export type { ApiSite, LiveCfg };
 
 interface ConfigFileStruct {
   cache_time?: number;
@@ -31,6 +19,8 @@ interface ConfigFileStruct {
   lives?: {
     [key: string]: LiveCfg;
   }
+  douban_data_cache_ttl?: number; // New field for Douban data cache TTL in minutes
+  image_cache_ttl?: number; // New field for Image cache TTL in days
 }
 
 export const API_CONFIG = {
@@ -52,6 +42,10 @@ export const API_CONFIG = {
     },
   },
 };
+
+// Default TTLs
+const DEFAULT_DOUBAN_DATA_CACHE_TTL_MINUTES = 24 * 60; // 1 day
+const DEFAULT_IMAGE_CACHE_TTL_DAYS = 30; // 30 days
 
 // 在模块加载时根据环境决定配置来源
 let cachedConfig: AdminConfig;
@@ -114,13 +108,13 @@ export function refineConfig(adminConfig: AdminConfig): AdminConfig {
     const key = category.query + category.type;
     const existedCategory = currentCustomCategories.get(key);
     if (existedCategory) {
-      existedCategory.name = category.name;
+      existedCategory.name = category.name || category.query; // Fix: Fallback to query if name is undefined
       existedCategory.query = category.query;
       existedCategory.type = category.type;
       existedCategory.from = 'config';
     } else {
       currentCustomCategories.set(key, {
-        name: category.name,
+        name: category.name || category.query, // Fix: Fallback here too
         type: category.type,
         query: category.query,
         from: 'config',
@@ -208,15 +202,17 @@ async function getInitConfig(configFile: string, subConfig: {
         Number(process.env.NEXT_PUBLIC_SEARCH_MAX_PAGE) || 5,
       SiteInterfaceCacheTime: cfgFile.cache_time || 7200,
       DoubanProxyType:
-        process.env.NEXT_PUBLIC_DOUBAN_PROXY_TYPE || 'cmliussss-cdn-tencent',
+        (process.env.NEXT_PUBLIC_DOUBAN_PROXY_TYPE as 'direct' | 'custom') || 'direct', // Cast type
       DoubanProxy: process.env.NEXT_PUBLIC_DOUBAN_PROXY || '',
       DoubanImageProxyType:
-        process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE || 'cmliussss-cdn-tencent',
+        (process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE as 'cmliussss-cdn-tencent' | 'custom' | 'direct') || 'cmliussss-cdn-tencent', // Cast type
       DoubanImageProxy: process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY || '',
       DisableYellowFilter:
         process.env.NEXT_PUBLIC_DISABLE_YELLOW_FILTER === 'true',
       FluidSearch:
         process.env.NEXT_PUBLIC_FLUID_SEARCH !== 'false',
+      DoubanDataCacheTTL: Number(process.env.DOUBAN_DATA_CACHE_TTL_MINUTES) || cfgFile.douban_data_cache_ttl || DEFAULT_DOUBAN_DATA_CACHE_TTL_MINUTES, // Use env var or cfgFile or default
+      ImageCacheTTL: Number(process.env.IMAGE_CACHE_TTL_DAYS) || cfgFile.image_cache_ttl || DEFAULT_IMAGE_CACHE_TTL_DAYS,     // Use env var or cfgFile or default
     },
     UserConfig: {
       Users: [],
@@ -449,7 +445,7 @@ export async function getAvailableApiSites(user?: string): Promise<ApiSite[]> {
       if (tagConfig && tagConfig.enabledApis) {
         tagConfig.enabledApis.forEach(apiKey => enabledApisFromTags.add(apiKey));
       }
-    });
+      });
 
     if (enabledApisFromTags.size > 0) {
       return allApiSites.filter((s) => enabledApisFromTags.has(s.key)).map((s) => ({

@@ -1,62 +1,72 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { getConfig } from '@/lib/config';
 
 export const runtime = 'nodejs';
 
-// OrionTV 兼容接口
-export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const imageUrl = searchParams.get('url');
+export async function GET(request: NextRequest) {
+  const url = request.nextUrl.searchParams.get('url');
+  if (!url) {
+    return new NextResponse('Missing url parameter', { status: 400 });
+  }
 
-  if (!imageUrl) {
-    return NextResponse.json({ error: 'Missing image URL' }, { status: 400 });
+  const config = await getConfig();
+  let proxyUrl = url;
+
+  // Simple substitution if proxy is configured
+  // Note: Real-world implementation might need more complex logic
+  if (config.SiteConfig.DoubanImageProxyType === 'custom' && config.SiteConfig.DoubanImageProxy) {
+      if (url.includes('doubanio.com')) {
+          // Attempt to replace host if it's a simple mirror
+          // This is a naive implementation
+          try {
+              const u = new URL(url);
+              const proxyBase = new URL(config.SiteConfig.DoubanImageProxy);
+              // Construct new URL using proxy host
+              // Example: https://img9.doubanio.com/... -> https://myproxy.com/...
+              // OR https://myproxy.com/view/photo/...
+              
+              // Here we assume the proxy is a prefix or replacement. 
+              // Let's assume it replaces the hostname.
+              // u.protocol = proxyBase.protocol;
+              // u.host = proxyBase.host;
+              // proxyUrl = u.toString();
+              
+              // Or if it's a prefix service:
+              proxyUrl = `${config.SiteConfig.DoubanImageProxy}${encodeURIComponent(url)}`;
+          } catch (e) {
+              console.error('Invalid proxy URL configuration', e);
+          }
+      }
   }
 
   try {
-    const imageResponse = await fetch(imageUrl, {
+    const headers = new Headers();
+    headers.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
+    // Add Referer to bypass hotlink protection if needed
+    headers.set('Referer', 'https://movie.douban.com/');
+
+    const response = await fetch(proxyUrl, { headers });
+
+    if (!response.ok) {
+        return new NextResponse(`Failed to fetch image: ${response.status} ${response.statusText}`, { status: response.status });
+    }
+
+    const contentType = response.headers.get('content-type') || 'image/jpeg';
+    const buffer = await response.arrayBuffer();
+
+    // Cache Control
+    const cacheTTL = config.SiteConfig.ImageCacheTTL || 30; // Default 30 days
+    const maxAgeSeconds = cacheTTL * 24 * 60 * 60;
+
+    return new NextResponse(buffer, {
       headers: {
-        Referer: 'https://movie.douban.com/',
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+        'Content-Type': contentType,
+        'Cache-Control': `public, max-age=${maxAgeSeconds}, immutable`,
       },
     });
 
-    if (!imageResponse.ok) {
-      return NextResponse.json(
-        { error: imageResponse.statusText },
-        { status: imageResponse.status }
-      );
-    }
-
-    const contentType = imageResponse.headers.get('content-type');
-
-    if (!imageResponse.body) {
-      return NextResponse.json(
-        { error: 'Image response has no body' },
-        { status: 500 }
-      );
-    }
-
-    // 创建响应头
-    const headers = new Headers();
-    if (contentType) {
-      headers.set('Content-Type', contentType);
-    }
-
-    // 设置缓存头（可选）
-    headers.set('Cache-Control', 'public, max-age=15720000, s-maxage=15720000'); // 缓存半年
-    headers.set('CDN-Cache-Control', 'public, s-maxage=15720000');
-    headers.set('Vercel-CDN-Cache-Control', 'public, s-maxage=15720000');
-    headers.set('Netlify-Vary', 'query');
-
-    // 直接返回图片流
-    return new Response(imageResponse.body, {
-      status: 200,
-      headers,
-    });
   } catch (error) {
-    return NextResponse.json(
-      { error: 'Error fetching image' },
-      { status: 500 }
-    );
+    console.error('Image proxy error:', error);
+    return new NextResponse('Internal Server Error', { status: 500 });
   }
 }
