@@ -54,7 +54,8 @@ export default function AdminPage() {
         alert('保存成功');
         fetchConfig();
       } else {
-        alert('保存失败');
+        const err = await res.json();
+        alert(`保存失败: ${err.error}`);
       }
     } catch (error) {
       console.error(error);
@@ -131,7 +132,8 @@ export default function AdminPage() {
         alert('刷新成功');
         fetchConfig();
       } else {
-        alert('刷新失败');
+        const err = await res.json();
+        alert(`刷新失败: ${err.error}`);
       }
     } catch (e) {
       alert('刷新失败');
@@ -157,6 +159,37 @@ export default function AdminPage() {
       alert('操作失败');
     }
   };
+
+  // --- Subscribe Management Handlers ---
+  const handleSubscribeConfigChange = (key: 'URL' | 'AutoUpdate', value: any) => {
+    if (!config) return;
+    setConfig({ ...config, ConfigSubscribtion: { ...config.ConfigSubscribtion, [key]: value } });
+  };
+
+  const saveSubscribeConfig = async () => {
+    if (!config) return;
+    setLoadingSave(true);
+    try {
+      const res = await fetch('/api/admin/subscribe', { // Assuming an API route for subscribe config
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config.ConfigSubscribtion),
+      });
+      if (res.ok) {
+        alert('保存成功');
+        fetchConfig();
+      } else {
+        const err = await res.json();
+        alert(`保存失败: ${err.error}`);
+      }
+    } catch (error) {
+      console.error(error);
+      alert('保存失败');
+    } finally {
+      setLoadingSave(false);
+    }
+  };
+
 
   if (loading) return <div className="p-8 text-center">加载中...</div>;
   if (!config) return <div className="p-8 text-center">加载失败</div>;
@@ -256,6 +289,7 @@ export default function AdminPage() {
                     >
                       <option value="direct">直连</option>
                       <option value="custom">自定义代理</option>
+                      <option value="cors-proxy-zwei">cors-proxy-zwei</option>
                       <option value="cmliussss-cdn-tencent">cmliussss-cdn-tencent</option>
                       <option value="cmliussss-cdn-ali">cmliussss-cdn-ali</option>
                     </select>
@@ -280,6 +314,7 @@ export default function AdminPage() {
                     >
                       <option value="direct">直连</option>
                       <option value="cmliussss-cdn-tencent">cmliussss-cdn-tencent</option>
+                      <option value="cmliussss-cdn-ali">cmliussss-cdn-ali</option>
                       <option value="custom">自定义代理</option>
                     </select>
                   </div>
@@ -367,7 +402,12 @@ export default function AdminPage() {
         )}
 
         {activeTab === 'subscribe' && (
-           <div className="text-gray-500">订阅管理功能开发中... (ConfigSubscribtion URL: {config.ConfigSubscribtion?.URL})</div>
+          <SubscribeManagement
+            configSubscribtion={config.ConfigSubscribtion}
+            onConfigChange={handleSubscribeConfigChange}
+            onSave={saveSubscribeConfig}
+            isSaving={saving}
+          />
         )}
       </div>
     </div>
@@ -587,6 +627,61 @@ function CategoryManagement({ categories, onAction }: { categories: CustomCatego
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function SubscribeManagement({ configSubscribtion, onConfigChange, onSave, isSaving }: { 
+  configSubscribtion: AdminConfig['ConfigSubscribtion'], 
+  onConfigChange: (key: 'URL' | 'AutoUpdate', value: any) => void,
+  onSave: () => void,
+  isSaving: boolean
+}) {
+  return (
+    <div className="space-y-6">
+      <h3 className="text-xl font-bold mb-4">订阅管理</h3>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">订阅 URL</label>
+          <input
+            type="text"
+            value={configSubscribtion?.URL || ''}
+            onChange={(e) => onConfigChange('URL', e.target.value)}
+            className="w-full border rounded px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500"
+            placeholder="例如: https://example.com/config.json"
+          />
+        </div>
+        <div className="flex items-center mt-4 md:mt-0">
+          <input
+            type="checkbox"
+            checked={configSubscribtion?.AutoUpdate || false}
+            onChange={(e) => onConfigChange('AutoUpdate', e.target.checked)}
+            className="rounded text-blue-600 focus:ring-blue-500"
+            id="autoUpdate"
+          />
+          <label htmlFor="autoUpdate" className="ml-2 text-sm font-medium text-gray-700">自动更新</label>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">上次检查时间</label>
+          <input
+            type="text"
+            value={configSubscribtion?.LastCheck || 'N/A'}
+            className="w-full border rounded px-3 py-2 bg-gray-100 dark:bg-gray-800 outline-none"
+            readOnly
+          />
+        </div>
+      </div>
+      <div className="flex justify-end pt-4">
+        <button
+          onClick={onSave}
+          disabled={isSaving}
+          className={`px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+            isSaving ? 'opacity-50 cursor-not-allowed' : ''
+          }`}
+        >
+          {isSaving ? '保存中...' : '保存配置'}
+        </button>
+      </div>
     </div>
   );
 }

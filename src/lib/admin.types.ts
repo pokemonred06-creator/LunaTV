@@ -50,9 +50,9 @@ export interface SiteConfig {
   Announcement: string;
   SearchDownstreamMaxPage: number;
   SiteInterfaceCacheTime: number; // 站点接口缓存时间
-  DoubanProxyType: 'direct' | 'custom' | 'cmliussss-cdn-tencent' | 'cmliussss-cdn-ali';
+  DoubanProxyType: 'direct' | 'custom' | 'cors-proxy-zwei' | 'cmliussss-cdn-tencent' | 'cmliussss-cdn-ali';
   DoubanProxy: string;
-  DoubanImageProxyType: 'direct' | 'cmliussss-cdn-tencent' | 'custom';
+  DoubanImageProxyType: 'direct' | 'cmliussss-cdn-tencent' | 'cmliussss-cdn-ali' | 'custom';
   DoubanImageProxy: string;
   DisableYellowFilter: boolean; // 是否禁用黄反
   FluidSearch: boolean; // 是否启用流式搜索

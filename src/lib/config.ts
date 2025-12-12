@@ -200,10 +200,10 @@ async function getInitConfig(configFile: string, subConfig: {
         Number(process.env.NEXT_PUBLIC_SEARCH_MAX_PAGE) || 5,
       SiteInterfaceCacheTime: cfgFile.cache_time || 7200,
       DoubanProxyType:
-        (process.env.NEXT_PUBLIC_DOUBAN_PROXY_TYPE as 'direct' | 'custom' | 'cmliussss-cdn-tencent' | 'cmliussss-cdn-ali') || 'direct', // Updated cast
+        (process.env.NEXT_PUBLIC_DOUBAN_PROXY_TYPE as 'direct' | 'custom' | 'cors-proxy-zwei' | 'cmliussss-cdn-tencent' | 'cmliussss-cdn-ali') || 'direct', // Updated cast
       DoubanProxy: process.env.NEXT_PUBLIC_DOUBAN_PROXY || '',
       DoubanImageProxyType:
-        (process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE as 'cmliussss-cdn-tencent' | 'custom' | 'direct') || 'cmliussss-cdn-tencent',
+        (process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE as 'direct' | 'cmliussss-cdn-tencent' | 'cmliussss-cdn-ali' | 'custom') || 'cmliussss-cdn-tencent', // Updated cast
       DoubanImageProxy: process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY || '',
       DisableYellowFilter:
         process.env.NEXT_PUBLIC_DISABLE_YELLOW_FILTER === 'true',
