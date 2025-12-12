@@ -133,15 +133,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '密码不能为空' }, { status: 400 });
     }
 
+    const lowerUsername = username.toLowerCase();
+    const envUsername = process.env.USERNAME ? process.env.USERNAME.toLowerCase() : '';
+
     // 可能是站长，直接读环境变量
     if (
-      username === process.env.USERNAME &&
+      lowerUsername === envUsername &&
       password === process.env.PASSWORD
     ) {
       // 验证成功，设置认证cookie
       const response = NextResponse.json({ ok: true });
       const cookieValue = await generateAuthCookie(
-        username,
+        lowerUsername, // Use normalized username
         password,
         'owner',
         false
@@ -158,30 +161,37 @@ export async function POST(req: NextRequest) {
       });
 
       return response;
-    } else if (username === process.env.USERNAME) {
+    } else if (lowerUsername === envUsername) {
       return NextResponse.json({ error: '用户名或密码错误' }, { status: 401 });
     }
 
     const config = await getConfig();
-    const user = config.UserConfig.Users.find((u) => u.username === username);
+    const user = config.UserConfig.Users.find((u) => u.username.toLowerCase() === lowerUsername);
     if (user && user.banned) {
       return NextResponse.json({ error: '用户被封禁' }, { status: 401 });
     }
 
     // 校验用户密码
     try {
-      const pass = await db.verifyUser(username, password);
+      // Assuming DB verifyUser also needs to be consistent. 
+      // If DB keys are case-sensitive, we must ensure they were stored as lowercase or we might break existing mixed-case users.
+      // However, for "not be case sensitive", forcing lowercase is the standard approach.
+      const pass = await db.verifyUser(lowerUsername, password);
       if (!pass) {
-        return NextResponse.json(
-          { error: '用户名或密码错误' },
-          { status: 401 }
-        );
+        // Fallback: try original username just in case older users were registered with mixed case
+        const passOriginal = await db.verifyUser(username, password);
+        if (!passOriginal) {
+             return NextResponse.json(
+              { error: '用户名或密码错误' },
+              { status: 401 }
+            );
+        }
       }
 
       // 验证成功，设置认证cookie
       const response = NextResponse.json({ ok: true });
       const cookieValue = await generateAuthCookie(
-        username,
+        lowerUsername, // Use normalized username
         password,
         user?.role || 'user',
         false
