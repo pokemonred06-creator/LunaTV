@@ -35,8 +35,12 @@ function HomeClient() {
   const [bangumiCalendarData, setBangumiCalendarData] = useState<
     BangumiCalendarData[]
   >([]);
-  const [loading, setLoading] = useState(true);
   const { announcement } = useSite();
+
+  const [moviesLoading, setMoviesLoading] = useState(true);
+  const [tvLoading, setTvLoading] = useState(true);
+  const [varietyLoading, setVarietyLoading] = useState(true);
+  const [bangumiLoading, setBangumiLoading] = useState(true);
 
   const [showAnnouncement, setShowAnnouncement] = useState(false);
 
@@ -67,45 +71,78 @@ function HomeClient() {
 
   const [favoriteItems, setFavoriteItems] = useState<FavoriteItem[]>([]);
 
+  // 独立获取热门电影
   useEffect(() => {
-    const fetchRecommendData = async () => {
+    const fetchMovies = async () => {
       try {
-        setLoading(true);
-
-        // 并行获取热门电影、热门剧集和热门综艺
-        const [moviesData, tvShowsData, varietyShowsData, bangumiCalendarData] =
-          await Promise.all([
-            getDoubanCategories({
-              kind: 'movie',
-              category: '热门',
-              type: '全部',
-            }),
-            getDoubanCategories({ kind: 'tv', category: 'tv', type: 'tv' }),
-            getDoubanCategories({ kind: 'tv', category: 'show', type: 'show' }),
-            GetBangumiCalendarData(),
-          ]);
-
-        if (moviesData.code === 200) {
-          setHotMovies(moviesData.list);
+        setMoviesLoading(true);
+        const data = await getDoubanCategories({
+          kind: 'movie',
+          category: '热门',
+          type: '全部',
+        });
+        if (data.code === 200) {
+          setHotMovies(data.list);
         }
-
-        if (tvShowsData.code === 200) {
-          setHotTvShows(tvShowsData.list);
-        }
-
-        if (varietyShowsData.code === 200) {
-          setHotVarietyShows(varietyShowsData.list);
-        }
-
-        setBangumiCalendarData(bangumiCalendarData);
       } catch (error) {
-        console.error('获取推荐数据失败:', error);
+        console.error('获取热门电影失败:', error);
       } finally {
-        setLoading(false);
+        setMoviesLoading(false);
       }
     };
+    fetchMovies();
+  }, []);
 
-    fetchRecommendData();
+  // 独立获取热门剧集
+  useEffect(() => {
+    const fetchTv = async () => {
+      try {
+        setTvLoading(true);
+        const data = await getDoubanCategories({ kind: 'tv', category: 'tv', type: 'tv' });
+        if (data.code === 200) {
+          setHotTvShows(data.list);
+        }
+      } catch (error) {
+        console.error('获取热门剧集失败:', error);
+      } finally {
+        setTvLoading(false);
+      }
+    };
+    fetchTv();
+  }, []);
+
+  // 独立获取热门综艺
+  useEffect(() => {
+    const fetchVariety = async () => {
+      try {
+        setVarietyLoading(true);
+        const data = await getDoubanCategories({ kind: 'tv', category: 'show', type: 'show' });
+        if (data.code === 200) {
+          setHotVarietyShows(data.list);
+        }
+      } catch (error) {
+        console.error('获取热门综艺失败:', error);
+      } finally {
+        setVarietyLoading(false);
+      }
+    };
+    fetchVariety();
+  }, []);
+
+  // 独立获取 Bangumi 数据
+  useEffect(() => {
+    const fetchBangumi = async () => {
+      try {
+        setBangumiLoading(true);
+        const data = await GetBangumiCalendarData();
+        setBangumiCalendarData(data);
+      } catch (error) {
+        console.error('获取 Bangumi 数据失败:', error);
+      } finally {
+        setBangumiLoading(false);
+      }
+    };
+    fetchBangumi();
   }, []);
 
   // 处理收藏数据更新的函数
@@ -241,7 +278,7 @@ function HomeClient() {
                   </Link>
                 </div>
                 <ScrollableRow>
-                  {loading
+                  {moviesLoading
                     ? // 加载状态显示灰色占位数据
                     Array.from({ length: 8 }).map((_, index) => (
                       <div
@@ -289,7 +326,7 @@ function HomeClient() {
                   </Link>
                 </div>
                 <ScrollableRow>
-                  {loading
+                  {tvLoading
                     ? // 加载状态显示灰色占位数据
                     Array.from({ length: 8 }).map((_, index) => (
                       <div
@@ -336,7 +373,7 @@ function HomeClient() {
                   </Link>
                 </div>
                 <ScrollableRow>
-                  {loading
+                  {bangumiLoading
                     ? // 加载状态显示灰色占位数据
                     Array.from({ length: 8 }).map((_, index) => (
                       <div
@@ -411,7 +448,7 @@ function HomeClient() {
                   </Link>
                 </div>
                 <ScrollableRow>
-                  {loading
+                  {varietyLoading
                     ? // 加载状态显示灰色占位数据
                     Array.from({ length: 8 }).map((_, index) => (
                       <div
