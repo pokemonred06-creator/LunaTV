@@ -24,7 +24,7 @@ export default function AdminPage() {
         return;
       }
       const data = await res.json();
-      setConfig(data);
+      setConfig(data.Config);
     } catch (error) {
       console.error('获取配置失败', error);
     } finally {
