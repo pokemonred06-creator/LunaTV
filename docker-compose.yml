@@ -16,7 +16,7 @@ services:
       - IMAGE_CACHE_TTL_DAYS=30             # 30 days (default)
       # App Configuration
       - NEXT_PUBLIC_SITE_NAME=MoonTV
-      - ANNOUNCEMENT=Welcome to MoonTV!
+      - ANNOUNCEMENT=
       - NEXT_PUBLIC_SEARCH_MAX_PAGE=5
       - NEXT_PUBLIC_DOUBAN_PROXY_TYPE=direct
       - NEXT_PUBLIC_DOUBAN_PROXY=
