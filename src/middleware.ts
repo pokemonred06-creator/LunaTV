@@ -12,8 +12,6 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  const storageType = process.env.NEXT_PUBLIC_STORAGE_TYPE || 'localstorage';
-
   if (!process.env.PASSWORD) {
     // 如果没有设置密码，重定向到警告页面
     const warningUrl = new URL('/warning', request.url);
@@ -27,32 +25,25 @@ export async function middleware(request: NextRequest) {
     return handleAuthFailure(request, pathname);
   }
 
-  // localstorage模式：在middleware中完成验证
-  if (storageType === 'localstorage') {
-    if (!authInfo.password || authInfo.password !== process.env.PASSWORD) {
-      return handleAuthFailure(request, pathname);
-    }
-    return NextResponse.next();
-  }
-
-  // 其他模式：只验证签名
-  // 检查是否有用户名（非localStorage模式下密码不存储在cookie中）
-  if (!authInfo.username || !authInfo.signature) {
+  // 统一验证逻辑：检查签名
+  // localstorage 模式现在也使用签名，不再直接比较密码
+  if (!authInfo.username || !authInfo.signature || !authInfo.timestamp) {
     return handleAuthFailure(request, pathname);
   }
 
-  // 验证签名（如果存在）
-  if (authInfo.signature) {
-    const isValidSignature = await verifySignature(
-      authInfo.username,
-      authInfo.signature,
-      process.env.PASSWORD || ''
-    );
+  // 验证签名
+  // 签名内容: username + ":" + timestamp
+  const dataToVerify = `${authInfo.username}:${authInfo.timestamp}`;
+  
+  const isValidSignature = await verifySignature(
+    dataToVerify,
+    authInfo.signature,
+    process.env.PASSWORD || ''
+  );
 
-    // 签名验证通过即可
-    if (isValidSignature) {
-      return NextResponse.next();
-    }
+  // 签名验证通过即可
+  if (isValidSignature) {
+    return NextResponse.next();
   }
 
   // 签名验证失败或不存在签名
