@@ -8,11 +8,6 @@ const nextConfig = {
   // },
 
   reactStrictMode: false,
-  swcMinify: false,
-
-  experimental: {
-    instrumentationHook: process.env.NODE_ENV === 'production',
-  },
 
   // Uncoment to add domain whitelist
   images: {

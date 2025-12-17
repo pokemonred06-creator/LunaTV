@@ -1,5 +1,5 @@
 # 使用官方 Node.js 镜像作为基础镜像
-FROM node:18-alpine AS base
+FROM node:20-alpine AS base
 
 # 安装依赖
 FROM base AS deps
