@@ -2,6 +2,7 @@
 
 import { AdminConfig } from './admin.types';
 import { KvrocksStorage } from './kvrocks.db';
+import { FileStorage } from './local.db';
 import { RedisStorage } from './redis.db';
 import { Favorite, IStorage, PlayRecord, SkipConfig } from './types';
 import { UpstashRedisStorage } from './upstash.db';
@@ -26,7 +27,7 @@ function createStorage(): IStorage {
       return new KvrocksStorage();
     case 'localstorage':
     default:
-      return null as unknown as IStorage;
+      return new FileStorage();
   }
 }
 
