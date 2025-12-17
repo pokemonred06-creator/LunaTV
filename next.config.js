@@ -7,11 +7,10 @@ const nextConfig = {
   //   dirs: ['src'],
   // },
 
-  reactStrictMode: false,
+  reactStrictMode: true,
 
   // Uncoment to add domain whitelist
   images: {
-    unoptimized: true,
     remotePatterns: [
       {
         protocol: 'https',
