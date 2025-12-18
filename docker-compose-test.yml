@@ -1,0 +1,21 @@
+version: '3'
+
+services:
+  lunatv-test:
+    image: lunatv:custom
+    container_name: lunatv-test
+    restart: unless-stopped
+    ports:
+      - "3002:3000"
+    volumes:
+      - ./cache-test:/app/data
+    environment:
+      - NODE_ENV=production
+      # Cache Configuration
+      - DOUBAN_DATA_CACHE_TTL_MINUTES=1440
+      - IMAGE_CACHE_TTL_DAYS=30
+      - NEXT_PUBLIC_SITE_NAME=MoonTV-Test
+      - ANNOUNCEMENT=Test Build
+      # Auth
+      - USERNAME=admin
+      - PASSWORD=admin_1234

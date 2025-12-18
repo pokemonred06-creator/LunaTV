@@ -26,6 +26,7 @@ import { useLongPress } from '@/hooks/useLongPress';
 
 import { ImagePlaceholder } from '@/components/ImagePlaceholder';
 import MobileActionSheet from '@/components/MobileActionSheet';
+import { useLanguage } from '@/components/LanguageProvider';
 
 export interface VideoCardProps {
   id?: string;
@@ -80,6 +81,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
   ref
 ) {
   const router = useRouter();
+  const { convert } = useLanguage();
   const [favorited, setFavorited] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [showMobileActions, setShowMobileActions] = useState(false);
@@ -873,8 +875,8 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
                             {displaySources.map((sourceName, index) => (
                               <div key={index} className='flex items-center gap-1 sm:gap-1.5'>
                                 <div className='w-0.5 h-0.5 sm:w-1 sm:h-1 bg-blue-400 rounded-full flex-shrink-0'></div>
-                                <span className='truncate text-[10px] sm:text-xs leading-tight' title={sourceName}>
-                                  {sourceName}
+                                <span className='truncate text-[10px] sm:text-xs leading-tight' title={convert(sourceName)}>
+                                  {convert(sourceName)}
                                 </span>
                               </div>
                             ))}
@@ -964,7 +966,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
                 return false;
               }}
             >
-              {actualTitle}
+              {convert(actualTitle)}
             </span>
             {/* 自定义 tooltip */}
             <div
@@ -979,7 +981,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
                 return false;
               }}
             >
-              {actualTitle}
+              {convert(actualTitle)}
               <div
                 className='absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-800'
                 style={{
@@ -1018,7 +1020,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
                 {origin === 'live' && (
                   <Radio size={12} className="inline-block text-gray-500 dark:text-gray-400 mr-1.5" />
                 )}
-                {source_name}
+                {convert(source_name)}
               </span>
             </span>
           )}
@@ -1029,12 +1031,12 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
       <MobileActionSheet
         isOpen={showMobileActions}
         onClose={() => setShowMobileActions(false)}
-        title={actualTitle}
+        title={convert(actualTitle)}
         poster={processImageUrl(actualPoster)}
         actions={mobileActions}
         sources={isAggregate && dynamicSourceNames ? Array.from(new Set(dynamicSourceNames)) : undefined}
         isAggregate={isAggregate}
-        sourceName={source_name}
+        sourceName={convert(source_name || '')}
         currentEpisode={currentEpisode}
         totalEpisodes={actualEpisodes}
         origin={origin}

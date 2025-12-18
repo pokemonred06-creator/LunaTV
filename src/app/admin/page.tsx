@@ -5,8 +5,11 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { AdminConfig, SiteConfig, User, ApiSite, LiveCfg, CustomCategory } from '@/lib/admin.types';
 
+import { useLanguage } from '@/components/LanguageProvider';
+
 export default function AdminPage() {
   const router = useRouter();
+  const { convert } = useLanguage();
   const [config, setConfig] = useState<AdminConfig | null>(null);
   const [role, setRole] = useState<'owner' | 'admin' | 'user' | null>(null);
   const [loading, setLoading] = useState(true);
@@ -197,16 +200,16 @@ export default function AdminPage() {
   return (
     <div className="container mx-auto p-4 max-w-6xl">
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold text-gray-800 dark:text-white">系统设置</h1>
+        <h1 className="text-2xl font-bold text-gray-800 dark:text-white">{convert('系统设置')}</h1>
         <div className="space-x-4">
-          <Link href="/" className="text-blue-500 hover:underline dark:text-blue-400">返回首页</Link>
+          <Link href="/" className="text-blue-500 hover:underline dark:text-blue-400">{convert('返回首页')}</Link>
           <button
             onClick={() => {
               fetch('/api/auth/logout', { method: 'POST' }).then(() => router.push('/login'));
             }}
             className="text-red-500 hover:underline dark:text-red-400"
           >
-            退出登录
+            {convert('退出登录')}
           </button>
         </div>
       </div>
@@ -229,7 +232,7 @@ export default function AdminPage() {
                 : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
             }`}
           >
-            {tab.name}
+            {convert(tab.name)}
           </button>
         ))}
       </div>
@@ -239,7 +242,7 @@ export default function AdminPage() {
           <div className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">站点名称</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{convert('站点名称')}</label>
                 <input
                   type="text"
                   value={config.SiteConfig?.SiteName || ''}
@@ -249,7 +252,7 @@ export default function AdminPage() {
               </div>
               
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">接口缓存时间 (秒)</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{convert('接口缓存时间 (秒)')}</label>
                 <input
                   type="number"
                   value={config.SiteConfig?.SiteInterfaceCacheTime || 0}
@@ -259,7 +262,7 @@ export default function AdminPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">搜索最大页数</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{convert('搜索最大页数')}</label>
                 <input
                   type="number"
                   value={config.SiteConfig?.SearchDownstreamMaxPage || 5}
@@ -269,7 +272,7 @@ export default function AdminPage() {
               </div>
 
               <div className="col-span-2">
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">站点公告</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{convert('站点公告')}</label>
                 <textarea
                   value={config.SiteConfig?.Announcement || ''}
                   onChange={(e) => handleSiteConfigChange('Announcement', e.target.value)}
@@ -278,24 +281,24 @@ export default function AdminPage() {
               </div>
 
               <div className="col-span-2 border-t dark:border-gray-700 pt-4 mt-2">
-                <h3 className="font-medium mb-4 text-gray-800 dark:text-white">豆瓣代理设置</h3>
+                <h3 className="font-medium mb-4 text-gray-800 dark:text-white">{convert('豆瓣代理设置')}</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">接口代理类型</label>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{convert('接口代理类型')}</label>
                     <select
                       value={config.SiteConfig?.DoubanProxyType || 'direct'}
                       onChange={(e) => handleSiteConfigChange('DoubanProxyType', e.target.value)}
                       className="w-full border rounded px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                     >
-                      <option value="direct">直连</option>
-                      <option value="custom">自定义代理</option>
+                      <option value="direct">{convert('直连')}</option>
+                      <option value="custom">{convert('自定义代理')}</option>
                       <option value="cors-proxy-zwei">cors-proxy-zwei</option>
                       <option value="cmliussss-cdn-tencent">cmliussss-cdn-tencent</option>
                       <option value="cmliussss-cdn-ali">cmliussss-cdn-ali</option>
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">接口代理地址</label>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{convert('接口代理地址')}</label>
                     <input
                       type="text"
                       value={config.SiteConfig?.DoubanProxy || ''}
@@ -306,20 +309,20 @@ export default function AdminPage() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">图片代理类型</label>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{convert('图片代理类型')}</label>
                     <select
                       value={config.SiteConfig?.DoubanImageProxyType || 'cmliussss-cdn-tencent'}
                       onChange={(e) => handleSiteConfigChange('DoubanImageProxyType', e.target.value)}
                       className="w-full border rounded px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                     >
-                      <option value="direct">直连</option>
+                      <option value="direct">{convert('直连')}</option>
                       <option value="cmliussss-cdn-tencent">cmliussss-cdn-tencent</option>
                       <option value="cmliussss-cdn-ali">cmliussss-cdn-ali</option>
-                      <option value="custom">自定义代理</option>
+                      <option value="custom">{convert('自定义代理')}</option>
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">图片代理地址</label>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{convert('图片代理地址')}</label>
                     <input
                       type="text"
                       value={config.SiteConfig?.DoubanImageProxy || ''}
@@ -333,7 +336,7 @@ export default function AdminPage() {
               </div>
 
               <div className="col-span-2 border-t dark:border-gray-700 pt-4 mt-2">
-                <h3 className="font-medium mb-4 text-gray-800 dark:text-white">高级设置</h3>
+                <h3 className="font-medium mb-4 text-gray-800 dark:text-white">{convert('高级设置')}</h3>
                 <div className="flex items-center space-x-4">
                   <label className="flex items-center space-x-2 cursor-pointer">
                     <input
@@ -342,7 +345,7 @@ export default function AdminPage() {
                       onChange={(e) => handleSiteConfigChange('DisableYellowFilter', e.target.checked)}
                       className="rounded text-blue-600 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600"
                     />
-                    <span className="text-sm text-gray-700 dark:text-gray-300">禁用黄反过滤</span>
+                    <span className="text-sm text-gray-700 dark:text-gray-300">{convert('禁用黄反过滤')}</span>
                   </label>
                   <label className="flex items-center space-x-2 cursor-pointer">
                     <input
@@ -351,7 +354,7 @@ export default function AdminPage() {
                       onChange={(e) => handleSiteConfigChange('FluidSearch', e.target.checked)}
                       className="rounded text-blue-600 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600"
                     />
-                    <span className="text-sm text-gray-700 dark:text-gray-300">启用流式搜索</span>
+                    <span className="text-sm text-gray-700 dark:text-gray-300">{convert('启用流式搜索')}</span>
                   </label>
                 </div>
               </div>
@@ -365,7 +368,7 @@ export default function AdminPage() {
                   saving ? 'opacity-50 cursor-not-allowed' : ''
                 }`}
               >
-                {saving ? '保存中...' : '保存配置'}
+                {saving ? convert('保存中...') : convert('保存配置')}
               </button>
             </div>
           </div>
@@ -376,6 +379,7 @@ export default function AdminPage() {
             users={config.UserConfig.Users || []} 
             role={role}
             onAction={handleUserAction}
+            convert={convert}
           />
         )}
 
@@ -383,6 +387,7 @@ export default function AdminPage() {
           <SourceManagement 
             sources={config.SourceConfig || []}
             onAction={handleSourceAction}
+            convert={convert}
           />
         )}
 
@@ -391,6 +396,7 @@ export default function AdminPage() {
             lives={config.LiveConfig || []}
             onAction={handleLiveAction}
             onRefresh={refreshLiveChannels}
+            convert={convert}
           />
         )}
 
@@ -398,6 +404,7 @@ export default function AdminPage() {
           <CategoryManagement 
             categories={config.CustomCategories || []}
             onAction={handleCategoryAction}
+            convert={convert}
           />
         )}
 
@@ -407,6 +414,7 @@ export default function AdminPage() {
             onConfigChange={handleSubscribeConfigChange}
             onSave={saveSubscribeConfig}
             isSaving={saving}
+            convert={convert}
           />
         )}
       </div>
@@ -416,22 +424,22 @@ export default function AdminPage() {
 
 // --- Sub Components ---
 
-function UserManagement({ users, role, onAction }: { users: User[], role: any, onAction: (a: string, p: any) => void }) {
+function UserManagement({ users, role, onAction, convert }: { users: User[], role: any, onAction: (a: string, p: any) => void, convert: (s:string)=>string }) {
   const [newUser, setNewUser] = useState({ username: '', password: '', userGroup: '' });
   
   return (
     <div className="space-y-6">
       <div className="border dark:border-gray-700 p-4 rounded bg-gray-50 dark:bg-gray-700/50">
-        <h3 className="font-bold mb-4 text-gray-800 dark:text-white">添加用户</h3>
+        <h3 className="font-bold mb-4 text-gray-800 dark:text-white">{convert('添加用户')}</h3>
         <div className="flex gap-4">
           <input 
-            placeholder="用户名" 
+            placeholder={convert('用户名')}
             className="border p-2 rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white" 
             value={newUser.username} 
             onChange={e => setNewUser({...newUser, username: e.target.value})}
           />
           <input 
-            placeholder="密码" 
+            placeholder={convert('密码')}
             type="password"
             className="border p-2 rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white" 
             value={newUser.password}
@@ -443,25 +451,25 @@ function UserManagement({ users, role, onAction }: { users: User[], role: any, o
               onAction('add', { targetUsername: newUser.username, targetPassword: newUser.password });
               setNewUser({ username: '', password: '', userGroup: '' });
             }}
-          >添加</button>
+          >{convert('添加')}</button>
         </div>
       </div>
 
       <table className="min-w-full text-left">
         <thead>
           <tr className="border-b dark:border-gray-700 text-gray-700 dark:text-gray-300">
-            <th className="p-2">用户名</th>
-            <th className="p-2">角色</th>
-            <th className="p-2">状态</th>
-            <th className="p-2">操作</th>
+            <th className="p-2">{convert('用户名')}</th>
+            <th className="p-2">{convert('角色')}</th>
+            <th className="p-2">{convert('状态')}</th>
+            <th className="p-2">{convert('操作')}</th>
           </tr>
         </thead>
         <tbody>
-          {users.map(u => (
-            <tr key={u.username} className="border-b dark:border-gray-700 text-gray-800 dark:text-gray-200">
+          {users.map((u, i) => (
+            <tr key={`${u.username}-${i}`} className="border-b dark:border-gray-700 text-gray-800 dark:text-gray-200">
               <td className="p-2">{u.username}</td>
-              <td className="p-2">{u.role === 'owner' ? '站长' : u.role === 'admin' ? '管理员' : '普通用户'}</td>
-              <td className="p-2">{u.banned ? '已封禁' : '正常'}</td>
+              <td className="p-2">{u.role === 'owner' ? convert('站长') : u.role === 'admin' ? convert('管理员') : convert('普通用户')}</td>
+              <td className="p-2">{u.banned ? convert('已封禁') : convert('正常')}</td>
               <td className="p-2 space-x-2">
                 {u.role !== 'owner' && (
                   <>
@@ -469,14 +477,14 @@ function UserManagement({ users, role, onAction }: { users: User[], role: any, o
                       className="text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300" 
                       onClick={() => onAction(u.banned ? 'unban' : 'ban', { targetUsername: u.username })}
                     >
-                      {u.banned ? '解封' : '封禁'}
+                      {u.banned ? convert('解封') : convert('封禁')}
                     </button>
                     {u.role === 'admin' ? (
-                       <button className="text-yellow-500 hover:text-yellow-700 dark:text-yellow-400" onClick={() => onAction('cancelAdmin', { targetUsername: u.username })}>取消管理员</button>
+                       <button className="text-yellow-500 hover:text-yellow-700 dark:text-yellow-400" onClick={() => onAction('cancelAdmin', { targetUsername: u.username })}>{convert('取消管理员')}</button>
                     ) : (
-                       <button className="text-blue-500 hover:text-blue-700 dark:text-blue-400" onClick={() => onAction('setAdmin', { targetUsername: u.username })}>设为管理员</button>
+                       <button className="text-blue-500 hover:text-blue-700 dark:text-blue-400" onClick={() => onAction('setAdmin', { targetUsername: u.username })}>{convert('设为管理员')}</button>
                     )}
-                    <button className="text-red-700 hover:text-red-900 dark:text-red-500" onClick={() => onAction('deleteUser', { targetUsername: u.username })}>删除</button>
+                    <button className="text-red-700 hover:text-red-900 dark:text-red-500" onClick={() => onAction('deleteUser', { targetUsername: u.username })}>{convert('删除')}</button>
                   </>
                 )}
               </td>
@@ -488,28 +496,28 @@ function UserManagement({ users, role, onAction }: { users: User[], role: any, o
   );
 }
 
-function SourceManagement({ sources, onAction }: { sources: ApiSite[], onAction: (a: string, p: any) => void }) {
+function SourceManagement({ sources, onAction, convert }: { sources: ApiSite[], onAction: (a: string, p: any) => void, convert: (s:string)=>string }) {
   const [newSource, setNewSource] = useState({ key: '', name: '', api: '' });
 
   return (
     <div className="space-y-6">
       <div className="border dark:border-gray-700 p-4 rounded bg-gray-50 dark:bg-gray-700/50">
-        <h3 className="font-bold mb-4 text-gray-800 dark:text-white">添加采集源</h3>
+        <h3 className="font-bold mb-4 text-gray-800 dark:text-white">{convert('添加采集源')}</h3>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <input placeholder="Key (唯一标识)" className="border p-2 rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white" value={newSource.key} onChange={e => setNewSource({...newSource, key: e.target.value})} />
-          <input placeholder="名称" className="border p-2 rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white" value={newSource.name} onChange={e => setNewSource({...newSource, name: e.target.value})} />
-          <input placeholder="API 地址" className="border p-2 rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white" value={newSource.api} onChange={e => setNewSource({...newSource, api: e.target.value})} />
+          <input placeholder={convert('Key (唯一标识)')} className="border p-2 rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white" value={newSource.key} onChange={e => setNewSource({...newSource, key: e.target.value})} />
+          <input placeholder={convert('名称')} className="border p-2 rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white" value={newSource.name} onChange={e => setNewSource({...newSource, name: e.target.value})} />
+          <input placeholder={convert('API 地址')} className="border p-2 rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white" value={newSource.api} onChange={e => setNewSource({...newSource, api: e.target.value})} />
         </div>
-        <button className="mt-4 bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 dark:bg-green-600" onClick={() => onAction('add', newSource)}>添加</button>
+        <button className="mt-4 bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 dark:bg-green-600" onClick={() => onAction('add', newSource)}>{convert('添加')}</button>
       </div>
 
       <table className="min-w-full text-left">
         <thead>
           <tr className="border-b dark:border-gray-700 text-gray-700 dark:text-gray-300">
-            <th className="p-2">名称</th>
-            <th className="p-2">API</th>
-            <th className="p-2">状态</th>
-            <th className="p-2">操作</th>
+            <th className="p-2">{convert('名称')}</th>
+            <th className="p-2">{convert('API')}</th>
+            <th className="p-2">{convert('状态')}</th>
+            <th className="p-2">{convert('操作')}</th>
           </tr>
         </thead>
         <tbody>
@@ -517,13 +525,13 @@ function SourceManagement({ sources, onAction }: { sources: ApiSite[], onAction:
             <tr key={s.key} className="border-b dark:border-gray-700 text-gray-800 dark:text-gray-200">
               <td className="p-2">{s.name}</td>
               <td className="p-2 truncate max-w-xs">{s.api}</td>
-              <td className="p-2">{s.disabled ? '禁用' : '启用'}</td>
+              <td className="p-2">{s.disabled ? convert('禁用') : convert('启用')}</td>
               <td className="p-2 space-x-2">
                 <button className="text-blue-500 hover:text-blue-700 dark:text-blue-400" onClick={() => onAction(s.disabled ? 'enable' : 'disable', { key: s.key })}>
-                  {s.disabled ? '启用' : '禁用'}
+                  {s.disabled ? convert('启用') : convert('禁用')}
                 </button>
                 {s.from === 'custom' && (
-                  <button className="text-red-500 hover:text-red-700 dark:text-red-400" onClick={() => onAction('delete', { key: s.key })}>删除</button>
+                  <button className="text-red-500 hover:text-red-700 dark:text-red-400" onClick={() => onAction('delete', { key: s.key })}>{convert('删除')}</button>
                 )}
               </td>
             </tr>
@@ -534,33 +542,33 @@ function SourceManagement({ sources, onAction }: { sources: ApiSite[], onAction:
   );
 }
 
-function LiveManagement({ lives, onAction, onRefresh }: { lives: LiveCfg[], onAction: (a: string, p: any) => void, onRefresh: () => void }) {
+function LiveManagement({ lives, onAction, onRefresh, convert }: { lives: LiveCfg[], onAction: (a: string, p: any) => void, onRefresh: () => void, convert: (s:string)=>string }) {
   const [newLive, setNewLive] = useState({ key: '', name: '', url: '' });
 
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
-         <h3 className="font-bold text-gray-800 dark:text-white">直播源列表</h3>
-         <button className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 dark:bg-blue-600" onClick={onRefresh}>刷新频道数</button>
+         <h3 className="font-bold text-gray-800 dark:text-white">{convert('直播源列表')}</h3>
+         <button className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 dark:bg-blue-600" onClick={onRefresh}>{convert('刷新频道数')}</button>
       </div>
       
       <div className="border dark:border-gray-700 p-4 rounded bg-gray-50 dark:bg-gray-700/50">
-        <h3 className="font-bold mb-4 text-gray-800 dark:text-white">添加直播源</h3>
+        <h3 className="font-bold mb-4 text-gray-800 dark:text-white">{convert('添加直播源')}</h3>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <input placeholder="Key" className="border p-2 rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white" value={newLive.key} onChange={e => setNewLive({...newLive, key: e.target.value})} />
-          <input placeholder="名称" className="border p-2 rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white" value={newLive.name} onChange={e => setNewLive({...newLive, name: e.target.value})} />
-          <input placeholder="M3U8 URL" className="border p-2 rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white" value={newLive.url} onChange={e => setNewLive({...newLive, url: e.target.value})} />
+          <input placeholder={convert("Key")} className="border p-2 rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white" value={newLive.key} onChange={e => setNewLive({...newLive, key: e.target.value})} />
+          <input placeholder={convert("名称")} className="border p-2 rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white" value={newLive.name} onChange={e => setNewLive({...newLive, name: e.target.value})} />
+          <input placeholder={convert("M3U8 URL")} className="border p-2 rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white" value={newLive.url} onChange={e => setNewLive({...newLive, url: e.target.value})} />
         </div>
-        <button className="mt-4 bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 dark:bg-green-600" onClick={() => onAction('add', newLive)}>添加</button>
+        <button className="mt-4 bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 dark:bg-green-600" onClick={() => onAction('add', newLive)}>{convert('添加')}</button>
       </div>
 
       <table className="min-w-full text-left">
         <thead>
           <tr className="border-b dark:border-gray-700 text-gray-700 dark:text-gray-300">
-            <th className="p-2">名称</th>
-            <th className="p-2">频道数</th>
-            <th className="p-2">状态</th>
-            <th className="p-2">操作</th>
+            <th className="p-2">{convert('名称')}</th>
+            <th className="p-2">{convert('频道数')}</th>
+            <th className="p-2">{convert('状态')}</th>
+            <th className="p-2">{convert('操作')}</th>
           </tr>
         </thead>
         <tbody>
@@ -568,13 +576,13 @@ function LiveManagement({ lives, onAction, onRefresh }: { lives: LiveCfg[], onAc
             <tr key={l.key} className="border-b dark:border-gray-700 text-gray-800 dark:text-gray-200">
               <td className="p-2">{l.name}</td>
               <td className="p-2">{l.channelNumber}</td>
-              <td className="p-2">{l.disabled ? '禁用' : '启用'}</td>
+              <td className="p-2">{l.disabled ? convert('禁用') : convert('启用')}</td>
               <td className="p-2 space-x-2">
                 <button className="text-blue-500 hover:text-blue-700 dark:text-blue-400" onClick={() => onAction(l.disabled ? 'enable' : 'disable', { key: l.key })}>
-                  {l.disabled ? '启用' : '禁用'}
+                  {l.disabled ? convert('启用') : convert('禁用')}
                 </button>
                 {l.from === 'custom' && (
-                  <button className="text-red-500 hover:text-red-700 dark:text-red-400" onClick={() => onAction('delete', { key: l.key })}>删除</button>
+                  <button className="text-red-500 hover:text-red-700 dark:text-red-400" onClick={() => onAction('delete', { key: l.key })}>{convert('删除')}</button>
                 )}
               </td>
             </tr>
@@ -585,42 +593,42 @@ function LiveManagement({ lives, onAction, onRefresh }: { lives: LiveCfg[], onAc
   );
 }
 
-function CategoryManagement({ categories, onAction }: { categories: CustomCategory[], onAction: (a: string, p: any) => void }) {
+function CategoryManagement({ categories, onAction, convert }: { categories: CustomCategory[], onAction: (a: string, p: any) => void, convert: (s:string)=>string }) {
   const [newCat, setNewCat] = useState({ name: '', type: 'movie', query: '' });
 
   return (
     <div className="space-y-6">
       <div className="border dark:border-gray-700 p-4 rounded bg-gray-50 dark:bg-gray-700/50">
-        <h3 className="font-bold mb-4 text-gray-800 dark:text-white">添加分类</h3>
+        <h3 className="font-bold mb-4 text-gray-800 dark:text-white">{convert('添加分类')}</h3>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <input placeholder="名称" className="border p-2 rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white" value={newCat.name} onChange={e => setNewCat({...newCat, name: e.target.value})} />
+          <input placeholder={convert('名称')} className="border p-2 rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white" value={newCat.name} onChange={e => setNewCat({...newCat, name: e.target.value})} />
           <select className="border p-2 rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white" value={newCat.type} onChange={e => setNewCat({...newCat, type: e.target.value as any})}>
-            <option value="movie">电影</option>
-            <option value="tv">剧集</option>
+            <option value="movie">{convert('电影')}</option>
+            <option value="tv">{convert('剧集')}</option>
           </select>
-          <input placeholder="查询关键词" className="border p-2 rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white" value={newCat.query} onChange={e => setNewCat({...newCat, query: e.target.value})} />
+          <input placeholder={convert('查询关键词')} className="border p-2 rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white" value={newCat.query} onChange={e => setNewCat({...newCat, query: e.target.value})} />
         </div>
-        <button className="mt-4 bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 dark:bg-green-600" onClick={() => onAction('add', newCat)}>添加</button>
+        <button className="mt-4 bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 dark:bg-green-600" onClick={() => onAction('add', newCat)}>{convert('添加')}</button>
       </div>
 
       <table className="min-w-full text-left">
         <thead>
           <tr className="border-b dark:border-gray-700 text-gray-700 dark:text-gray-300">
-            <th className="p-2">名称</th>
-            <th className="p-2">类型</th>
-            <th className="p-2">查询词</th>
-            <th className="p-2">操作</th>
+            <th className="p-2">{convert('名称')}</th>
+            <th className="p-2">{convert('类型')}</th>
+            <th className="p-2">{convert('查询词')}</th>
+            <th className="p-2">{convert('操作')}</th>
           </tr>
         </thead>
         <tbody>
           {categories.map((c, i) => (
             <tr key={`${c.query}-${i}`} className="border-b dark:border-gray-700 text-gray-800 dark:text-gray-200">
               <td className="p-2">{c.name}</td>
-              <td className="p-2">{c.type === 'movie' ? '电影' : '剧集'}</td>
+              <td className="p-2">{c.type === 'movie' ? convert('电影') : convert('剧集')}</td>
               <td className="p-2">{c.query}</td>
               <td className="p-2">
                 {c.from === 'custom' && (
-                  <button className="text-red-500 hover:text-red-700 dark:text-red-400" onClick={() => onAction('delete', { query: c.query, type: c.type })}>删除</button>
+                  <button className="text-red-500 hover:text-red-700 dark:text-red-400" onClick={() => onAction('delete', { query: c.query, type: c.type })}>{convert('删除')}</button>
                 )}
               </td>
             </tr>
@@ -631,24 +639,25 @@ function CategoryManagement({ categories, onAction }: { categories: CustomCatego
   );
 }
 
-function SubscribeManagement({ configSubscribtion, onConfigChange, onSave, isSaving }: { 
+function SubscribeManagement({ configSubscribtion, onConfigChange, onSave, isSaving, convert }: { 
   configSubscribtion: AdminConfig['ConfigSubscribtion'], 
   onConfigChange: (key: 'URL' | 'AutoUpdate', value: any) => void,
   onSave: () => void,
-  isSaving: boolean
+  isSaving: boolean,
+  convert: (s:string)=>string
 }) {
   return (
     <div className="space-y-6">
-      <h3 className="text-xl font-bold mb-4 text-gray-800 dark:text-white">订阅管理</h3>
+      <h3 className="text-xl font-bold mb-4 text-gray-800 dark:text-white">{convert('订阅管理')}</h3>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">订阅 URL</label>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{convert('订阅 URL')}</label>
           <input
             type="text"
             value={configSubscribtion?.URL || ''}
             onChange={(e) => onConfigChange('URL', e.target.value)}
             className="w-full border rounded px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-            placeholder="例如: https://example.com/config.json"
+            placeholder={convert('例如: https://example.com/config.json')}
           />
         </div>
         <div className="flex items-center mt-4 md:mt-0">
@@ -659,10 +668,10 @@ function SubscribeManagement({ configSubscribtion, onConfigChange, onSave, isSav
             className="rounded text-blue-600 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600"
             id="autoUpdate"
           />
-          <label htmlFor="autoUpdate" className="ml-2 text-sm font-medium text-gray-700 dark:text-gray-300">自动更新</label>
+          <label htmlFor="autoUpdate" className="ml-2 text-sm font-medium text-gray-700 dark:text-gray-300">{convert('自动更新')}</label>
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">上次检查时间</label>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{convert('上次检查时间')}</label>
           <input
             type="text"
             value={configSubscribtion?.LastCheck || 'N/A'}
@@ -679,7 +688,7 @@ function SubscribeManagement({ configSubscribtion, onConfigChange, onSave, isSav
             isSaving ? 'opacity-50 cursor-not-allowed' : ''
           }`}
         >
-          {isSaving ? '保存中...' : '保存配置'}
+          {isSaving ? convert('保存中...') : convert('保存配置')}
         </button>
       </div>
     </div>

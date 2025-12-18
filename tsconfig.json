@@ -42,7 +42,8 @@
     ".next/dev/types/**/*.ts"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    "tailwind.config.ts"
   ],
   "moduleResolution": [
     "node_modules",

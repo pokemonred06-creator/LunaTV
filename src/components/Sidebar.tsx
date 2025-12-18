@@ -15,6 +15,7 @@ import {
 } from 'react';
 
 import { useSite } from './SiteProvider';
+import { useLanguage } from './LanguageProvider';
 
 interface SidebarContextType {
   isCollapsed: boolean;
@@ -55,6 +56,7 @@ declare global {
 
 const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
   const router = useRouter();
+  const { convert } = useLanguage();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   // 若同一次 SPA 会话中已经读取过折叠状态，则直接复用，避免闪烁
@@ -213,7 +215,7 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
                 </div>
                 {!isCollapsed && (
                   <span className='whitespace-nowrap transition-opacity duration-200 opacity-100'>
-                    首页
+                    {convert('首页')}
                   </span>
                 )}
               </Link>
@@ -233,7 +235,7 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
                 </div>
                 {!isCollapsed && (
                   <span className='whitespace-nowrap transition-opacity duration-200 opacity-100'>
-                    搜索
+                    {convert('搜索')}
                   </span>
                 )}
               </Link>
@@ -269,7 +271,7 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
                       </div>
                       {!isCollapsed && (
                         <span className='whitespace-nowrap transition-opacity duration-200 opacity-100'>
-                          {item.label}
+                          {convert(item.label)}
                         </span>
                       )}
                     </Link>

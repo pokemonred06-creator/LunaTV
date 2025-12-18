@@ -6,6 +6,7 @@ import { Cat, Clover, Film, Home, Radio, Star, Tv } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
+import { useLanguage } from './LanguageProvider';
 
 interface MobileBottomNavProps {
   /**
@@ -15,6 +16,7 @@ interface MobileBottomNavProps {
 }
 
 const MobileBottomNav = ({ activePath }: MobileBottomNavProps) => {
+  const { convert } = useLanguage();
   const pathname = usePathname();
 
   // 当前激活路径：优先使用传入的 activePath，否则回退到浏览器地址
@@ -113,7 +115,7 @@ const MobileBottomNav = ({ activePath }: MobileBottomNavProps) => {
                       : 'text-gray-600 dark:text-gray-300'
                   }
                 >
-                  {item.label}
+                  {convert(item.label)}
                 </span>
               </Link>
             </li>

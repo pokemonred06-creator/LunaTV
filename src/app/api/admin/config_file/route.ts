@@ -9,15 +9,7 @@ import { db } from '@/lib/db';
 export const runtime = 'nodejs';
 
 export async function POST(request: NextRequest) {
-  const storageType = process.env.NEXT_PUBLIC_STORAGE_TYPE || 'localstorage';
-  if (storageType === 'localstorage') {
-    return NextResponse.json(
-      {
-        error: '不支持本地存储进行管理员配置',
-      },
-      { status: 400 }
-    );
-  }
+
 
   const authInfo = getAuthInfoFromCookie(request);
   if (!authInfo || !authInfo.username) {

@@ -1,6 +1,5 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import 'tailwindcss';
+@variant dark (&:where(.dark, .dark *));
 
 @layer utilities {
   .scrollbar-hide {
@@ -14,6 +13,11 @@
 }
 
 :root {
+  /* 默认（浅色模式）为深色文字 */
+  --foreground-rgb: 0, 0, 0;
+}
+
+html.dark {
   --foreground-rgb: 255, 255, 255;
 }
 

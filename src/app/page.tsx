@@ -26,6 +26,7 @@ import PageLayout from '@/components/PageLayout';
 import ScrollableRow from '@/components/ScrollableRow';
 import { useSite } from '@/components/SiteProvider';
 import VideoCard from '@/components/VideoCard';
+import { useLanguage } from '@/components/LanguageProvider';
 
 function HomeClient() {
   const [activeTab, setActiveTab] = useState<'home' | 'favorites'>('home');
@@ -36,6 +37,7 @@ function HomeClient() {
     BangumiCalendarData[]
   >([]);
   const { announcement } = useSite();
+  const { convert } = useLanguage();
 
   const [moviesLoading, setMoviesLoading] = useState(true);
   const [tvLoading, setTvLoading] = useState(true);
@@ -211,8 +213,8 @@ function HomeClient() {
         <div className='mb-8 flex justify-center'>
           <CapsuleSwitch
             options={[
-              { label: '首页', value: 'home' },
-              { label: '收藏夹', value: 'favorites' },
+              { label: convert('首页'), value: 'home' },
+              { label: convert('收藏夹'), value: 'favorites' },
             ]}
             active={activeTab}
             onChange={(value) => setActiveTab(value as 'home' | 'favorites')}
@@ -225,7 +227,7 @@ function HomeClient() {
             <section className='mb-8'>
               <div className='mb-4 flex items-center justify-between'>
                 <h2 className='text-xl font-bold text-gray-800 dark:text-gray-200'>
-                  我的收藏
+                  {convert('我的收藏')}
                 </h2>
                 {favoriteItems.length > 0 && (
                   <button
@@ -235,7 +237,7 @@ function HomeClient() {
                       setFavoriteItems([]);
                     }}
                   >
-                    清空
+                    {convert('清空')}
                   </button>
                 )}
               </div>
@@ -252,7 +254,7 @@ function HomeClient() {
                 ))}
                 {favoriteItems.length === 0 && (
                   <div className='col-span-full text-center text-gray-500 py-8 dark:text-gray-400'>
-                    暂无收藏内容
+                    {convert('暂无收藏内容')}
                   </div>
                 )}
               </div>
@@ -267,13 +269,13 @@ function HomeClient() {
               <section className='mb-8'>
                 <div className='mb-4 flex items-center justify-between'>
                   <h2 className='text-xl font-bold text-gray-800 dark:text-gray-200'>
-                    热门电影
+                    {convert('热门电影')}
                   </h2>
                   <Link
                     href='/douban?type=movie'
                     className='flex items-center text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
                   >
-                    查看更多
+                    {convert('查看更多')}
                     <ChevronRight className='w-4 h-4 ml-1' />
                   </Link>
                 </div>
@@ -315,13 +317,13 @@ function HomeClient() {
               <section className='mb-8'>
                 <div className='mb-4 flex items-center justify-between'>
                   <h2 className='text-xl font-bold text-gray-800 dark:text-gray-200'>
-                    热门剧集
+                    {convert('热门剧集')}
                   </h2>
                   <Link
                     href='/douban?type=tv'
                     className='flex items-center text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
                   >
-                    查看更多
+                    {convert('查看更多')}
                     <ChevronRight className='w-4 h-4 ml-1' />
                   </Link>
                 </div>
@@ -362,13 +364,13 @@ function HomeClient() {
               <section className='mb-8'>
                 <div className='mb-4 flex items-center justify-between'>
                   <h2 className='text-xl font-bold text-gray-800 dark:text-gray-200'>
-                    新番放送
+                    {convert('新番放送')}
                   </h2>
                   <Link
                     href='/douban?type=anime'
                     className='flex items-center text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
                   >
-                    查看更多
+                    {convert('查看更多')}
                     <ChevronRight className='w-4 h-4 ml-1' />
                   </Link>
                 </div>
@@ -437,13 +439,13 @@ function HomeClient() {
               <section className='mb-8'>
                 <div className='mb-4 flex items-center justify-between'>
                   <h2 className='text-xl font-bold text-gray-800 dark:text-gray-200'>
-                    热门综艺
+                    {convert('热门综艺')}
                   </h2>
                   <Link
                     href='/douban?type=show'
                     className='flex items-center text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
                   >
-                    查看更多
+                    {convert('查看更多')}
                     <ChevronRight className='w-4 h-4 ml-1' />
                   </Link>
                 </div>
@@ -522,7 +524,7 @@ function HomeClient() {
           >
             <div className='flex justify-between items-start mb-4'>
               <h3 className='text-2xl font-bold tracking-tight text-gray-800 dark:text-white border-b border-green-500 pb-1'>
-                提示
+                {convert('提示')}
               </h3>
               <button
                 onClick={() => handleCloseAnnouncement(announcement)}
@@ -542,7 +544,7 @@ function HomeClient() {
               onClick={() => handleCloseAnnouncement(announcement)}
               className='w-full rounded-lg bg-gradient-to-r from-green-600 to-green-700 px-4 py-3 text-white font-medium shadow-md hover:shadow-lg hover:from-green-700 hover:to-green-800 dark:from-green-600 dark:to-green-700 dark:hover:from-green-700 dark:hover:to-green-800 transition-all duration-300 transform hover:-translate-y-0.5'
             >
-              我知道了
+              {convert('我知道了')}
             </button>
           </div>
         </div>

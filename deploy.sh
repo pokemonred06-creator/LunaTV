@@ -18,15 +18,20 @@ echo "--> Creating directory $DEST on remote..."
 ssh $TARGET "mkdir -p $DEST"
 
 echo "--> Copying application files..."
-scp $IMAGE_TAR docker-compose.yml $TARGET:$DEST/
+scp -O $IMAGE_TAR docker-compose.yml $TARGET:$DEST/
 
 echo "--> Deploying Docker container..."
 ssh $TARGET "cd $DEST && \
     echo 'Loading Docker image (this may take a while)...' && \
-    docker load -i $IMAGE_TAR && \
+    /usr/local/bin/docker load -i $IMAGE_TAR && \
+    echo 'Stopping existing container...' && \
+    (/usr/local/bin/docker rm -f lunatv || true) && \
+    echo 'Creating cache directory...' && \
+    mkdir -p cache && \
+    chmod 777 cache && \
     echo 'Starting services...' && \
-    docker-compose up -d --remove-orphans && \
-    docker system prune -f" # Optional cleanup
+    /usr/local/bin/docker-compose up -d --remove-orphans && \
+    /usr/local/bin/docker system prune -f" # Optional cleanup
 
 echo "--> Deployment Complete!"
 echo "Check status directly on NAS or visit http://192.168.50.8:3000"

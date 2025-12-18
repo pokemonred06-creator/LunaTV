@@ -26,6 +26,7 @@ import { getVideoResolutionFromM3u8, processImageUrl } from '@/lib/utils';
 
 import EpisodeSelector from '@/components/EpisodeSelector';
 import PageLayout from '@/components/PageLayout';
+import { useLanguage } from '@/components/LanguageProvider';
 
 // 扩展 HTMLVideoElement 类型以支持 hls 属性
 declare global {
@@ -45,6 +46,7 @@ interface WakeLockSentinel {
 function PlayPageClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { convert } = useLanguage();
 
   // -----------------------------------------------------------------------------
   // 状态变量（State）
@@ -1750,7 +1752,7 @@ function PlayPageClient() {
             {/* 加载消息 */}
             <div className='space-y-2'>
               <p className='text-xl font-semibold text-gray-800 dark:text-gray-200 animate-pulse'>
-                {loadingMessage}
+                {convert(loadingMessage)}
               </p>
             </div>
           </div>
@@ -1811,14 +1813,14 @@ function PlayPageClient() {
                 }
                 className='w-full px-6 py-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-xl font-medium hover:from-green-600 hover:to-emerald-700 transform hover:scale-105 transition-all duration-200 shadow-lg hover:shadow-xl'
               >
-                {videoTitle ? '🔍 返回搜索' : '← 返回上页'}
+                {videoTitle ? convert('🔍 返回搜索') : convert('← 返回上页')}
               </button>
 
               <button
                 onClick={() => window.location.reload()}
                 className='w-full px-6 py-3 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-medium hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors duration-200'
               >
-                🔄 重新尝试
+                {convert('🔄 重新尝试')}
               </button>
             </div>
           </div>
@@ -1833,7 +1835,7 @@ function PlayPageClient() {
         {/* 第一行：影片标题 */}
         <div className='py-1'>
           <h1 className='text-xl font-semibold text-gray-900 dark:text-gray-100'>
-            {videoTitle || '影片标题'}
+            {convert(videoTitle || '影片标题')}
             {totalEpisodes > 1 && (
               <span className='text-gray-500 dark:text-gray-400'>
                 {` > ${detail?.episodes_titles?.[currentEpisodeIndex] || `第 ${currentEpisodeIndex + 1} 集`}`}
@@ -1929,8 +1931,8 @@ function PlayPageClient() {
                       <div className='space-y-2'>
                         <p className='text-xl font-semibold text-white animate-pulse'>
                           {videoLoadingStage === 'sourceChanging'
-                            ? '🔄 切换播放源...'
-                            : '🔄 视频加载中...'}
+                            ? convert('🔄 切换播放源...')
+                            : convert('🔄 视频加载中...')}
                         </p>
                       </div>
                     </div>
@@ -1971,7 +1973,7 @@ function PlayPageClient() {
             <div className='p-6 flex flex-col min-h-0'>
               {/* 标题 */}
               <h1 className='text-3xl font-bold mb-2 tracking-wide flex items-center flex-shrink-0 text-center md:text-left w-full'>
-                {videoTitle || '影片标题'}
+                {convert(videoTitle || '影片标题')}
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -1987,7 +1989,7 @@ function PlayPageClient() {
               <div className='flex flex-wrap items-center gap-3 text-base mb-4 opacity-80 flex-shrink-0'>
                 {detail?.class && (
                   <span className='text-green-600 font-semibold'>
-                    {detail.class}
+                    {convert(detail.class)}
                   </span>
                 )}
                 {(detail?.year || videoYear) && (
@@ -1995,10 +1997,10 @@ function PlayPageClient() {
                 )}
                 {detail?.source_name && (
                   <span className='border border-gray-500/60 px-2 py-[1px] rounded'>
-                    {detail.source_name}
+                    {convert(detail.source_name)}
                   </span>
                 )}
-                {detail?.type_name && <span>{detail.type_name}</span>}
+                {detail?.type_name && <span>{convert(detail.type_name)}</span>}
               </div>
               {/* 剧情简介 */}
               {detail?.desc && (
@@ -2006,7 +2008,7 @@ function PlayPageClient() {
                   className='mt-0 text-base leading-relaxed opacity-90 overflow-y-auto pr-2 flex-1 min-h-0 scrollbar-hide'
                   style={{ whiteSpace: 'pre-line' }}
                 >
-                  {detail.desc}
+                  {convert(detail.desc)}
                 </div>
               )}
             </div>
