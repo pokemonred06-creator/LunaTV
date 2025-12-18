@@ -4,13 +4,14 @@
   <img src="public/logo.png" alt="MoonTV Logo" width="120">
 </div>
 
-> 🎬 **MoonTV** 是一个开箱即用的、跨平台的影视聚合播放器。它基于 **Next.js 14** + **Tailwind&nbsp;CSS** + **TypeScript** 构建，支持多资源搜索、在线播放、收藏同步、播放记录、云端存储，让你可以随时随地畅享海量免费影视内容。
+> 🎬 **MoonTV** 是一个开箱即用的、跨平台的影视聚合播放器。它基于 **Next.js 16** + **Tailwind&nbsp;CSS 4** + **TypeScript** 构建，支持多资源搜索、在线播放、收藏同步、播放记录、云端存储，让你可以随时随地畅享海量免费影视内容。
 
 <div align="center">
 
-![Next.js](https://img.shields.io/badge/Next.js-14-000?logo=nextdotjs)
-![TailwindCSS](https://img.shields.io/badge/TailwindCSS-3-38bdf8?logo=tailwindcss)
-![TypeScript](https://img.shields.io/badge/TypeScript-4.x-3178c6?logo=typescript)
+![Next.js](https://img.shields.io/badge/Next.js-16-000?logo=nextdotjs)
+![React](https://img.shields.io/badge/React-19-61dafb?logo=react)
+![TailwindCSS](https://img.shields.io/badge/TailwindCSS-4-38bdf8?logo=tailwindcss)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178c6?logo=typescript)
 ![License](https://img.shields.io/badge/License-MIT-green)
 ![Docker Ready](https://img.shields.io/badge/Docker-ready-blue?logo=docker)
 
@@ -23,11 +24,12 @@
 - 🔍 **多源聚合搜索**：一次搜索立刻返回全源结果。
 - 📄 **丰富详情页**：支持剧集列表、演员、年份、简介等完整信息展示。
 - ▶️ **流畅在线播放**：集成 HLS.js & ArtPlayer。
-- ❤️ **收藏 + 继续观看**：支持 Kvrocks/Redis/Upstash 存储，多端同步进度。
+- ❤️ **收藏 + 继续观看**：支持 Kvrocks/Redis/Upstash/LocalStorage 存储，多端同步进度。
 - 📱 **PWA**：离线缓存、安装到桌面/主屏，移动端原生体验。
 - 🌗 **响应式布局**：桌面侧边栏 + 移动底部导航，自适应各种屏幕尺寸。
+- 🌏 **语言切换**：支持简体中文/繁体中文一键切换。
 - ⚡ **极速加载**：首页采用渐进式加载策略，电影、剧集、综艺、动漫独立获取，拒绝阻塞，秒开体验。
-- 🛡️ **全能管理后台**：内置强大的管理面板，支持用户管理、源管理、直播源管理、自定义分类及订阅管理，支持暗色模式。
+- 🛡️ **全能管理后台**：内置强大的管理面板，支持用户管理、源管理、直播源管理、自定义分类及订阅管理，支持暗色模式，**现已支持 LocalStorage 模式**。
 - 👿 **智能去广告**：自动跳过视频中的切片广告（实验性）。
 
 ### 注意：部署后项目为空壳项目，无内置播放源和直播源，需要自行收集
@@ -67,7 +69,7 @@
 | 语言      | TypeScript 4                                                                                          |
 | 播放器    | [ArtPlayer](https://github.com/zhw2590582/ArtPlayer) · [HLS.js](https://github.com/video-dev/hls.js/) |
 | 代码质量  | ESLint · Prettier · Jest                                                                              |
-| 部署      | Docker                                                                    |
+| 部署      | Docker                                                                                                |
 
 ## 部署
 
@@ -80,6 +82,7 @@
 [![Deploy on Zeabur](https://zeabur.com/button.svg)](https://zeabur.com/templates/8MPTQU/deploy)
 
 **优势**：
+
 - ✅ 无需配置，一键启动（自动部署完整环境）
 - ✅ 自动 HTTPS 和全球 CDN 加速
 - ✅ 持久化存储，数据永不丢失
@@ -159,6 +162,7 @@ networks:
 1. 在 [upstash](https://upstash.com/) 注册账号并新建一个 Redis 实例，名称任意。
 2. 复制新数据库的 **HTTPS ENDPOINT 和 TOKEN**
 3. 使用如下 docker compose
+
 ```yml
 services:
   moontv-core:
@@ -189,11 +193,11 @@ Zeabur 是一站式云端部署平台，使用预构建的 Docker 镜像可以�
    - 配置端口：`6666` (TCP)
    - **记住服务名称**（通常是 `apachekvrocks`）
    - **配置持久化卷（重要）**：
-     * 在服务设置中找到 "Volumes" 部分
-     * 点击 "Add Volume" 添加新卷
-     * Volume ID: `kvrocks-data`（可自定义，仅支持字母、数字、连字符）
-     * Path: `/var/lib/kvrocks/db`
-     * 保存配置
+     - 在服务设置中找到 "Volumes" 部分
+     - 点击 "Add Volume" 添加新卷
+     - Volume ID: `kvrocks-data`（可自定义，仅支持字母、数字、连字符）
+     - Path: `/var/lib/kvrocks/db`
+     - 保存配置
 
    > 💡 **重要提示**：持久化卷路径必须设置为 `/var/lib/kvrocks/db`（KVRocks 数据目录），这样配置文件保留在容器内，数据库文件持久化，重启后数据不会丢失！
 
@@ -236,12 +240,12 @@ Zeabur 是一站式云端部署平台，使用预构建的 Docker 镜像可以�
 
 #### 5. 设置访问域名（必须）
 
-   - 在 LunaTV 服务页面，点击 "Networking" 或 "网络" 标签
-   - 点击 "Generate Domain" 生成 Zeabur 提供的免费域名（如 `xxx.zeabur.app`）
-   - 或者绑定自定义域名：
-     * 点击 "Add Domain" 添加你的域名
-     * 按照提示配置 DNS CNAME 记录指向 Zeabur 提供的目标地址
-   - 设置完域名后即可通过域名访问 LunaTV
+- 在 LunaTV 服务页面，点击 "Networking" 或 "网络" 标签
+- 点击 "Generate Domain" 生成 Zeabur 提供的免费域名（如 `xxx.zeabur.app`）
+- 或者绑定自定义域名：
+  - 点击 "Add Domain" 添加你的域名
+  - 按照提示配置 DNS CNAME 记录指向 Zeabur 提供的目标地址
+- 设置完域名后即可通过域名访问 LunaTV
 
 6. **绑定自定义域名（可选）**
    - 在服务设置中点击 "Domains"
@@ -262,6 +266,7 @@ Zeabur 是一站式云端部署平台，使用预构建的 Docker 镜像可以�
    - Zeabur 会自动拉取最新的 `latest` 镜像并重新部署
 
 > 💡 **提示**：
+>
 > - 使用 `latest` 标签时，Restart 会自动拉取最新镜像
 > - 生产环境推荐使用固定版本标签（如 `v5.5.6`）避免意外更新
 
@@ -324,25 +329,25 @@ dockge/komodo 等 docker compose UI 也有自动更新功能
 
 ## 环境变量
 
-| 变量                                | 说明                                         | 可选值                           | 默认值                                                                                                                     |
-| ----------------------------------- | -------------------------------------------- | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| USERNAME                            | 站长账号 (不区分大小写)      | 任意字符串                       | 无默认，必填字段                                                                                                                     |
-| PASSWORD                            | 站长密码           | 任意字符串                       | 无默认，必填字段                                                                                                                     |
-| SITE_BASE                           | 站点 url              |       形如 https://example.com                  | 空                                                                                                                     |
-| NEXT_PUBLIC_SITE_NAME               | 站点名称                                     | 任意字符串                       | MoonTV                                                                                                                     |
-| ANNOUNCEMENT                        | 站点公告                                     | 任意字符串                       | 本网站仅提供影视信息搜索服务，所有内容均来自第三方网站。本站不存储任何视频资源，不对任何内容的准确性、合法性、完整性负责。 |
-| NEXT_PUBLIC_STORAGE_TYPE            | 播放记录/收藏的存储方式                      | redis、kvrocks、upstash | 无默认，必填字段                                                                                                               |
-| KVROCKS_URL                           | kvrocks 连接 url                               | 连接 url                         | 空                                                                                                                         |
-| REDIS_URL                           | redis 连接 url                               | 连接 url                         | 空                                                                                                                         |
-| UPSTASH_URL                         | upstash redis 连接 url                       | 连接 url                         | 空                                                                                                                         |
-| UPSTASH_TOKEN                       | upstash redis 连接 token                     | 连接 token                       | 空                                                                                                                         |
-| NEXT_PUBLIC_SEARCH_MAX_PAGE         | 搜索接口可拉取的最大页数                     | 1-50                             | 5                                                                                                                          |
-| NEXT_PUBLIC_DOUBAN_PROXY_TYPE       | 豆瓣数据源请求方式                           | 见下方                           | direct                                                                                                                     |
-| NEXT_PUBLIC_DOUBAN_PROXY            | 自定义豆瓣数据代理 URL                       | url prefix                       | (空)                                                                                                                       |
-| NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE | 豆瓣图片代理类型                             | 见下方                           | direct                                                                                                                     |
-| NEXT_PUBLIC_DOUBAN_IMAGE_PROXY      | 自定义豆瓣图片代理 URL                       | url prefix                       | (空)                                                                                                                       |
-| NEXT_PUBLIC_DISABLE_YELLOW_FILTER   | 关闭色情内容过滤                             | true/false                       | false                                                                                                                      |
-| NEXT_PUBLIC_FLUID_SEARCH | 是否开启搜索接口流式输出 | true/ false | true |
+| 变量                                | 说明                     | 可选值                   | 默认值                                                                                                                     |
+| ----------------------------------- | ------------------------ | ------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| USERNAME                            | 站长账号 (不区分大小写)  | 任意字符串               | 无默认，必填字段                                                                                                           |
+| PASSWORD                            | 站长密码                 | 任意字符串               | 无默认，必填字段                                                                                                           |
+| SITE_BASE                           | 站点 url                 | 形如 https://example.com | 空                                                                                                                         |
+| NEXT_PUBLIC_SITE_NAME               | 站点名称                 | 任意字符串               | MoonTV                                                                                                                     |
+| ANNOUNCEMENT                        | 站点公告                 | 任意字符串               | 本网站仅提供影视信息搜索服务，所有内容均来自第三方网站。本站不存储任何视频资源，不对任何内容的准确性、合法性、完整性负责。 |
+| NEXT_PUBLIC_STORAGE_TYPE            | 播放记录/收藏的存储方式  | redis、kvrocks、upstash  | 无默认，必填字段                                                                                                           |
+| KVROCKS_URL                         | kvrocks 连接 url         | 连接 url                 | 空                                                                                                                         |
+| REDIS_URL                           | redis 连接 url           | 连接 url                 | 空                                                                                                                         |
+| UPSTASH_URL                         | upstash redis 连接 url   | 连接 url                 | 空                                                                                                                         |
+| UPSTASH_TOKEN                       | upstash redis 连接 token | 连接 token               | 空                                                                                                                         |
+| NEXT_PUBLIC_SEARCH_MAX_PAGE         | 搜索接口可拉取的最大页数 | 1-50                     | 5                                                                                                                          |
+| NEXT_PUBLIC_DOUBAN_PROXY_TYPE       | 豆瓣数据源请求方式       | 见下方                   | direct                                                                                                                     |
+| NEXT_PUBLIC_DOUBAN_PROXY            | 自定义豆瓣数据代理 URL   | url prefix               | (空)                                                                                                                       |
+| NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE | 豆瓣图片代理类型         | 见下方                   | direct                                                                                                                     |
+| NEXT_PUBLIC_DOUBAN_IMAGE_PROXY      | 自定义豆瓣图片代理 URL   | url prefix               | (空)                                                                                                                       |
+| NEXT_PUBLIC_DISABLE_YELLOW_FILTER   | 关闭色情内容过滤         | true/false               | false                                                                                                                      |
+| NEXT_PUBLIC_FLUID_SEARCH            | 是否开启搜索接口流式输出 | true/ false              | true                                                                                                                       |
 
 NEXT_PUBLIC_DOUBAN_PROXY_TYPE 选项解释：
 
