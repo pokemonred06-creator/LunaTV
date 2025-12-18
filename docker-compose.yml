@@ -1,8 +1,9 @@
-version: '3'
-
 services:
   lunatv:
-    image: lunatv:custom
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: lunatv:integrated
     container_name: lunatv
     restart: unless-stopped
     ports:
@@ -11,6 +12,7 @@ services:
       - ./cache:/app/data
     environment:
       - NODE_ENV=production
+      - GO_PROXY_URL=http://127.0.0.1:8080
       # Cache Configuration
       - DOUBAN_DATA_CACHE_TTL_MINUTES=1440
       - IMAGE_CACHE_TTL_DAYS=30

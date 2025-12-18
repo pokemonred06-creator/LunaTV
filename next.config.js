@@ -9,6 +9,21 @@ const nextConfig = {
 
   reactStrictMode: true,
 
+  // Proxy routes to Go server running on port 8080
+  async rewrites() {
+    const goProxyUrl = process.env.GO_PROXY_URL || 'http://127.0.0.1:8080';
+    return [
+      {
+        source: '/api/proxy/:path*',
+        destination: `${goProxyUrl}/api/proxy/:path*`,
+      },
+      {
+        source: '/api/image-proxy',
+        destination: `${goProxyUrl}/api/image-proxy`,
+      },
+    ];
+  },
+
   // Uncoment to add domain whitelist
   images: {
     unoptimized: true,

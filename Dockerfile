@@ -1,7 +1,14 @@
 # 使用官方 Node.js 镜像作为基础镜像
 FROM node:20-alpine AS base
 
-# 安装依赖
+# ===== Go Proxy Build Stage =====
+FROM golang:1.22-alpine AS go-builder
+WORKDIR /go-app
+COPY scripts/proxy/go.mod .
+COPY scripts/proxy/server.go .
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /goproxy ./server.go
+
+# ===== Node.js Dependencies Stage =====
 FROM base AS deps
 WORKDIR /app
 
@@ -13,13 +20,12 @@ COPY package.json pnpm-lock.yaml ./
 RUN rm -rf node_modules .next
 
 # Install dependencies using pnpm
-# ARG NPM_CI_FLAGS="" # No longer needed for pnpm install
 RUN pnpm install --no-frozen-lockfile
 
-# 构建应用
+# ===== Next.js Build Stage =====
 FROM base AS builder
 WORKDIR /app
-RUN npm install -g pnpm@10.14.0 # Install pnpm directly in builder stage
+RUN npm install -g pnpm@10.14.0
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
@@ -32,7 +38,7 @@ ENV NEXT_TELEMETRY_DISABLED 1
 # 构建
 RUN npm run build
 
-# 生产环境运行
+# ===== Production Runner Stage =====
 FROM base AS runner
 WORKDIR /app
 
@@ -43,19 +49,28 @@ ENV NEXT_TELEMETRY_DISABLED 1
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 
+# Copy Go proxy binary
+COPY --from=go-builder /goproxy /app/goproxy
+
 # 复制构建产物
 COPY --from=builder /app/public ./public
 
 # 自动利用 standalone output 减少镜像大小
-# https://nextjs.org/docs/advanced-features/output-file-tracing
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+
+# Copy startup script
+COPY --chown=nextjs:nodejs start.sh /app/start.sh
+RUN chmod +x /app/start.sh
+
+# Create data directory
+RUN mkdir -p /app/data && chown -R nextjs:nodejs /app/data
 
 # 切换用户
 USER nextjs
 
-# 暴露端口
-EXPOSE 3000
+# 暴露端口 (3000 for Next.js, 8080 for Go proxy)
+EXPOSE 3000 8080
 
 # 启动命令
-CMD ["node", "server.js"]
+CMD ["/app/start.sh"]
