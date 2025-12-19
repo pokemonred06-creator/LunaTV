@@ -32,7 +32,21 @@ export async function GET(request: NextRequest) {
     }
 
     const records = await db.getAllPlayRecords(authInfo.username);
-    return NextResponse.json(records, { status: 200 });
+
+    // 处理图片链接，适配第三方客户端（如 OrionTV）
+    // 原始豆瓣链接在第三方App中会因 Referrer 限制无法加载
+    // 这里统一替换为免 Referrer 的 CDN 镜像
+    const processedRecords = Object.entries(records).reduce((acc, [key, record]) => {
+      let cover = record.cover;
+      if (cover && cover.includes('doubanio.com')) {
+        cover = cover.replace(/img\d+\.doubanio\.com/g, 'img.doubanio.cmliussss.net');
+      }
+      // 添加 poster 字段作为 cover 的别名，适配 OrionTV 等可能使用 poster 字段的客户端
+      acc[key] = { ...record, cover, poster: cover } as PlayRecord & { poster: string };
+      return acc;
+    }, {} as Record<string, PlayRecord>);
+
+    return NextResponse.json(processedRecords, { status: 200 });
   } catch (err) {
     console.error('获取播放记录失败', err);
     return NextResponse.json(

@@ -581,7 +581,7 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
                               const sourceKey = `${source.source}-${source.id}`;
                               const videoInfo = videoInfoMap.get(sourceKey);
 
-                              if (videoInfo && videoInfo.quality !== '未知') {
+                              if (videoInfo) {
                                 if (videoInfo.hasError) {
                                   return (
                                     <div className='bg-gray-500/10 dark:bg-gray-400/20 text-red-600 dark:text-red-400 px-1.5 py-0 rounded text-xs flex-shrink-0 min-w-[50px] text-center'>
@@ -589,24 +589,44 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
                                     </div>
                                   );
                                 } else {
-                                  // 根据分辨率设置不同颜色：2K、4K为紫色，1080p、720p为绿色，其他为黄色
+                                  // 如果质量未知，不显示任何标签（leave it）
+                                  if (videoInfo.quality === '未知' || videoInfo.quality === 'Unknown') {
+                                    return null;
+                                  }
+
+                                  // 直接显示原始分辨率（包括 SD）
+                                  const displayQuality = videoInfo.quality;
+
+                                  // 根据分辨率设置不同颜色
                                   const isUltraHigh = ['4K', '2K'].includes(
-                                    videoInfo.quality
+                                    displayQuality
                                   );
                                   const isHigh = ['1080p', '720p'].includes(
-                                    videoInfo.quality
+                                    displayQuality
                                   );
-                                  const textColorClasses = isUltraHigh
-                                    ? 'text-purple-600 dark:text-purple-400'
-                                    : isHigh
-                                      ? 'text-green-600 dark:text-green-400'
-                                      : 'text-yellow-600 dark:text-yellow-400';
+                                  const isNormal = ['480p', 'SD'].includes(
+                                    displayQuality
+                                  );
+
+                                  let textColorClasses =
+                                    'text-gray-500 dark:text-gray-400';
+
+                                  if (isUltraHigh) {
+                                    textColorClasses =
+                                      'text-purple-600 dark:text-purple-400';
+                                  } else if (isHigh) {
+                                    textColorClasses =
+                                      'text-green-600 dark:text-green-400';
+                                  } else if (isNormal) {
+                                    textColorClasses =
+                                      'text-yellow-600 dark:text-yellow-400';
+                                  }
 
                                   return (
                                     <div
                                       className={`bg-gray-500/10 dark:bg-gray-400/20 ${textColorClasses} px-1.5 py-0 rounded text-xs flex-shrink-0 min-w-[50px] text-center`}
                                     >
-                                      {videoInfo.quality}
+                                      {displayQuality}
                                     </div>
                                   );
                                 }

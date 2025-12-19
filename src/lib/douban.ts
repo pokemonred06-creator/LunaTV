@@ -177,13 +177,27 @@ export async function getDoubanDetail(id: string): Promise<DoubanSubject | null>
 }
 
 // New generic fetch function for douban data with caching
+// New generic fetch function for douban data with caching
 export async function fetchDoubanData<T>(url: string, ttlMinutes?: number): Promise<T> {
   // Use a cache key based on the URL
   const cacheKey = `douban_generic:${url}`;
   return getCachedData<T>(cacheKey, async () => {
-    const response = await fetch(url, { headers: COMMON_HEADERS });
+    const config = await getConfig();
+    let targetUrl = url;
+
+    const { DoubanProxyType, DoubanProxy } = config.SiteConfig;
+
+    if (DoubanProxyType === 'custom' && DoubanProxy) {
+      targetUrl = DoubanProxy + encodeURIComponent(url);
+    } 
+    // Add other proxy types if known, for now custom is the main flexible one
+    
+    // If using a proxy, we might need to adjust headers (e.g. host), but usually the proxy handles it.
+    // Ensure we still send User-Agent as some proxies forward it.
+    
+    const response = await fetch(targetUrl, { headers: COMMON_HEADERS });
     if (!response.ok) {
-      throw new Error(`Failed to fetch from ${url}: ${response.status} ${response.statusText}`);
+      throw new Error(`Failed to fetch from ${targetUrl}: ${response.status} ${response.statusText}`);
     }
     return response.json();
   }, ttlMinutes);

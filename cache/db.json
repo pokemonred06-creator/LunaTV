@@ -36,6 +36,27 @@
         "api": "https://cj.rycjapi.com/api.php/provide/vod\t",
         "from": "custom",
         "disabled": false
+      },
+      {
+        "key": "如意",
+        "name": "如意",
+        "api": "https://cj.rycjapi.com/api.php/provide/vod\t",
+        "from": "custom",
+        "disabled": false
+      },
+      {
+        "key": "暴風",
+        "name": "暴風",
+        "api": "https://bfzyapi.com/api.php/provide/vod\t",
+        "from": "custom",
+        "disabled": false
+      },
+      {
+        "key": "天涯",
+        "name": "天涯",
+        "api": "https://tyyszy.com/api.php/provide/vod\t",
+        "from": "custom",
+        "disabled": false
       }
     ],
     "CustomCategories": [],

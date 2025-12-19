@@ -419,10 +419,11 @@ func handleImageProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !validateImageURL(rawURL) {
-		writeError(w, 403, "Forbidden Domain")
-		return
-	}
+	// Allow any image URL
+	// if !validateImageURL(rawURL) {
+	// 	writeError(w, 403, "Forbidden Domain")
+	// 	return
+	// }
 
 	// Apply custom proxy URL if configured
 	proxyURL := rawURL
@@ -433,7 +434,7 @@ func handleImageProxy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	headers := map[string]string{
-		"Referer": "https://movie.douban.com/",
+		"Referer": "", // Douban images require empty or allowed referrer
 	}
 	resp, err := fetch(proxyURL, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36", headers)
 	if err != nil {

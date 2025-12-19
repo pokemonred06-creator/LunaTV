@@ -33,6 +33,12 @@ export async function GET(request: NextRequest) {
     }
 
     const result = await getDetailFromApi(apiSite, id);
+
+    // 修复图片 Referrer 问题
+    if (result.poster && result.poster.includes('doubanio.com')) {
+      result.poster = result.poster.replace(/img\d+\.doubanio\.com/g, 'img.doubanio.cmliussss.net');
+    }
+
     const config = await getConfig(); // Get full config
     const cacheTime = config.SiteConfig.SiteInterfaceCacheTime || 7200; // Use SiteInterfaceCacheTime
 

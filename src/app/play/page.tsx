@@ -213,46 +213,80 @@ function PlayPageClient() {
   // -----------------------------------------------------------------------------
 
   // 播放源优选函数
+  // 播放源优选函数
   const preferBestSource = async (
     sources: SearchResult[]
   ): Promise<SearchResult> => {
     if (sources.length === 1) return sources[0];
 
-    // 将播放源均分为两批，并发测速各批，避免一次性过多请求
-    const batchSize = Math.ceil(sources.length / 2);
-    const allResults: Array<{
+    // 并发池限制：最多同时测试12个源，大幅提升并发度以接近原始速度，同时保留上限防止崩溃
+    const MAX_CONCURRENT = 12;
+
+    // 测试单个源的函数
+    const testSource = async (source: SearchResult): Promise<{
       source: SearchResult;
       testResult: { quality: string; loadSpeed: string; pingTime: number };
-    } | null> = [];
+    } | null> => {
+      try {
+        if (!source.episodes || source.episodes.length === 0) {
+          console.warn(`播放源 ${source.source_name} 没有可用的播放地址`);
+          return null;
+        }
 
-    for (let start = 0; start < sources.length; start += batchSize) {
-      const batchSources = sources.slice(start, start + batchSize);
-      const batchResults = await Promise.all(
-        batchSources.map(async (source) => {
-          try {
-            // 检查是否有第一集的播放地址
-            if (!source.episodes || source.episodes.length === 0) {
-              console.warn(`播放源 ${source.source_name} 没有可用的播放地址`);
-              return null;
-            }
+        const episodeUrl =
+          source.episodes.length > 1
+            ? source.episodes[1]
+            : source.episodes[0];
+        const testResult = await getVideoResolutionFromM3u8(episodeUrl);
 
-            const episodeUrl =
-              source.episodes.length > 1
-                ? source.episodes[1]
-                : source.episodes[0];
-            const testResult = await getVideoResolutionFromM3u8(episodeUrl);
+        return { source, testResult };
+      } catch (error) {
+        console.warn(`播放源 ${source.source_name} 测速失败:`, error);
+        // 如果测速失败（如超时或CORS），仍然保留该源，但标记为未知
+        return {
+          source,
+          testResult: {
+            quality: '未知',
+            loadSpeed: '未知', // 会给予默认低分
+            pingTime: 0,
+          },
+        };
+      }
+    };
 
-            return {
-              source,
-              testResult,
-            };
-          } catch (error) {
-            return null;
-          }
-        })
-      );
-      allResults.push(...batchResults);
-    }
+    // 并发池执行器（保证结果顺序与输入一致）
+    const runWithConcurrencyLimit = async <T,>(
+      inputTasks: (() => Promise<T>)[],
+      limit: number
+    ): Promise<T[]> => {
+      const results: T[] = new Array(inputTasks.length);
+      const executing: Promise<void>[] = [];
+
+      let i = 0;
+      for (const task of inputTasks) {
+        const index = i++; // 捕获当前索引
+        const promise = task().then((result) => {
+          results[index] = result; // 按索引存储结果，保证顺序
+          executing.splice(executing.indexOf(promise), 1);
+        });
+        executing.push(promise);
+
+        // 当达到并发限制时，等待任意一个完成
+        if (executing.length >= limit) {
+          await Promise.race(executing);
+        }
+      }
+
+      // 等待所有剩余任务完成
+      await Promise.all(executing);
+      return results;
+    };
+
+    // 创建测试任务
+    const taskList = sources.map((source) => () => testSource(source));
+
+    // 使用并发池执行所有测试
+    const allResults = await runWithConcurrencyLimit(taskList, MAX_CONCURRENT);
 
     // 等待所有测速完成，包含成功和失败的结果
     // 保存所有测速结果到 precomputedVideoInfo，供 EpisodeSelector 使用（包含错误结果）
@@ -336,7 +370,7 @@ function PlayPageClient() {
       );
     });
 
-    return resultsWithScore[0].source;
+    return resultsWithScore[0]?.source || sources[0];
   };
 
   // 计算播放源综合评分
@@ -1109,6 +1143,7 @@ function PlayPageClient() {
         total_time: Math.floor(duration),
         save_time: Date.now(),
         search_title: searchTitle,
+        category: detailRef.current?.class || detailRef.current?.type_name,
       });
 
       lastSaveTimeRef.current = Date.now();
