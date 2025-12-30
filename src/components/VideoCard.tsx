@@ -311,7 +311,6 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
   // 长按手势hook
   const longPressProps = useLongPress({
     onLongPress: handleLongPress,
-    onClick: handleClick, // 保持点击播放功能
     longPressDelay: 500,
   });
 

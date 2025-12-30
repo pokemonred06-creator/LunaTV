@@ -2,7 +2,7 @@ import { useCallback, useRef } from 'react';
 
 interface UseLongPressOptions {
   onLongPress: () => void;
-  onClick?: () => void;
+  // onClick is removed as we now rely on native click events
   longPressDelay?: number;
   moveThreshold?: number;
 }
@@ -14,7 +14,6 @@ interface TouchPosition {
 
 export const useLongPress = ({
   onLongPress,
-  onClick,
   longPressDelay = 500,
   moveThreshold = 10,
 }: UseLongPressOptions) => {
@@ -22,7 +21,6 @@ export const useLongPress = ({
   const pressTimer = useRef<NodeJS.Timeout | null>(null);
   const startPosition = useRef<TouchPosition | null>(null);
   const isActive = useRef(false); // 防止重复触发
-  const wasButton = useRef(false); // 记录触摸开始时是否是按钮
 
   const clearTimer = useCallback(() => {
     if (pressTimer.current) {
@@ -32,7 +30,7 @@ export const useLongPress = ({
   }, []);
 
   const handleStart = useCallback(
-    (clientX: number, clientY: number, isButton = false) => {
+    (clientX: number, clientY: number) => {
       // 如果已经有活跃的手势，忽略新的开始
       if (isActive.current) {
         return;
@@ -41,9 +39,6 @@ export const useLongPress = ({
       isActive.current = true;
       isLongPress.current = false;
       startPosition.current = { x: clientX, y: clientY };
-
-      // 记录触摸开始时是否是按钮
-      wasButton.current = isButton;
 
       pressTimer.current = setTimeout(() => {
         // 再次检查是否仍然活跃
@@ -82,38 +77,26 @@ export const useLongPress = ({
 
   const handleEnd = useCallback(() => {
     clearTimer();
-
-    // 根据情况决定是否触发点击事件：
-    // 1. 如果是长按，不触发点击
-    // 2. 如果不是长按且触摸开始时是按钮，不触发点击
-    // 3. 否则触发点击
-    const shouldClick = !isLongPress.current && !wasButton.current && onClick && isActive.current;
-
-    if (shouldClick) {
-      onClick();
-    }
+    // Reverted manual onClick logic.
+    // relying on the browser to fire 'click' naturally if we don't preventDefault.
 
     // 重置所有状态
+    // Note: isLongPress.current is checked in onTouchEnd before calling handleEnd
+    // preventing the click if needed.
+    // We reset it here after the check is done.
+    
+    // Defer resetting isLongPress slightly? No, onTouchEnd runs synchronously.
+    // We check isLongPress in onTouchEnd, then call handleEnd.
     isLongPress.current = false;
     startPosition.current = null;
     isActive.current = false;
-    wasButton.current = false;
-  }, [clearTimer, onClick]);
+  }, [clearTimer]);
 
   // 触摸事件处理器
   const onTouchStart = useCallback(
     (e: React.TouchEvent) => {
-      // 检查是否触摸的是按钮或其他交互元素
-      const target = e.target as HTMLElement;
-      const buttonElement = target.closest('[data-button]');
-
-      // 更精确的按钮检测：只有当触摸目标直接是按钮元素或其直接子元素时才认为是按钮
-      const isDirectButton = target.hasAttribute('data-button');
-      const isButton = !!buttonElement && isDirectButton;
-
-      // 阻止默认的长按行为，但不阻止触摸开始事件
       const touch = e.touches[0];
-      handleStart(touch.clientX, touch.clientY, !!isButton);
+      handleStart(touch.clientX, touch.clientY);
     },
     [handleStart]
   );
@@ -128,15 +111,16 @@ export const useLongPress = ({
 
   const onTouchEnd = useCallback(
     (e: React.TouchEvent) => {
-      // 始终阻止默认行为，避免任何系统长按菜单
-      e.preventDefault();
-      e.stopPropagation();
+      // If it was a long press, prevent default to avoid the subsequent click
+      if (isLongPress.current) {
+        e.preventDefault();
+      }
+      // Do NOT stop propagation randomly.
+      
       handleEnd();
     },
     [handleEnd]
   );
-
-
 
   return {
     onTouchStart,

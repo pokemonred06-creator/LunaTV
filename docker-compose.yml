@@ -1,9 +1,6 @@
 services:
   lunatv:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: lunatv:integrated
+    image: lunatv:custom
     container_name: lunatv
     restart: unless-stopped
     ports:
