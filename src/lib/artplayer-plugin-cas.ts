@@ -2,11 +2,11 @@
 import type Artplayer from 'artplayer';
 
 export default function artplayerPluginCas(option: {
-    sharpness?: number; // 0.0 - 1.0, default 0.3 (Subtle but effective)
+    sharpness?: number; // 0.0 - 1.0
 } = {}) {
     return (art: Artplayer) => {
         const {
-            sharpness = 0.3,
+            sharpness = 0.6, // Boosted to 0.6 for visibility
         } = option;
 
         let isEnabled = false;
@@ -93,6 +93,7 @@ export default function artplayerPluginCas(option: {
                 canvas.style.left = '0';
                 canvas.style.width = '100%';
                 canvas.style.height = '100%';
+                canvas.style.objectFit = 'contain';
                 canvas.style.pointerEvents = 'none';
                 canvas.style.zIndex = '1';
                 
