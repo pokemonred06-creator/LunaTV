@@ -27,6 +27,7 @@ import { getVideoResolutionFromM3u8, processImageUrl } from '@/lib/utils';
 import EpisodeSelector from '@/components/EpisodeSelector';
 import PageLayout from '@/components/PageLayout';
 import { useLanguage } from '@/components/LanguageProvider';
+import artplayerPluginCas from '@/lib/artplayer-plugin-cas';
 
 // 扩展 HTMLVideoElement 类型以支持 hls 属性
 declare global {
@@ -1384,6 +1385,7 @@ function PlayPageClient() {
         moreVideoAttr: {
           crossOrigin: 'anonymous',
         },
+        plugins: [artplayerPluginCas()],
         // HLS 支持配置
         customType: {
           m3u8: function (video: HTMLVideoElement, url: string) {
