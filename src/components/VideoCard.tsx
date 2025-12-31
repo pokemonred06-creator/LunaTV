@@ -231,14 +231,14 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
       router.push(url);
     } else if (from === 'douban' || (isAggregate && !actualSource && !actualId)) {
       const url = `/play?title=${encodeURIComponent(actualTitle.trim())}${actualYear ? `&year=${actualYear}` : ''
-        }${actualSearchType ? `&stype=${actualSearchType}` : ''}${isAggregate ? '&prefer=true' : ''}${actualQuery ? `&stitle=${encodeURIComponent(actualQuery.trim())}` : ''}`;
+        }${actualSearchType ? `&stype=${actualSearchType}` : ''}${isAggregate ? '&prefer=true' : ''}${actualQuery ? `&stitle=${encodeURIComponent(actualQuery.trim())}` : ''}${actualPoster ? `&cover=${encodeURIComponent(actualPoster)}` : ''}`;
       router.push(url);
     } else if (actualSource && actualId) {
       const url = `/play?source=${actualSource}&id=${actualId}&title=${encodeURIComponent(
         actualTitle
       )}${actualYear ? `&year=${actualYear}` : ''}${isAggregate ? '&prefer=true' : ''
         }${actualQuery ? `&stitle=${encodeURIComponent(actualQuery.trim())}` : ''
-        }${actualSearchType ? `&stype=${actualSearchType}` : ''}`;
+        }${actualSearchType ? `&stype=${actualSearchType}` : ''}${actualPoster ? `&cover=${encodeURIComponent(actualPoster)}` : ''}`;
       router.push(url);
     }
   }, [
@@ -309,10 +309,34 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
   }, [showMobileActions, from, isAggregate, actualSource, actualId, searchFavorited, checkSearchFavoriteStatus]);
 
   // 长按手势hook
-  const longPressProps = useLongPress({
+  const { isPressed, ...longPressProps } = useLongPress({
     onLongPress: handleLongPress,
     longPressDelay: 500,
+    moveThreshold: 50, // Increase threshold to allow for finger 'roll'
   });
+
+  // Calculate dynamic classes for interaction feedback
+  const containerClasses = useMemo(() => {
+    // Dynamic transition speed: fast in, smooth out
+    const transitionClass = isPressed 
+      ? 'transition-all duration-75 ease-out' 
+      : 'transition-all duration-200 ease-out';
+      
+    const baseClasses = `group relative w-full rounded-lg bg-transparent cursor-pointer ${transitionClass}`;
+    
+    if (showMobileActions) {
+      // Long press triggered (Magnify)
+      return `${baseClasses} scale-110 z-[500] brightness-110`;
+    }
+    
+    if (isPressed) {
+      // Pressing (Dim + Shrink)
+      return `${baseClasses} scale-95 opacity-80 brightness-90 z-10`;
+    }
+    
+    // Idle state
+    return `${baseClasses} scale-100 hover:scale-[1.05] hover:z-[500]`;
+  }, [showMobileActions, isPressed]);
 
   const config = useMemo(() => {
     const configs = {
@@ -350,7 +374,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
         showSourceName: false,
         showProgress: false,
         showPlayButton: true,
-        showHeart: false,
+        showHeart: true,
         showCheckCircle: false,
         showDoubanLink: true,
         showRating: !!rate,
@@ -387,7 +411,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
     // 聚合源信息 - 直接在菜单中展示，不需要单独的操作项
 
     // 收藏/取消收藏操作
-    if (config.showHeart && from !== 'douban' && actualSource && actualId) {
+    if (config.showHeart && actualSource && actualId) {
       const currentFavorited = from === 'search' ? searchFavorited : favorited;
 
       if (from === 'search') {
@@ -496,7 +520,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
   return (
     <>
       <div
-        className='group relative w-full rounded-lg bg-transparent cursor-pointer transition-all duration-300 ease-in-out hover:scale-[1.05] hover:z-[500]'
+        className={containerClasses}
         onClick={handleClick}
         {...longPressProps}
         style={{

@@ -101,7 +101,7 @@ function PlayPageClient() {
   // 视频基本信息
   const [videoTitle, setVideoTitle] = useState(searchParams.get('title') || '');
   const [videoYear, setVideoYear] = useState(searchParams.get('year') || '');
-  const [videoCover, setVideoCover] = useState('');
+  const [videoCover, setVideoCover] = useState(searchParams.get('cover') || '');
   const [videoDoubanId, setVideoDoubanId] = useState(0);
   // 当前源和ID
   const [currentSource, setCurrentSource] = useState(
@@ -110,8 +110,8 @@ function PlayPageClient() {
   const [currentId, setCurrentId] = useState(searchParams.get('id') || '');
 
   // 搜索所需信息
-  const [searchTitle] = useState(searchParams.get('stitle') || '');
-  const [searchType] = useState(searchParams.get('stype') || '');
+  const [searchTitle, setSearchTitle] = useState(searchParams.get('stitle') || '');
+  const [searchType, setSearchType] = useState(searchParams.get('stype') || '');
 
   // 是否需要优选
   const [needPrefer, setNeedPrefer] = useState(
@@ -147,6 +147,32 @@ function PlayPageClient() {
     videoTitle,
     videoYear,
   ]);
+
+  // Handle URL parameter changes (Navigation)
+  useEffect(() => {
+    const sTitle = searchParams.get('title') || '';
+    const sYear = searchParams.get('year') || '';
+    const sCover = searchParams.get('cover') || '';
+    const sSource = searchParams.get('source') || '';
+    const sId = searchParams.get('id') || '';
+    const sSTitle = searchParams.get('stitle') || '';
+    const sSType = searchParams.get('stype') || '';
+    const sPrefer = searchParams.get('prefer') === 'true';
+
+    // If identity changes, reset everything to URL params
+    if (sSource !== currentSource || sId !== currentId) {
+      setCurrentSource(sSource);
+      setCurrentId(sId);
+      setCurrentEpisodeIndex(0);
+      setVideoTitle(sTitle);
+      setVideoYear(sYear);
+      setVideoCover(sCover);
+    }
+
+    if (sSTitle !== searchTitle) setSearchTitle(sSTitle);
+    if (sSType !== searchType) setSearchType(sSType);
+    if (sPrefer !== needPrefer) setNeedPrefer(sPrefer);
+  }, [searchParams, currentSource, currentId, searchTitle, searchType, needPrefer]);
 
   // 视频播放地址
   const [videoUrl, setVideoUrl] = useState('');
@@ -1705,39 +1731,75 @@ function PlayPageClient() {
       // 销毁播放器实例
       cleanupPlayer();
     };
-  }, []);
+  }, [currentSource, currentId, videoTitle, searchTitle, needPrefer]);
 
   if (loading) {
     return (
       <PageLayout activePath='/play'>
         <div className='flex items-center justify-center min-h-screen bg-transparent'>
           <div className='text-center max-w-md mx-auto px-6'>
-            {/* 动画影院图标 */}
-            <div className='relative mb-8'>
-              <div className='relative mx-auto w-24 h-24 bg-gradient-to-r from-green-500 to-emerald-600 rounded-2xl shadow-2xl flex items-center justify-center transform hover:scale-105 transition-transform duration-300'>
-                <div className='text-white text-4xl'>
-                  {loadingStage === 'searching' && '🔍'}
-                  {loadingStage === 'preferring' && '⚡'}
-                  {loadingStage === 'fetching' && '🎬'}
-                  {loadingStage === 'ready' && '✨'}
+            {/* 动画影院图标 或 海报 */}
+            {videoCover ? (
+              <div className='relative mb-6 group animate-in fade-in zoom-in duration-500'>
+                {/* 海报容器 */}
+                <div className='relative mx-auto w-36 h-54 bg-gray-200 dark:bg-gray-800 rounded-xl shadow-2xl overflow-hidden transform hover:scale-105 transition-transform duration-300 ring-4 ring-white/20 dark:ring-black/20 rotate-1'>
+                  <img
+                    src={processImageUrl(videoCover)}
+                    alt={videoTitle}
+                    className='w-full h-full object-cover'
+                  />
+                  {/* 加载状态遮罩 */}
+                  <div className='absolute inset-0 bg-black/40 flex items-center justify-center backdrop-blur-[2px]'>
+                    <div className='w-16 h-16 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center shadow-lg ring-1 ring-white/20'>
+                      <div className='text-3xl animate-bounce'>
+                        {loadingStage === 'searching' && '🔍'}
+                        {loadingStage === 'preferring' && '⚡'}
+                        {loadingStage === 'fetching' && '🎬'}
+                        {loadingStage === 'ready' && '✨'}
+                      </div>
+                    </div>
+                  </div>
                 </div>
-                {/* 旋转光环 */}
-                <div className='absolute -inset-2 bg-gradient-to-r from-green-500 to-emerald-600 rounded-2xl opacity-20 animate-spin'></div>
-              </div>
 
-              {/* 浮动粒子效果 */}
-              <div className='absolute top-0 left-0 w-full h-full pointer-events-none'>
-                <div className='absolute top-2 left-2 w-2 h-2 bg-green-400 rounded-full animate-bounce'></div>
-                <div
-                  className='absolute top-4 right-4 w-1.5 h-1.5 bg-emerald-400 rounded-full animate-bounce'
-                  style={{ animationDelay: '0.5s' }}
-                ></div>
-                <div
-                  className='absolute bottom-3 left-6 w-1 h-1 bg-lime-400 rounded-full animate-bounce'
-                  style={{ animationDelay: '1s' }}
-                ></div>
+                {/* 标题信息 */}
+                <div className='mt-5 text-center px-4'>
+                  <h2 className='text-xl md:text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-300 line-clamp-2'>
+                    {convert(videoTitle)}
+                  </h2>
+                  {videoYear && (
+                    <span className='inline-block mt-2 px-3 py-1 bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 text-xs font-medium rounded-full'>
+                      {videoYear}
+                    </span>
+                  )}
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className='relative mb-8'>
+                <div className='relative mx-auto w-24 h-24 bg-gradient-to-r from-green-500 to-emerald-600 rounded-2xl shadow-2xl flex items-center justify-center transform hover:scale-105 transition-transform duration-300'>
+                  <div className='text-white text-4xl'>
+                    {loadingStage === 'searching' && '🔍'}
+                    {loadingStage === 'preferring' && '⚡'}
+                    {loadingStage === 'fetching' && '🎬'}
+                    {loadingStage === 'ready' && '✨'}
+                  </div>
+                  {/* 旋转光环 */}
+                  <div className='absolute -inset-2 bg-gradient-to-r from-green-500 to-emerald-600 rounded-2xl opacity-20 animate-spin'></div>
+                </div>
+
+                {/* 浮动粒子效果 */}
+                <div className='absolute top-0 left-0 w-full h-full pointer-events-none'>
+                  <div className='absolute top-2 left-2 w-2 h-2 bg-green-400 rounded-full animate-bounce'></div>
+                  <div
+                    className='absolute top-4 right-4 w-1.5 h-1.5 bg-emerald-400 rounded-full animate-bounce'
+                    style={{ animationDelay: '0.5s' }}
+                  ></div>
+                  <div
+                    className='absolute bottom-3 left-6 w-1 h-1 bg-lime-400 rounded-full animate-bounce'
+                    style={{ animationDelay: '1s' }}
+                  ></div>
+                </div>
+              </div>
+            )}
 
             {/* 进度指示器 */}
             <div className='mb-6 w-80 mx-auto'>

@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react';
+import { useCallback, useRef, useState } from 'react';
 
 interface UseLongPressOptions {
   onLongPress: () => void;
@@ -17,6 +17,7 @@ export const useLongPress = ({
   longPressDelay = 500,
   moveThreshold = 10,
 }: UseLongPressOptions) => {
+  const [isPressed, setIsPressed] = useState(false);
   const isLongPress = useRef(false);
   const pressTimer = useRef<NodeJS.Timeout | null>(null);
   const startPosition = useRef<TouchPosition | null>(null);
@@ -39,6 +40,7 @@ export const useLongPress = ({
       isActive.current = true;
       isLongPress.current = false;
       startPosition.current = { x: clientX, y: clientY };
+      setIsPressed(true);
 
       pressTimer.current = setTimeout(() => {
         // 再次检查是否仍然活跃
@@ -70,6 +72,7 @@ export const useLongPress = ({
       if (distance > moveThreshold) {
         clearTimer();
         isActive.current = false;
+        setIsPressed(false);
       }
     },
     [clearTimer, moveThreshold]
@@ -81,15 +84,10 @@ export const useLongPress = ({
     // relying on the browser to fire 'click' naturally if we don't preventDefault.
 
     // 重置所有状态
-    // Note: isLongPress.current is checked in onTouchEnd before calling handleEnd
-    // preventing the click if needed.
-    // We reset it here after the check is done.
-    
-    // Defer resetting isLongPress slightly? No, onTouchEnd runs synchronously.
-    // We check isLongPress in onTouchEnd, then call handleEnd.
     isLongPress.current = false;
     startPosition.current = null;
     isActive.current = false;
+    setIsPressed(false);
   }, [clearTimer]);
 
   // 触摸事件处理器
@@ -122,9 +120,36 @@ export const useLongPress = ({
     [handleEnd]
   );
 
+  const onMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      handleStart(e.clientX, e.clientY);
+    },
+    [handleStart]
+  );
+
+  const onMouseUp = useCallback(() => {
+    handleEnd();
+  }, [handleEnd]);
+
+  const onMouseLeave = useCallback(() => {
+    handleEnd();
+  }, [handleEnd]);
+
+  const onTouchCancel = useCallback(
+    (e: React.TouchEvent) => {
+      handleEnd();
+    },
+    [handleEnd]
+  );
+
   return {
+    isPressed,
     onTouchStart,
     onTouchMove,
     onTouchEnd,
+    onTouchCancel,
+    onMouseDown,
+    onMouseUp,
+    onMouseLeave,
   };
 };
