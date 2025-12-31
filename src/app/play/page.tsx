@@ -556,25 +556,72 @@ function PlayPageClient() {
     }
   };
 
-  // 去广告相关函数
-  function filterAdsFromM3U8(m3u8Content: string): string {
-    if (!m3u8Content) return '';
+  // 去广告相关函数 (增强版)
+function filterAdsFromM3U8(m3u8Content: string): string {
+  if (!m3u8Content) return '';
 
-    // 按行分割M3U8内容
-    const lines = m3u8Content.split('\n');
-    const filteredLines = [];
+  const lines = m3u8Content.split('\n');
+  const filteredLines: string[] = [];
+  
+  // 常见切片广告关键字 / Common Ad Segment Keywords
+  const adKeywords = [
+    '/ad/', '_ad', 'ad_', 'guanggao', // Explicit names
+    'xx_ad', 'cl_ad', 'udp_ad', // Pirate site patterns
+    '.png', '.jpg', '.jpeg', '.gif', // Fake images as video
+    'logo.ts', 'image.ts', 'intro.ts', // Generic junk
+    'kaitou', 'jiewei' // Intro/Outro pinyin
+  ];
 
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    
+    // 如果是时长标签 #EXTINF
+    if (line.startsWith('#EXTINF:')) {
+      // 检查下一行 (URL)
+      // Check next line for URL to see if it's an ad
+      let nextIdx = i + 1;
+      let urlLine = '';
+      
+      // 找到下一个非空行 (URL usually follows immediately)
+      while (nextIdx < lines.length) {
+        if (lines[nextIdx].trim() !== '' && !lines[nextIdx].startsWith('#')) {
+            urlLine = lines[nextIdx].trim();
+            break;
+        }
+        // 如果遇到其他 tag 继续找，除非是结束符
+        if (lines[nextIdx].startsWith('#EXT-X-ENDLIST')) break;
+        nextIdx++;
+      }
 
-      // 只过滤#EXT-X-DISCONTINUITY标识
-      if (!line.includes('#EXT-X-DISCONTINUITY')) {
-        filteredLines.push(line);
+      if (urlLine) {
+        // 判断是否命中广告关键字
+        const isAd = adKeywords.some(kw => urlLine.toLowerCase().includes(kw));
+        
+        if (isAd) {
+           // 是广告：跳过当前 #EXTINF 行 以及直到 URL 行的所有内容
+           // Skip strict block from i to nextIdx (URL)
+           // Logically we remove the segment declaration and the file reference.
+           i = nextIdx + 1;
+           continue; 
+        }
       }
     }
+    
+    // 依然移除 #EXT-X-DISCONTINUITY (Discontinuity)
+    // 很多切片广告前后会有这个标签，移除它可以让跳过广告后的拼接更平滑
+    // Remove discontinuity for smoother transition after ad removal
+    if (line.includes('#EXT-X-DISCONTINUITY')) {
+        i++;
+        continue;
+    }
 
-    return filteredLines.join('\n');
+    filteredLines.push(line);
+    i++;
   }
+
+  return filteredLines.join('\n');
+}
 
   // 跳过片头片尾配置相关函数
   const handleSkipConfigChange = async (newConfig: {
@@ -1385,7 +1432,9 @@ function PlayPageClient() {
         moreVideoAttr: {
           crossOrigin: 'anonymous',
         },
-        plugins: [artplayerPluginCas()],
+        plugins: [
+          artplayerPluginCas(),
+        ],
         // HLS 支持配置
         customType: {
           m3u8: function (video: HTMLVideoElement, url: string) {
