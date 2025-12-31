@@ -9,7 +9,15 @@ export default function artplayerPluginCas(option: {
             sharpness = 0.6, // Boosted to 0.6 for visibility
         } = option;
 
+        // Check localStorage for persisted state
+        const storageKey = 'artplayer_cas_enable';
         let isEnabled = false;
+        try {
+            isEnabled = localStorage.getItem(storageKey) === 'true';
+        } catch (e) {
+            console.warn('Failed to read from localStorage', e);
+        }
+
         let gl: WebGLRenderingContext | null = null;
         let program: WebGLProgram | null = null;
         let canvas: HTMLCanvasElement | null = null;
@@ -48,7 +56,6 @@ export default function artplayerPluginCas(option: {
 
                 // Contrast Adaptive Sharpening (CAS) Kernel
                 // Weight calculation: w = -1.0 / (8.0 * (1.0 - sharpness) + 5.0 * sharpness)
-                // This formula ensures the energy is preserved while sharpening.
                 float sharp = clamp(u_sharpness, 0.0, 1.0);
                 float w = -1.0 / mix(8.0, 5.0, sharp);
 
@@ -58,16 +65,27 @@ export default function artplayerPluginCas(option: {
                 vec3 final = res / div;
 
                 // Anti-Ringing: Clamp result to the min/max of the neighborhood
-                // This prevents white/black halos around edges (Ringing artifacts)
-                // And effectively disables sharpening on flat surfaces (where min == max == center)
                 vec3 mn = min(min(min(a, c), g), i);
                 vec3 mx = max(max(max(a, c), g), i);
                 mn = min(mn, e);
                 mx = max(mx, e);
-                
                 final = clamp(final, mn, mx);
 
-                gl_FragColor = vec4(final, 1.0);
+                // --- COLOR & CONTRAST ENHANCEMENTS ---
+                
+                // 1. Simple Vibrance (Safe Saturation Boost)
+                float luminance = dot(final, vec3(0.2126, 0.7152, 0.0722));
+                vec3 gray = vec3(luminance);
+                
+                // Boost saturation by 15%. mixing > 1.0 increases difference from gray.
+                vec3 satColor = mix(gray, final, 1.15); 
+
+                // 2. Smart Contrast (S-Curve to deepen blacks)
+                // Formula: (color - 0.5) * contrast + 0.5
+                // Boost contrast by 5% to restore depth lost by sharpening perception
+                vec3 contrastColor = (satColor - 0.5) * 1.05 + 0.5;
+                
+                gl_FragColor = vec4(contrastColor, 1.0);
             }
         `;
 
@@ -195,7 +213,7 @@ export default function artplayerPluginCas(option: {
             animationId = requestAnimationFrame(renderLoop);
         }
 
-        function enable() {
+        function enable(notify = true) {
             if (isEnabled) return;
             isEnabled = true;
             
@@ -208,7 +226,9 @@ export default function artplayerPluginCas(option: {
             renderLoop();
             
             // Notify user
-            art.notice.show = '画质增强 (CAS) 已开启';
+            if (notify) {
+                art.notice.show = '画质增强 (CAS) 已开启';
+            }
         }
 
         function disable() {
@@ -235,20 +255,39 @@ export default function artplayerPluginCas(option: {
             name: 'cas-enhance',
             width: 250,
             html: '画质增强 (CAS) <span style="font-size:10px;color:#f00;margin-left:5px">Beta</span>',
-            tooltip: '使用 GPU 锐化画面，可能增加耗电',
-            switch: false,
+            tooltip: isEnabled ? '点击关闭画质增强' : '使用 GPU 锐化画面，可能增加耗电',
+            switch: isEnabled,
             onSwitch: (item) => {
                 if (item.switch) {
                     disable();
+                    localStorage.setItem(storageKey, 'false');
                     item.tooltip = '使用 GPU 锐化画面，可能增加耗电';
                     return false;
                 } else {
                     enable();
+                    localStorage.setItem(storageKey, 'true');
                     item.tooltip = '点击关闭画质增强';
                     return true;
                 }
             },
         });
+        
+        // Auto-enable if stored state is true
+        if (isEnabled) {
+            // Need to wait for video to be ready or mount?
+            // Usually ok to call enable immediately, renderLoop waits for video readyState
+            // But we must be careful not to trigger notification too early or multiple times
+            // Let's set it to valid state
+             // Since initWebGL inserts canvas, we should ensure video parent exists.
+             // Artplayer plugin runs after mount usually.
+             
+             // Minor refinement: reset isEnabled false first because enable() checks it
+             const startState = isEnabled;
+             isEnabled = false; 
+             if (startState) {
+                 enable(false); // Silent enable on startup
+             }
+        }
         
         // Cleanup on destroy
         art.on('destroy', () => {
