@@ -539,6 +539,11 @@ function PlayPageClient() {
   const cleanupPlayer = () => {
     if (artPlayerRef.current) {
       try {
+        // Cleanup seek-on-release event listeners
+        if ((artPlayerRef.current as any)._seekOnReleaseCleanup) {
+          (artPlayerRef.current as any)._seekOnReleaseCleanup();
+        }
+
         // 销毁 HLS 实例
         if (artPlayerRef.current.video && artPlayerRef.current.video.hls) {
           artPlayerRef.current.video.hls.destroy();
@@ -1611,6 +1616,126 @@ function filterAdsFromM3U8(m3u8Content: string): string {
         if (artPlayerRef.current && !artPlayerRef.current.paused) {
           requestWakeLock();
         }
+
+        // =====================================================================
+        // Seek-on-release: Only seek when user releases the progress bar
+        // This prevents continuous loading during drag on slow connections
+        // =====================================================================
+        const art = artPlayerRef.current;
+        if (!art || !art.template || !art.template.$progress) return;
+
+        const $progress = art.template.$progress;
+        let isDragging = false;
+        let dragStartTime = 0;
+        let pendingSeekTime: number | null = null;
+        let wasPlaying = false;
+
+        // Calculate seek time from pointer position
+        const getSeekTimeFromEvent = (e: MouseEvent | TouchEvent): number => {
+          const rect = $progress.getBoundingClientRect();
+          const clientX = 'touches' in e ? e.touches[0]?.clientX ?? (e as TouchEvent).changedTouches[0]?.clientX : e.clientX;
+          const percent = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+          return percent * (art.duration || 0);
+        };
+
+        // Update visual indicator without seeking
+        const updateVisualProgress = (seekTime: number) => {
+          const duration = art.duration || 1;
+          const percent = (seekTime / duration) * 100;
+          
+          // Update the played bar and indicator visually
+          const $played = $progress.querySelector('.art-progress-played') as HTMLElement;
+          const $indicator = $progress.querySelector('.art-progress-indicator') as HTMLElement;
+          
+          if ($played) $played.style.width = `${percent}%`;
+          if ($indicator) $indicator.style.left = `${percent}%`;
+          
+          // Show time tooltip
+          art.notice.show = formatTime(seekTime);
+        };
+
+        const handleDragStart = (e: MouseEvent | TouchEvent) => {
+          // Only handle left mouse button or touch
+          if ('button' in e && e.button !== 0) return;
+          
+          isDragging = true;
+          dragStartTime = art.currentTime || 0;
+          wasPlaying = !art.paused;
+          
+          // Pause video during drag to prevent loading
+          if (wasPlaying) {
+            art.pause();
+          }
+          
+          pendingSeekTime = getSeekTimeFromEvent(e);
+          updateVisualProgress(pendingSeekTime);
+          
+          // Prevent default to avoid text selection and other behaviors
+          e.preventDefault();
+          e.stopPropagation();
+        };
+
+        const handleDragMove = (e: MouseEvent | TouchEvent) => {
+          if (!isDragging) return;
+          
+          pendingSeekTime = getSeekTimeFromEvent(e);
+          updateVisualProgress(pendingSeekTime);
+          
+          e.preventDefault();
+          e.stopPropagation();
+        };
+
+        const handleDragEnd = (e: MouseEvent | TouchEvent) => {
+          if (!isDragging) return;
+          
+          isDragging = false;
+          
+          // Get final seek time from release position
+          if ('changedTouches' in e || 'clientX' in e) {
+            pendingSeekTime = getSeekTimeFromEvent(e);
+          }
+          
+          // Perform the actual seek
+          if (pendingSeekTime !== null && pendingSeekTime >= 0) {
+            art.currentTime = pendingSeekTime;
+            console.log(`Seek on release: ${formatTime(pendingSeekTime)}`);
+          }
+          
+          // Resume playback if it was playing before drag
+          if (wasPlaying) {
+            art.play();
+          }
+          
+          pendingSeekTime = null;
+          art.notice.show = '';
+          
+          e.preventDefault();
+        };
+
+        // Attach event listeners to progress bar
+        $progress.addEventListener('mousedown', handleDragStart as EventListener, { capture: true });
+        $progress.addEventListener('touchstart', handleDragStart as EventListener, { capture: true, passive: false });
+        
+        // Document-level listeners for move/end to handle dragging outside progress bar
+        const docMoveHandler = (e: MouseEvent | TouchEvent) => handleDragMove(e);
+        const docEndHandler = (e: MouseEvent | TouchEvent) => handleDragEnd(e);
+        
+        document.addEventListener('mousemove', docMoveHandler as EventListener);
+        document.addEventListener('mouseup', docEndHandler as EventListener);
+        document.addEventListener('touchmove', docMoveHandler as EventListener, { passive: false });
+        document.addEventListener('touchend', docEndHandler as EventListener);
+        document.addEventListener('touchcancel', docEndHandler as EventListener);
+        
+        // Store cleanup function for later
+        (art as any)._seekOnReleaseCleanup = () => {
+          $progress.removeEventListener('mousedown', handleDragStart as EventListener, { capture: true });
+          $progress.removeEventListener('touchstart', handleDragStart as EventListener, { capture: true });
+          document.removeEventListener('mousemove', docMoveHandler as EventListener);
+          document.removeEventListener('mouseup', docEndHandler as EventListener);
+          document.removeEventListener('touchmove', docMoveHandler as EventListener);
+          document.removeEventListener('touchend', docEndHandler as EventListener);
+          document.removeEventListener('touchcancel', docEndHandler as EventListener);
+        };
       });
 
       // 监听播放状态变化，控制 Wake Lock

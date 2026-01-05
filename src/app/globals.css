@@ -178,3 +178,54 @@ div[data-media-provider] video {
     display: none !important;
   }
 }
+
+/* Fix progress bar dragging on Tesla Chrome and older browsers */
+.art-progress {
+  touch-action: none !important; /* Prevent browser handling of touch events */
+  -webkit-user-drag: none !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  -moz-user-select: none !important;
+  -ms-user-select: none !important;
+}
+
+.art-progress-inner,
+.art-progress-loaded,
+.art-progress-played,
+.art-progress-highlight,
+.art-progress-indicator {
+  touch-action: none !important;
+  pointer-events: auto !important;
+  -webkit-user-drag: none !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
+/* Ensure the progress indicator (draggable dot) is always interactive */
+.art-progress-indicator {
+  cursor: pointer !important;
+  touch-action: none !important;
+  -webkit-tap-highlight-color: transparent !important;
+}
+
+/* Increase touch target area for better mobile/Tesla touch interaction */
+.art-progress::before {
+  content: '';
+  position: absolute;
+  top: -12px;
+  bottom: -12px;
+  left: 0;
+  right: 0;
+  z-index: -1;
+}
+
+/* Fix for older WebKit browsers (Tesla uses older Chromium) */
+.art-bottom,
+.art-controls {
+  touch-action: manipulation !important;
+}
+
+.art-control-progress {
+  touch-action: none !important;
+  -webkit-touch-callout: none !important;
+}
