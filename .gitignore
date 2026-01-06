@@ -42,5 +42,9 @@ sitemap-*.xml
 
 # generated files
 src/lib/runtime.ts
-public/manifest.jsonlunatv_custom.tar
+public/manifest.json
 *.tar
+
+# local docker config (may contain credentials)
+docker-compose.yml
+/cache/

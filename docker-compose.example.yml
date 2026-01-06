@@ -15,6 +15,6 @@ services:
       - IMAGE_CACHE_TTL_DAYS=30
       - NEXT_PUBLIC_SITE_NAME=MoonTV
       - ANNOUNCEMENT=
-      # Auth
+      # Auth - Change these to your own credentials!
       - USERNAME=admin
-      - PASSWORD=admin_1234
+      - PASSWORD=change_me_to_secure_password
