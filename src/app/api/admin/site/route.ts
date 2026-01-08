@@ -25,6 +25,8 @@ export async function POST(request: NextRequest) {
       // Preserve existing TTL values from current config (which come from env vars)
       DoubanDataCacheTTL: currentConfig.SiteConfig.DoubanDataCacheTTL,
       ImageCacheTTL: currentConfig.SiteConfig.ImageCacheTTL,
+      // Seasonal Effects (admin-controlled)
+      SeasonalEffects: body.SeasonalEffects !== undefined ? body.SeasonalEffects : currentConfig.SiteConfig.SeasonalEffects,
     };
 
     currentConfig.SiteConfig = newSiteConfig;

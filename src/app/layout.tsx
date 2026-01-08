@@ -15,6 +15,7 @@ const inter = Inter({ subsets: ['latin'] });
 export const dynamic = 'force-dynamic';
 
 import { LanguageProvider } from '../components/LanguageProvider';
+import { SeasonalEffectsProvider } from '../components/SeasonalEffectsProvider';
 
 // 动态生成 metadata，支持配置更新后的标题变化
 export async function generateMetadata(): Promise<Metadata> {
@@ -120,10 +121,12 @@ export default async function RootLayout({
           disableTransitionOnChange
         >
           <LanguageProvider>
-            <SiteProvider siteName={siteName} announcement={announcement}>
-              {children}
-              <GlobalErrorIndicator />
-            </SiteProvider>
+            <SeasonalEffectsProvider>
+              <SiteProvider siteName={siteName} announcement={announcement}>
+                {children}
+                <GlobalErrorIndicator />
+              </SiteProvider>
+            </SeasonalEffectsProvider>
           </LanguageProvider>
         </ThemeProvider>
       </body>

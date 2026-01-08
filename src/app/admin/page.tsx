@@ -358,6 +358,87 @@ export default function AdminPage() {
                   </label>
                 </div>
               </div>
+
+              {/* 季节特效设置 */}
+              <div className="col-span-2 border-t dark:border-gray-700 pt-4 mt-2">
+                <h3 className="font-medium mb-4 text-gray-800 dark:text-white">{convert('季节特效')} ❄️🌸🍃🍁</h3>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+                  {convert('配置后对所有用户生效，在屏幕上显示季节性飘落效果')}
+                </p>
+                
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  {/* 开启/关闭 */}
+                  <div className="flex items-center">
+                    <label className="flex items-center space-x-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={config.SiteConfig?.SeasonalEffects?.enabled || false}
+                        onChange={(e) => handleSiteConfigChange('SeasonalEffects', {
+                          ...config.SiteConfig?.SeasonalEffects,
+                          enabled: e.target.checked,
+                          season: config.SiteConfig?.SeasonalEffects?.season || 'auto',
+                          intensity: config.SiteConfig?.SeasonalEffects?.intensity || 'normal',
+                        })}
+                        className="rounded text-blue-600 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600"
+                      />
+                      <span className="text-sm text-gray-700 dark:text-gray-300">{convert('启用季节特效')}</span>
+                    </label>
+                  </div>
+
+                  {/* 季节选择 */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{convert('季节')}</label>
+                    <select
+                      value={config.SiteConfig?.SeasonalEffects?.season || 'auto'}
+                      onChange={(e) => handleSiteConfigChange('SeasonalEffects', {
+                        ...config.SiteConfig?.SeasonalEffects,
+                        enabled: config.SiteConfig?.SeasonalEffects?.enabled || false,
+                        season: e.target.value,
+                        intensity: config.SiteConfig?.SeasonalEffects?.intensity || 'normal',
+                      })}
+                      disabled={!config.SiteConfig?.SeasonalEffects?.enabled}
+                      className="w-full border rounded px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white disabled:opacity-50"
+                    >
+                      <option value="auto">{convert('自动（根据月份）')}</option>
+                      <option value="spring">{convert('春季 - 樱花雨 🌸')}</option>
+                      <option value="summer">{convert('夏季 - 绿叶雨 🍃')}</option>
+                      <option value="autumn">{convert('秋季 - 红枫落叶 🍁')}</option>
+                      <option value="winter">{convert('冬季 - 雪花 ❄️')}</option>
+                      <option value="off">{convert('关闭效果')}</option>
+                    </select>
+                  </div>
+
+                  {/* 密度选择 */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{convert('飘落密度')}</label>
+                    <div className="flex space-x-2">
+                      {[
+                        { value: 'light', label: '轻柔' },
+                        { value: 'normal', label: '正常' },
+                        { value: 'heavy', label: '浓密' },
+                      ].map((opt) => (
+                        <button
+                          key={opt.value}
+                          onClick={() => handleSiteConfigChange('SeasonalEffects', {
+                            ...config.SiteConfig?.SeasonalEffects,
+                            enabled: config.SiteConfig?.SeasonalEffects?.enabled || false,
+                            season: config.SiteConfig?.SeasonalEffects?.season || 'auto',
+                            intensity: opt.value,
+                          })}
+                          disabled={!config.SiteConfig?.SeasonalEffects?.enabled}
+                          className={`flex-1 px-3 py-2 text-sm rounded border transition-colors ${
+                            config.SiteConfig?.SeasonalEffects?.intensity === opt.value
+                              ? 'border-blue-500 bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400'
+                              : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+                          } disabled:opacity-50`}
+                        >
+                          {convert(opt.label)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
 
             <div className="flex justify-end pt-4">

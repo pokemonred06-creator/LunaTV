@@ -58,6 +58,12 @@ export interface SiteConfig {
   FluidSearch: boolean; // 是否启用流式搜索
   DoubanDataCacheTTL?: number; // Minutes
   ImageCacheTTL?: number; // Days
+  // Seasonal Effects Config (admin-controlled)
+  SeasonalEffects?: {
+    enabled: boolean;
+    season: 'auto' | 'spring' | 'summer' | 'autumn' | 'winter' | 'off';
+    intensity: 'light' | 'normal' | 'heavy';
+  };
 }
 
 export interface UserConfig {

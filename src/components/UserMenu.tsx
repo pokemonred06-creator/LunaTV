@@ -21,7 +21,10 @@ import { getAuthInfoFromBrowserCookie } from '@/lib/auth';
 import { CURRENT_VERSION } from '@/lib/version';
 import { checkForUpdates, UpdateStatus } from '@/lib/version_check';
 
+
+import { themeOptions } from './ThemeToggle';
 import { VersionPanel } from './VersionPanel';
+import { useTheme } from 'next-themes';
 
 interface AuthInfo {
   username?: string;
@@ -73,6 +76,10 @@ export const UserMenu: React.FC = () => {
   const [isDoubanDropdownOpen, setIsDoubanDropdownOpen] = useState(false);
   const [isDoubanImageProxyDropdownOpen, setIsDoubanImageProxyDropdownOpen] =
     useState(false);
+
+
+  // 主题设置
+  const { theme: currentTheme, setTheme } = useTheme();
 
   // 豆瓣数据源选项
   const doubanDataSourceOptions = [
@@ -398,6 +405,8 @@ export const UserMenu: React.FC = () => {
     }
   };
 
+
+
   // 获取感谢信息
   const getThanksInfo = (dataSource: string) => {
     switch (dataSource) {
@@ -648,6 +657,40 @@ export const UserMenu: React.FC = () => {
 
           {/* 设置项 */}
           <div className='space-y-6'>
+            {/* 主题设置 */}
+            <div className='space-y-3'>
+              <div>
+                <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
+                  外观主题
+                </h4>
+                <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
+                  选择应用的显示主题
+                </p>
+              </div>
+              <div className='flex gap-2'>
+                {themeOptions.map((option) => {
+                  const Icon = option.icon;
+                  return (
+                    <button
+                      key={option.value}
+                      onClick={() => setTheme(option.value)}
+                      className={`flex-1 px-3 py-2.5 text-sm rounded-lg border transition-all duration-200 flex items-center justify-center gap-2 ${
+                        currentTheme === option.value
+                          ? 'border-green-500 bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400'
+                          : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:border-gray-400 dark:hover:border-gray-500'
+                      }`}
+                    >
+                      <Icon className='w-4 h-4' />
+                      <span>{option.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* 分割线 */}
+            <div className='border-t border-gray-200 dark:border-gray-700'></div>
+
             {/* 豆瓣数据源选择 */}
             <div className='space-y-3'>
               <div>
@@ -950,10 +993,10 @@ export const UserMenu: React.FC = () => {
                     onChange={(e) => handleLiveDirectConnectToggle(e.target.checked)}
                   />
                   <div className='w-11 h-6 bg-gray-300 rounded-full peer-checked:bg-green-500 transition-colors dark:bg-gray-600'></div>
-                  <div className='absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5'></div>
                 </div>
               </label>
             </div>
+
           </div>
 
           {/* 底部说明 */}
