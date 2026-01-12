@@ -45,6 +45,23 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const { currentPassword } = body;
+    if (!currentPassword) {
+      return NextResponse.json(
+        { error: '请输入当前密码' },
+        { status: 400 }
+      );
+    }
+
+    // 验证当前密码是否正确
+    const isValid = await db.verifyUser(username, currentPassword);
+    if (!isValid) {
+      return NextResponse.json(
+        { error: '当前密码错误' },
+        { status: 400 }
+      );
+    }
+
     // 修改密码
     await db.changePassword(username, newPassword);
 

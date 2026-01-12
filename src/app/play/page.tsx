@@ -1440,6 +1440,28 @@ function filterAdsFromM3U8(m3u8Content: string): string {
         plugins: [
           artplayerPluginCas(),
         ],
+        layers: [
+          {
+            name: 'touch-control',
+            html: '',
+            style: {
+              position: 'absolute',
+              top: '0',
+              left: '0',
+              width: '100%',
+              height: '100%',
+              zIndex: '20',
+            },
+            click: function () {
+              // 切换控制栏显示状态
+              if (this.controls.show) {
+                this.controls.show = false;
+              } else {
+                this.controls.show = true;
+              }
+            },
+          },
+        ],
         // HLS 支持配置
         customType: {
           m3u8: function (video: HTMLVideoElement, url: string) {
@@ -1611,6 +1633,34 @@ function filterAdsFromM3U8(m3u8Content: string): string {
       // 监听播放器事件
       artPlayerRef.current.on('ready', () => {
         setError(null);
+        
+        const player = artPlayerRef.current;
+
+        // 注入自定义样式：进度条放大效果
+        const style = document.createElement('style');
+        style.textContent = `
+          .art-control-progress-indicator {
+            transform-origin: center;
+            transition: transform 0.1s ease;
+          }
+          /* 拖拽或悬停时放大指示点 */
+          .art-control-progress:hover .art-control-progress-indicator,
+          .art-control-progress.is-dragging .art-control-progress-indicator {
+            transform: scale(2.5) !important;
+            background-color: #fff !important;
+          }
+          /* 放大时间提示 */
+          .art-control-progress-tip {
+            font-size: 18px !important;
+            padding: 6px 10px !important;
+            bottom: 30px !important;
+            background-color: rgba(0,0,0,0.8) !important;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+          }
+        `;
+        if (player && player.template && player.template.$container) {
+          player.template.$container.appendChild(style);
+        }
 
         // 播放器就绪后，如果正在播放则请求 Wake Lock
         if (artPlayerRef.current && !artPlayerRef.current.paused) {
@@ -1659,6 +1709,7 @@ function filterAdsFromM3U8(m3u8Content: string): string {
           if ('button' in e && e.button !== 0) return;
           
           isDragging = true;
+          $progress.classList.add('is-dragging');
           dragStartTime = art.currentTime || 0;
           wasPlaying = !art.paused;
           
@@ -1689,6 +1740,7 @@ function filterAdsFromM3U8(m3u8Content: string): string {
           if (!isDragging) return;
           
           isDragging = false;
+          $progress.classList.remove('is-dragging');
           
           // Get final seek time from release position
           if ('changedTouches' in e || 'clientX' in e) {

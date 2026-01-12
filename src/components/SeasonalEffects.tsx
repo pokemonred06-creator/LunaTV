@@ -293,8 +293,7 @@ const SeasonalEffects: React.FC<SeasonalEffectsProps> = memo(({
         {backParticles.map(renderParticle)}
       </div>
       
-      {/* Front layer - in front of cards */}
-      <div style={{ ...containerStyle, zIndex: 5 }} aria-hidden="true">
+      <div style={{ ...containerStyle, zIndex: 9999 }} aria-hidden="true">
         {frontParticles.map(renderParticle)}
       </div>
     </>
