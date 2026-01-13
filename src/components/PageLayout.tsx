@@ -1,8 +1,12 @@
+import { useEffect, useState } from 'react';
+
+import { isForcedMobile } from '@/lib/utils';
+
 import { BackButton } from './BackButton';
+import { LanguageToggle } from './LanguageToggle';
 import MobileBottomNav from './MobileBottomNav';
 import MobileHeader from './MobileHeader';
 import Sidebar from './Sidebar';
-import { LanguageToggle } from './LanguageToggle';
 import { ThemeToggle } from './ThemeToggle';
 import { UserMenu } from './UserMenu';
 
@@ -13,15 +17,24 @@ interface PageLayoutProps {
 }
 
 const PageLayout = ({ children, activePath = '/' }: PageLayoutProps) => {
+  const [forcedMobile, setForcedMobile] = useState(false);
+
+  useEffect(() => {
+    setForcedMobile(isForcedMobile());
+  }, []);
+
   return (
     <div className='w-full min-h-screen'>
       {/* 移动端头部 */}
-      <MobileHeader showBackButton={['/play', '/live'].includes(activePath)} />
+      <MobileHeader 
+        showBackButton={['/play', '/live'].includes(activePath)} 
+        forced={forcedMobile}
+      />
 
       {/* 主要布局容器 */}
-      <div className='flex md:grid md:grid-cols-[auto_1fr] w-full min-h-screen md:min-h-auto'>
+      <div className={`flex ${forcedMobile ? '' : 'md:grid md:grid-cols-[auto_1fr]'} w-full min-h-screen md:min-h-auto`}>
         {/* 侧边栏 - 桌面端显示，移动端隐藏 */}
-        <div className='hidden md:block'>
+        <div className={forcedMobile ? 'hidden' : 'hidden md:block'}>
           <Sidebar activePath={activePath} />
         </div>
 
@@ -29,13 +42,13 @@ const PageLayout = ({ children, activePath = '/' }: PageLayoutProps) => {
         <div className='relative min-w-0 flex-1 transition-all duration-300'>
           {/* 桌面端左上角返回按钮 */}
           {['/play', '/live'].includes(activePath) && (
-            <div className='absolute top-3 left-1 z-20 hidden md:flex'>
+            <div className={`absolute top-3 left-1 z-20 ${forcedMobile ? 'hidden' : 'hidden md:flex'}`}>
               <BackButton />
             </div>
           )}
 
           {/* 桌面端顶部按钮 */}
-          <div className='absolute top-2 right-4 z-20 hidden md:flex items-center gap-2'>
+          <div className={`absolute top-2 right-4 z-20 ${forcedMobile ? 'hidden' : 'hidden md:flex'} items-center gap-2`}>
             <LanguageToggle />
             <ThemeToggle />
             <UserMenu />
@@ -43,9 +56,11 @@ const PageLayout = ({ children, activePath = '/' }: PageLayoutProps) => {
 
           {/* 主内容 */}
           <main
-            className='flex-1 md:min-h-0 mb-14 md:mb-0 md:mt-0 mt-12'
+            className={`flex-1 ${forcedMobile ? 'mt-12 mb-14' : 'md:min-h-0 mb-14 md:mb-0 md:mt-0 mt-12'}`}
             style={{
-              paddingBottom: 'calc(3.5rem + env(safe-area-inset-bottom))',
+              paddingBottom: forcedMobile 
+                ? 'calc(3.5rem + env(safe-area-inset-bottom))' 
+                : 'calc(3.5rem + env(safe-area-inset-bottom))',
             }}
           >
             {children}
@@ -54,8 +69,8 @@ const PageLayout = ({ children, activePath = '/' }: PageLayoutProps) => {
       </div>
 
       {/* 移动端底部导航 */}
-      <div className='md:hidden'>
-        <MobileBottomNav activePath={activePath} />
+      <div className={forcedMobile ? 'block' : 'md:hidden'}>
+        <MobileBottomNav activePath={activePath} forced={forcedMobile} />
       </div>
     </div>
   );

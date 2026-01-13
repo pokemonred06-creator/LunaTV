@@ -1,4 +1,4 @@
-/* eslint-disable no-console,@typescript-eslint/no-explicit-any, @typescript-eslint/no-non-null-assertion */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 'use client';
 
@@ -14,6 +14,7 @@ import {
   X,
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { useTheme } from 'next-themes';
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 
@@ -21,10 +22,8 @@ import { getAuthInfoFromBrowserCookie } from '@/lib/auth';
 import { CURRENT_VERSION } from '@/lib/version';
 import { checkForUpdates, UpdateStatus } from '@/lib/version_check';
 
-
 import { themeOptions } from './ThemeToggle';
 import { VersionPanel } from './VersionPanel';
-import { useTheme } from 'next-themes';
 
 interface AuthInfo {
   username?: string;

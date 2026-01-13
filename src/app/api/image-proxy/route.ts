@@ -1,5 +1,6 @@
 
 import { NextRequest, NextResponse } from 'next/server';
+
 import { getConfig } from '@/lib/config';
 
 export const runtime = 'nodejs';
@@ -10,6 +11,30 @@ export async function GET(request: NextRequest) {
 
   if (!url) {
     return new NextResponse('Missing url parameter', { status: 400 });
+  }
+
+  // Prevent SSRF: Validate URL protocol and hostname
+  try {
+    const parsedUrl = new URL(url);
+    if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+      return new NextResponse('Invalid protocol', { status: 400 });
+    }
+    
+    const hostname = parsedUrl.hostname;
+    // Basic private IP/localhost blocking
+    if (
+      hostname === 'localhost' ||
+      hostname === '127.0.0.1' ||
+      hostname === '::1' ||
+      hostname.startsWith('192.168.') ||
+      hostname.startsWith('10.') ||
+      hostname.startsWith('172.16.') ||
+      hostname.endsWith('.local')
+    ) {
+      return new NextResponse('Internal network access denied', { status: 403 });
+    }
+  } catch {
+    return new NextResponse('Invalid URL format', { status: 400 });
   }
 
   try {

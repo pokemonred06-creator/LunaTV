@@ -64,6 +64,7 @@ export interface SiteConfig {
     season: 'auto' | 'spring' | 'summer' | 'autumn' | 'winter' | 'off';
     intensity: 'light' | 'normal' | 'heavy';
   };
+  DebugLogs?: boolean;
 }
 
 export interface UserConfig {

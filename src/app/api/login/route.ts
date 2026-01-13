@@ -1,4 +1,4 @@
-/* eslint-disable no-console,@typescript-eslint/no-explicit-any */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getConfig } from '@/lib/config';
@@ -72,38 +72,67 @@ async function generateAuthCookie(
 
 export async function POST(req: NextRequest) {
   try {
+    console.log('[Login] Request received. Storage Type:', STORAGE_TYPE);
+    
+    // Check Env Vars Presence
+    console.log('[Login] Env Check:', {
+      hasPassword: !!process.env.PASSWORD,
+      passwordLen: process.env.PASSWORD?.length,
+      username: process.env.USERNAME || '(default: admin)',
+      next_public_storage_type: process.env.NEXT_PUBLIC_STORAGE_TYPE
+    });
+
     // 本地 / localStorage 模式——仅校验固定密码
     if (STORAGE_TYPE === 'localstorage') {
       const envPassword = process.env.PASSWORD;
+      console.log('[Login] Mode: LocalStorage');
 
       // 未配置 PASSWORD 时直接放行
       if (!envPassword) {
+        console.log('[Login] No PASSWORD configured, allowing access.');
         const response = NextResponse.json({ ok: true });
-
-        // 清除可能存在的认证cookie
         response.cookies.set('auth', '', {
           path: '/',
           expires: new Date(0),
-          sameSite: 'lax', // 改为 lax 以支持 PWA
-          httpOnly: false, // PWA 需要客户端可访问
-          secure: false, // 根据协议自动设置
+          sameSite: 'lax', 
+          httpOnly: false, 
+          secure: process.env.NODE_ENV === 'production',
         });
-
         return response;
       }
 
-      const { password } = await req.json();
-      if (typeof password !== 'string') {
+      const body = await req.json();
+      const { password, username } = body;
+      
+      console.log('[Login] Body:', { username, passwordProvided: !!password });
+
+      if (typeof password !== 'string' || !password) {
+        console.log('[Login] Password missing or invalid type');
         return NextResponse.json({ error: '密码不能为空' }, { status: 400 });
       }
 
+      // Check password first
       if (password !== envPassword) {
+        console.log('[Login] Password mismatch. Provided len:', password.length, 'Expected len:', envPassword.length);
         return NextResponse.json(
           { ok: false, error: '密码错误' },
           { status: 401 }
         );
       }
 
+      // If username was provided, also validate it matches the env USERNAME (or defaults to 'admin')
+      if (username) {
+        const envUsername = (process.env.USERNAME || 'admin').toLowerCase();
+        if (username.toLowerCase() !== envUsername) {
+          console.log('[Login] Username mismatch:', username, 'Expected:', envUsername);
+          return NextResponse.json(
+            { ok: false, error: '用户名或密码错误' },
+            { status: 401 }
+          );
+        }
+      }
+
+      console.log('[Login] LocalStorage Success');
       // 验证成功，设置认证cookie
       const response = NextResponse.json({ ok: true });
       const cookieValue = await generateAuthCookie(
@@ -119,14 +148,16 @@ export async function POST(req: NextRequest) {
         expires,
         sameSite: 'lax',
         httpOnly: false, // PWA compabitility
-        secure: false, 
+        secure: process.env.NODE_ENV === 'production' && process.env.DISABLE_SECURE_COOKIES !== 'true',
       });
 
       return response;
     }
 
     // 数据库 / redis 模式——校验用户名并尝试连接数据库
+    console.log('[Login] Mode: DB/Redis');
     const { username, password } = await req.json();
+    console.log('[Login] Request Data:', { username, passwordProvided: !!password });
 
     if (!username || typeof username !== 'string') {
       return NextResponse.json({ error: '用户名不能为空' }, { status: 400 });
@@ -136,13 +167,17 @@ export async function POST(req: NextRequest) {
     }
 
     const lowerUsername = username.toLowerCase();
-    const envUsername = process.env.USERNAME ? process.env.USERNAME.toLowerCase() : '';
+    const envUsername = (process.env.USERNAME || 'admin').toLowerCase();
+    const envPassword = process.env.PASSWORD;
+
+    console.log('[Login] Check Env Match:', { lowerUsername, envUsername, passwordMatch: password === envPassword });
 
     // 可能是站长，直接读环境变量
     if (
       lowerUsername === envUsername &&
-      password === process.env.PASSWORD
+      password === envPassword
     ) {
+      console.log('[Login] Owner Success (Environment Variable Match)');
       // 验证成功，设置认证cookie
       const response = NextResponse.json({ ok: true });
       const cookieValue = await generateAuthCookie(
@@ -158,14 +193,16 @@ export async function POST(req: NextRequest) {
         expires,
         sameSite: 'lax', 
         httpOnly: false, 
-        secure: false, 
+        secure: process.env.NODE_ENV === 'production' && process.env.DISABLE_SECURE_COOKIES !== 'true',
       });
 
       return response;
     } else if (lowerUsername === envUsername) {
-      return NextResponse.json({ error: '用户名或密码错误' }, { status: 401 });
+       console.log('[Login] Owner Username matched but Password mismatch');
+       return NextResponse.json({ error: '用户名或密码错误' }, { status: 401 });
     }
 
+    console.log('[Login] Checking DB for user:', lowerUsername);
     const config = await getConfig();
     const user = config.UserConfig.Users.find((u) => u.username.toLowerCase() === lowerUsername);
     if (user && user.banned) {
@@ -174,13 +211,13 @@ export async function POST(req: NextRequest) {
 
     // 校验用户密码
     try {
-      // Assuming DB verifyUser also needs to be consistent. 
-      // If DB keys are case-sensitive, we must ensure they were stored as lowercase or we might break existing mixed-case users.
-      // However, for "not be case sensitive", forcing lowercase is the standard approach.
       const pass = await db.verifyUser(lowerUsername, password);
+      console.log('[Login] DB verifyUser result:', pass);
+      
       if (!pass) {
-        // Fallback: try original username just in case older users were registered with mixed case
+        // Fallback
         const passOriginal = await db.verifyUser(username, password);
+        console.log('[Login] DB verifyUser(original) result:', passOriginal);
         if (!passOriginal) {
              return NextResponse.json(
               { error: '用户名或密码错误' },
@@ -189,6 +226,7 @@ export async function POST(req: NextRequest) {
         }
       }
 
+      console.log('[Login] DB Success');
       // 验证成功，设置认证cookie
       const response = NextResponse.json({ ok: true });
       const cookieValue = await generateAuthCookie(
@@ -204,16 +242,16 @@ export async function POST(req: NextRequest) {
         expires,
         sameSite: 'lax', 
         httpOnly: false, 
-        secure: false, 
+        secure: process.env.NODE_ENV === 'production' && process.env.DISABLE_SECURE_COOKIES !== 'true',
       });
 
       return response;
     } catch (err) {
-      console.error('数据库验证失败', err);
+      console.error('[Login] DB Verification Failed:', err);
       return NextResponse.json({ error: '数据库错误' }, { status: 500 });
     }
   } catch (error) {
-    console.error('登录接口异常', error);
+    console.error('[Login] Exception:', error);
     return NextResponse.json({ error: '服务器错误' }, { status: 500 });
   }
 }

@@ -1,4 +1,4 @@
-/* eslint-disable no-console,react-hooks/exhaustive-deps */
+/* eslint-disable react-hooks/exhaustive-deps */
 
 'use client';
 
@@ -41,72 +41,6 @@ export const VersionPanel: React.FC<VersionPanelProps> = ({
   const [hasUpdate, setIsHasUpdate] = useState(false);
   const [latestVersion, setLatestVersion] = useState<string>('');
   const [showRemoteContent, setShowRemoteContent] = useState(false);
-
-  // 确保组件已挂载
-  useEffect(() => {
-    setMounted(true);
-    return () => setMounted(false);
-  }, []);
-
-  // Body 滚动锁定 - 使用 overflow 方式避免布局问题
-  useEffect(() => {
-    if (isOpen) {
-      const body = document.body;
-      const html = document.documentElement;
-
-      // 保存原始样式
-      const originalBodyOverflow = body.style.overflow;
-      const originalHtmlOverflow = html.style.overflow;
-
-      // 只设置 overflow 来阻止滚动
-      body.style.overflow = 'hidden';
-      html.style.overflow = 'hidden';
-
-      return () => {
-        // 恢复所有原始样式
-        body.style.overflow = originalBodyOverflow;
-        html.style.overflow = originalHtmlOverflow;
-      };
-    }
-  }, [isOpen]);
-
-  // 获取远程变更日志
-  useEffect(() => {
-    if (isOpen) {
-      fetchRemoteChangelog();
-    }
-  }, [isOpen]);
-
-  // 获取远程变更日志
-  const fetchRemoteChangelog = async () => {
-    try {
-      const response = await fetch(
-        'https://raw.githubusercontent.com/MoonTechLab/LunaTV/main/CHANGELOG'
-      );
-      if (response.ok) {
-        const content = await response.text();
-        const parsed = parseChangelog(content);
-        setRemoteChangelog(parsed);
-
-        // 检查是否有更新
-        if (parsed.length > 0) {
-          const latest = parsed[0];
-          setLatestVersion(latest.version);
-          setIsHasUpdate(
-            compareVersions(latest.version) === UpdateStatus.HAS_UPDATE
-          );
-        }
-      } else {
-        console.error(
-          '获取远程变更日志失败:',
-          response.status,
-          response.statusText
-        );
-      }
-    } catch (error) {
-      console.error('获取远程变更日志失败:', error);
-    }
-  };
 
   // 解析变更日志格式
   const parseChangelog = (content: string): RemoteChangelogEntry[] => {
@@ -176,6 +110,74 @@ export const VersionPanel: React.FC<VersionPanelProps> = ({
     return versions;
   };
 
+  // 获取远程变更日志
+  const fetchRemoteChangelog = async () => {
+    try {
+      const response = await fetch(
+        'https://raw.githubusercontent.com/MoonTechLab/LunaTV/main/CHANGELOG'
+      );
+      if (response.ok) {
+        const content = await response.text();
+        const parsed = parseChangelog(content);
+        setRemoteChangelog(parsed);
+
+        // 检查是否有更新
+        if (parsed.length > 0) {
+          const latest = parsed[0];
+          setLatestVersion(latest.version);
+          setIsHasUpdate(
+            compareVersions(latest.version) === UpdateStatus.HAS_UPDATE
+          );
+        }
+      } else {
+        console.error(
+          '获取远程变更日志失败:',
+          response.status,
+          response.statusText
+        );
+      }
+    } catch (error) {
+      console.error('获取远程变更日志失败:', error);
+    }
+  };
+
+  // 确保组件已挂载
+  useEffect(() => {
+     
+    setMounted(true);
+    return () => setMounted(false);
+  }, []);
+
+  // Body 滚动锁定 - 使用 overflow 方式避免布局问题
+  useEffect(() => {
+    if (isOpen) {
+      const body = document.body;
+      const html = document.documentElement;
+
+      // 保存原始样式
+      const originalBodyOverflow = body.style.overflow;
+      const originalHtmlOverflow = html.style.overflow;
+
+      // 只设置 overflow 来阻止滚动
+      body.style.overflow = 'hidden';
+      html.style.overflow = 'hidden';
+
+      return () => {
+        // 恢复所有原始样式
+        body.style.overflow = originalBodyOverflow;
+        html.style.overflow = originalHtmlOverflow;
+      };
+    }
+  }, [isOpen]);
+
+  // 获取远程变更日志
+  useEffect(() => {
+    if (isOpen) {
+       
+      fetchRemoteChangelog();
+    }
+  }, [isOpen]);
+
   // 渲染变更日志条目
   const renderChangelogEntry = (
     entry: ChangelogEntry | RemoteChangelogEntry,
@@ -231,7 +233,7 @@ export const VersionPanel: React.FC<VersionPanelProps> = ({
                     key={index}
                     className='text-sm text-gray-700 dark:text-gray-300 flex items-start gap-2'
                   >
-                    <span className='w-1.5 h-1.5 bg-green-500 rounded-full mt-2 flex-shrink-0'></span>
+                    <span className='w-1.5 h-1.5 bg-green-500 rounded-full mt-2 shrink-0'></span>
                     {item}
                   </li>
                 ))}
@@ -251,7 +253,7 @@ export const VersionPanel: React.FC<VersionPanelProps> = ({
                     key={index}
                     className='text-sm text-gray-700 dark:text-gray-300 flex items-start gap-2'
                   >
-                    <span className='w-1.5 h-1.5 bg-blue-500 rounded-full mt-2 flex-shrink-0'></span>
+                    <span className='w-1.5 h-1.5 bg-blue-500 rounded-full mt-2 shrink-0'></span>
                     {item}
                   </li>
                 ))}
@@ -271,7 +273,7 @@ export const VersionPanel: React.FC<VersionPanelProps> = ({
                     key={index}
                     className='text-sm text-gray-700 dark:text-gray-300 flex items-start gap-2'
                   >
-                    <span className='w-1.5 h-1.5 bg-purple-500 rounded-full mt-2 flex-shrink-0'></span>
+                    <span className='w-1.5 h-1.5 bg-purple-500 rounded-full mt-2 shrink-0'></span>
                     {item}
                   </li>
                 ))}
@@ -288,7 +290,7 @@ export const VersionPanel: React.FC<VersionPanelProps> = ({
     <>
       {/* 背景遮罩 */}
       <div
-        className='fixed inset-0 bg-black/50 backdrop-blur-sm z-[1000]'
+        className='fixed inset-0 bg-black/50 backdrop-blur-sm z-1000'
         onClick={onClose}
         onTouchMove={(e) => {
           // 只阻止滚动，允许其他触摸事件
@@ -305,7 +307,7 @@ export const VersionPanel: React.FC<VersionPanelProps> = ({
 
       {/* 版本面板 */}
       <div
-        className='fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-xl max-h-[90vh] bg-white dark:bg-gray-900 rounded-xl shadow-xl z-[1001] overflow-hidden'
+        className='fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-xl max-h-[90vh] bg-white dark:bg-gray-900 rounded-xl shadow-xl z-1001 overflow-hidden'
         onTouchMove={(e) => {
           // 允许版本面板内部滚动，阻止事件冒泡到外层
           e.stopPropagation();
@@ -347,10 +349,10 @@ export const VersionPanel: React.FC<VersionPanelProps> = ({
           <div className='space-y-3 sm:space-y-6'>
             {/* 远程更新信息 */}
             {hasUpdate && (
-              <div className='bg-gradient-to-r from-yellow-50 to-amber-50 dark:from-yellow-900/20 dark:to-amber-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-3 sm:p-4'>
+              <div className='bg-linear-to-r from-yellow-50 to-amber-50 dark:from-yellow-900/20 dark:to-amber-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-3 sm:p-4'>
                 <div className='flex flex-col gap-3'>
                   <div className='flex items-center gap-2 sm:gap-3'>
-                    <div className='w-8 h-8 sm:w-10 sm:h-10 bg-yellow-100 dark:bg-yellow-800/40 rounded-full flex items-center justify-center flex-shrink-0'>
+                    <div className='w-8 h-8 sm:w-10 sm:h-10 bg-yellow-100 dark:bg-yellow-800/40 rounded-full flex items-center justify-center shrink-0'>
                       <Download className='w-4 h-4 sm:w-5 sm:h-5 text-yellow-600 dark:text-yellow-400' />
                     </div>
                     <div className='min-w-0 flex-1'>
@@ -377,10 +379,10 @@ export const VersionPanel: React.FC<VersionPanelProps> = ({
 
             {/* 当前为最新版本信息 */}
             {!hasUpdate && (
-              <div className='bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 border border-green-200 dark:border-green-800 rounded-lg p-3 sm:p-4'>
+              <div className='bg-linear-to-r from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 border border-green-200 dark:border-green-800 rounded-lg p-3 sm:p-4'>
                 <div className='flex flex-col gap-3'>
                   <div className='flex items-center gap-2 sm:gap-3'>
-                    <div className='w-8 h-8 sm:w-10 sm:h-10 bg-green-100 dark:bg-green-800/40 rounded-full flex items-center justify-center flex-shrink-0'>
+                    <div className='w-8 h-8 sm:w-10 sm:h-10 bg-green-100 dark:bg-green-800/40 rounded-full flex items-center justify-center shrink-0'>
                       <CheckCircle className='w-4 h-4 sm:w-5 sm:h-5 text-green-600 dark:text-green-400' />
                     </div>
                     <div className='min-w-0 flex-1'>
@@ -477,7 +479,7 @@ export const VersionPanel: React.FC<VersionPanelProps> = ({
                                     key={itemIndex}
                                     className='text-sm text-gray-700 dark:text-gray-300 flex items-start gap-2'
                                   >
-                                    <span className='w-1.5 h-1.5 bg-green-400 rounded-full mt-2 flex-shrink-0'></span>
+                                    <span className='w-1.5 h-1.5 bg-green-400 rounded-full mt-2 shrink-0'></span>
                                     {item}
                                   </li>
                                 ))}
@@ -497,7 +499,7 @@ export const VersionPanel: React.FC<VersionPanelProps> = ({
                                     key={itemIndex}
                                     className='text-sm text-gray-700 dark:text-gray-300 flex items-start gap-2'
                                   >
-                                    <span className='w-1.5 h-1.5 bg-blue-400 rounded-full mt-2 flex-shrink-0'></span>
+                                    <span className='w-1.5 h-1.5 bg-blue-400 rounded-full mt-2 shrink-0'></span>
                                     {item}
                                   </li>
                                 ))}
@@ -517,7 +519,7 @@ export const VersionPanel: React.FC<VersionPanelProps> = ({
                                     key={itemIndex}
                                     className='text-sm text-gray-700 dark:text-gray-300 flex items-start gap-2'
                                   >
-                                    <span className='w-1.5 h-1.5 bg-purple-500 rounded-full mt-2 flex-shrink-0'></span>
+                                    <span className='w-1.5 h-1.5 bg-purple-500 rounded-full mt-2 shrink-0'></span>
                                     {item}
                                   </li>
                                 ))}

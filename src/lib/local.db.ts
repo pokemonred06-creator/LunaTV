@@ -1,4 +1,4 @@
-/* eslint-disable no-console, @typescript-eslint/no-explicit-any */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import fs from 'fs';
 import path from 'path';
 
@@ -38,7 +38,9 @@ export class FileStorage implements IStorage {
 
   private save() {
     try {
-      fs.writeFileSync(DB_FILE, JSON.stringify(this.data, null, 2));
+      const tempFile = `${DB_FILE}.tmp`;
+      fs.writeFileSync(tempFile, JSON.stringify(this.data, null, 2));
+      fs.renameSync(tempFile, DB_FILE);
     } catch (error) {
       console.error('Failed to save local database:', error);
     }

@@ -1,4 +1,4 @@
-/* eslint-disable react-hooks/exhaustive-deps, @typescript-eslint/no-explicit-any,@typescript-eslint/no-non-null-assertion,no-empty */
+/* eslint-disable react-hooks/exhaustive-deps, @typescript-eslint/no-explicit-any,no-empty */
 'use client';
 
 import { ChevronUp, Search, X } from 'lucide-react';
@@ -337,7 +337,9 @@ function SearchPageClient() {
 
   useEffect(() => {
     // 无搜索参数时聚焦搜索框
-    !searchParams.get('q') && document.getElementById('searchInput')?.focus();
+    if (!searchParams.get('q')) {
+      document.getElementById('searchInput')?.focus();
+    }
 
     // 初始加载搜索历史
     getSearchHistory().then(setSearchHistory);
@@ -421,6 +423,8 @@ function SearchPageClient() {
         clearTimeout(flushTimerRef.current);
         flushTimerRef.current = null;
       }
+      groupRefs.current.clear();
+      groupStatsRef.current.clear();
       setIsLoading(true);
       setShowResults(true);
 

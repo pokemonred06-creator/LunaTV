@@ -1,4 +1,3 @@
-// eslint-disable-next-line @typescript-eslint/no-var-requires
 const nextJest = require('next/jest');
 
 const createJestConfig = nextJest({
@@ -13,6 +12,12 @@ const customJestConfig = {
 
   // if using TypeScript with a baseUrl set to the root directory then you need the below for alias' to work
   moduleDirectories: ['node_modules', '<rootDir>/'],
+
+  // Ignore build outputs to avoid haste map collisions with generated package.json files
+  modulePathIgnorePatterns: ['<rootDir>/.next/'],
+
+  // Allow CI to succeed even when the project has no explicit test files yet
+  passWithNoTests: true,
 
   testEnvironment: 'jest-environment-jsdom',
 

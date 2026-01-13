@@ -1,8 +1,9 @@
 /** @type {import('next').NextConfig} */
-/* eslint-disable @typescript-eslint/no-var-requires */
 
 const nextConfig = {
   output: 'standalone',
+  // Pin tracing root to the project to avoid monorepo lockfile warnings
+  outputFileTracingRoot: __dirname,
   // eslint: {
   //   dirs: ['src'],
   // },

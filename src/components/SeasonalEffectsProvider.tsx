@@ -1,8 +1,9 @@
 'use client';
 
-import { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
-import SeasonalEffects from './SeasonalEffects';
+import { createContext, ReactNode, useCallback,useContext, useEffect, useState } from 'react';
+
 import type { Season } from './SeasonalEffects';
+import SeasonalEffects from './SeasonalEffects';
 
 type Intensity = 'light' | 'normal' | 'heavy';
 

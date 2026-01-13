@@ -174,19 +174,20 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
   }, [precomputedVideoInfo]);
 
   // 读取本地"优选和测速"开关，默认开启
-  const [optimizationEnabled] = useState<boolean>(() => {
+  const [optimizationEnabled, setOptimizationEnabled] = useState<boolean>(true);
+  
+  useEffect(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('enableOptimization');
       if (saved !== null) {
         try {
-          return JSON.parse(saved);
+          setOptimizationEnabled(JSON.parse(saved));
         } catch {
           /* ignore */
         }
       }
     }
-    return true;
-  });
+  }, []);
 
   // 当切换到换源tab并且有源数据时，异步获取视频信息 - 移除 attemptedSources 依赖避免循环触发
   useEffect(() => {

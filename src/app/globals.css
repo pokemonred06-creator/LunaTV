@@ -223,9 +223,167 @@ div[data-media-provider] video {
 .art-bottom,
 .art-controls {
   touch-action: manipulation !important;
+  z-index: 100 !important; /* Force controls above custom layers */
+  -webkit-touch-callout: none !important;
+}
+
+.art-layer-touch-control {
+  z-index: 10 !important; /* Lower than controls */
+}
+
+/* Ensure controls stay on top in full screen */
+.art-fullscreen .art-bottom,
+.art-fullscreen .art-controls,
+.art-fullscreen-web .art-bottom,
+.art-fullscreen-web .art-controls {
+  z-index: 100 !important;
 }
 
 .art-control-progress {
   touch-action: none !important;
   -webkit-touch-callout: none !important;
+}
+
+/* =====================================================
+   Two-Level Fullscreen Styles
+   ===================================================== */
+
+/* Hide all other content when player is in player-level fullscreen */
+body.player-fullscreen-active {
+  overflow: hidden !important;
+}
+
+/* Player-level fullscreen container */
+.player-level-fullscreen {
+  /* Styles are applied inline via JavaScript for dynamic viewport sizing */
+  /* This class is used for additional styling hooks */
+  pointer-events: auto !important;
+}
+
+/* Force video and canvas (CAS plugin) to fill container in CSS fullscreen mode */
+.player-level-fullscreen video,
+.player-level-fullscreen canvas {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: contain !important;
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  max-width: none !important;
+  max-height: none !important;
+  z-index: 0 !important; /* Base layer */
+  opacity: 1 !important; /* Override CAS plugin's opacity: 0 */
+  visibility: visible !important;
+  transform: none !important; /* Prevent double rotation on video element */
+}
+.player-level-fullscreen canvas {
+  display: none !important; /* Force hide canvas via CSS too */
+}
+.player-level-fullscreen .art-video-player {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* Ensure controls remain visible and functional in player-level fullscreen */
+/* Ensure controls and interactive layers are ON TOP */
+.player-level-fullscreen .art-bottom,
+.player-level-fullscreen .art-top,
+.player-level-fullscreen .art-controls,
+.player-level-fullscreen .art-control,
+.player-level-fullscreen .art-bottom *,
+.player-level-fullscreen .art-contextmenu {
+  z-index: 2147483647 !important; /* Highest Priority: UI Controls */
+  pointer-events: auto !important;
+}
+
+.player-level-fullscreen .art-layer-side-fullscreen {
+  z-index: 2147483647 !important;
+  pointer-events: auto !important;
+}
+
+/* Ensure ALL player interactive elements can receive touch/click events */
+.player-level-fullscreen .art-video-player,
+.player-level-fullscreen video,
+.player-level-fullscreen .art-mask,
+.player-level-fullscreen .art-layer,
+.player-level-fullscreen .art-state,
+.player-level-fullscreen .art-progress,
+.player-level-fullscreen .art-progress-hover,
+.player-level-fullscreen .art-subtitle,
+.player-level-fullscreen .art-danmaku {
+  pointer-events: auto !important;
+}
+
+/* Art mask is critical for tap-to-toggle controls */
+.player-level-fullscreen .art-mask {
+  z-index: 50 !important;
+  pointer-events: auto !important;
+}
+
+/* Custom fullscreen button indicator for different levels */
+.art-icon-fullscreen-custom {
+  cursor: pointer;
+  transition: transform 0.2s ease;
+}
+
+.art-icon-fullscreen-custom:hover {
+  transform: scale(1.1);
+}
+
+/* Level 1 indicator - add a small badge or change color */
+.player-level-fullscreen .art-icon-fullscreen-custom svg path {
+  fill: #22c55e; /* Green to indicate level 1 active */
+}
+
+/* =====================================================
+   Mobile Fullscreen Button Styles
+   ===================================================== */
+
+/* Mobile fullscreen button layer */
+.art-layer-mobile-fullscreen {
+  pointer-events: auto !important;
+}
+
+/* Hide mobile fullscreen button on desktop */
+@media (min-width: 1024px) {
+  .art-layer-mobile-fullscreen {
+    display: none !important;
+  }
+}
+
+/* Mobile fullscreen button styling */
+.mobile-fullscreen-btn {
+  pointer-events: auto !important;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mobile-fullscreen-btn:active {
+  transform: scale(0.95);
+  background: rgba(34, 197, 94, 0.7) !important;
+}
+
+/* Change icon color when in player-level fullscreen */
+.player-level-fullscreen .mobile-fullscreen-btn svg path {
+  fill: #22c55e;
+}
+
+/* Show exit icon when in fullscreen */
+.player-level-fullscreen .mobile-fullscreen-btn::after {
+  content: '1';
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 14px;
+  height: 14px;
+  background: #22c55e;
+  border-radius: 50%;
+  font-size: 10px;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
 }

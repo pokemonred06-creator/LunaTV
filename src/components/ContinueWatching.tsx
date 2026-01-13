@@ -1,4 +1,4 @@
-/* eslint-disable no-console */
+ 
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -10,9 +10,9 @@ import {
   subscribeToDataUpdates,
 } from '@/lib/db.client';
 
+import { useLanguage } from '@/components/LanguageProvider';
 import ScrollableRow from '@/components/ScrollableRow';
 import VideoCard from '@/components/VideoCard';
-import { useLanguage } from '@/components/LanguageProvider';
 
 interface ContinueWatchingProps {
   className?: string;

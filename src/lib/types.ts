@@ -86,8 +86,8 @@ export interface IStorage {
   clearAllData(): Promise<void>;
 
   // 通用缓存
-  get(key: string): Promise<any>;
-  set(key: string, value: any, ttl?: number): Promise<void>;
+  get(key: string): Promise<unknown>;
+  set(key: string, value: unknown, ttl?: number): Promise<void>;
 }
 
 // 搜索结果数据结构

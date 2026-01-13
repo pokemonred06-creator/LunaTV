@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState, memo, useCallback } from 'react';
 import { usePathname } from 'next/navigation';
+import { memo, useCallback,useEffect, useRef, useState } from 'react';
 
 export type Season = 'spring' | 'summer' | 'autumn' | 'winter' | 'auto' | 'off';
 type ActiveSeason = 'spring' | 'summer' | 'autumn' | 'winter';
@@ -199,7 +199,7 @@ const SeasonalEffects: React.FC<SeasonalEffectsProps> = memo(({
 
   // Create and inject CSS keyframes
   useEffect(() => {
-    const shouldDisable = !enabled || prefersReducedMotion || resolvedSeason === 'off' || !config || (isPlayPage && isVideoPlaying);
+    const shouldDisable = !enabled || prefersReducedMotion || resolvedSeason === 'off' || !config || isPlayPage;
     
     if (shouldDisable) {
       setParticles([]);

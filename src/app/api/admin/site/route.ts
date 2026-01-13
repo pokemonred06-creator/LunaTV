@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getConfig, setCachedConfig, configSelfCheck } from '@/lib/config';
-import { db } from '@/lib/db';
+
 import { SiteConfig } from '@/lib/admin.types';
+import { configSelfCheck,getConfig, setCachedConfig } from '@/lib/config';
+import { db } from '@/lib/db';
 
 export async function POST(request: NextRequest) {
   try {
@@ -27,6 +28,7 @@ export async function POST(request: NextRequest) {
       ImageCacheTTL: currentConfig.SiteConfig.ImageCacheTTL,
       // Seasonal Effects (admin-controlled)
       SeasonalEffects: body.SeasonalEffects !== undefined ? body.SeasonalEffects : currentConfig.SiteConfig.SeasonalEffects,
+      DebugLogs: body.DebugLogs !== undefined ? body.DebugLogs : currentConfig.SiteConfig.DebugLogs,
     };
 
     currentConfig.SiteConfig = newSiteConfig;

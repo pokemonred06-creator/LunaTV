@@ -1,9 +1,11 @@
+/* eslint-disable react-hooks/exhaustive-deps, @typescript-eslint/no-explicit-any */
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
-import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { AdminConfig, SiteConfig, User, ApiSite, LiveCfg, CustomCategory } from '@/lib/admin.types';
+import { useRouter } from 'next/navigation';
+import { useEffect,useState } from 'react';
+
+import { AdminConfig, ApiSite, CustomCategory,LiveCfg, SiteConfig, User } from '@/lib/admin.types';
 
 import { useLanguage } from '@/components/LanguageProvider';
 
@@ -355,6 +357,15 @@ export default function AdminPage() {
                       className="rounded text-blue-600 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600"
                     />
                     <span className="text-sm text-gray-700 dark:text-gray-300">{convert('启用流式搜索')}</span>
+                  </label>
+                  <label className="flex items-center space-x-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={config.SiteConfig?.DebugLogs || false}
+                      onChange={(e) => handleSiteConfigChange('DebugLogs', e.target.checked)}
+                      className="rounded text-blue-600 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600"
+                    />
+                    <span className="text-sm text-gray-700 dark:text-gray-300">{convert('启用播放器调试日志')}</span>
                   </label>
                 </div>
               </div>

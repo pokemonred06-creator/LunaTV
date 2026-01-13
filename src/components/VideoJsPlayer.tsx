@@ -1,704 +1,1082 @@
+/**
+ * VideoJsPlayer.tsx
+ * 
+ * A fully custom video player component built on top of Video.js.
+ * Features:
+ * - Custom React-based UI controls (replaces Video.js native controls)
+ * - Unified 44px button sizing for consistent touch targets
+ * - CAS (Contrast Adaptive Sharpening) WebGL shader for video enhancement
+ * - Swipe-to-seek gesture support with visual feedback
+ * - Rotated fullscreen mode for mobile devices
+ * - AirPlay support for Apple devices
+ * - Persistent playback speed and enhancement settings per series
+ * - HLS streaming with optional custom loader for ad filtering
+ * 
+ * @author LunaTV Team
+ * @version 2.0.0
+ */
+
 'use client';
 
 import Hls from 'hls.js';
+import type { MutableRefObject,RefObject } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import videojs from 'video.js';
 import Player from 'video.js/dist/types/player';
+import 'videojs-hotkeys';
+import 'videojs-mobile-ui';
 
+import 'videojs-mobile-ui/dist/videojs-mobile-ui.css';
 import 'video.js/dist/video-js.css';
 
+// ============================================================================
+// TYPES
+// ============================================================================
+
+/**
+ * Props for the VideoJsPlayer component
+ */
 interface VideoJsPlayerProps {
+  /** Video source URL (supports HLS .m3u8 and direct video files) */
   url: string;
+  /** Poster image URL shown before playback */
   poster?: string;
+  /** Auto-start playback when ready */
   autoPlay?: boolean;
+  /** Callback when player is ready */
   onReady?: (player: Player) => void;
+  /** Callback on time update with current time and duration */
   onTimeUpdate?: (currentTime: number, duration: number) => void;
+  /** Callback when video ends */
   onEnded?: () => void;
+  /** Callback on playback error */
   onError?: (error: unknown) => void;
+  /** Callback when playback starts */
   onPlay?: () => void;
+  /** Callback when playback pauses */
   onPause?: () => void;
+  /** Callback to navigate to next episode */
   onNextEpisode?: () => void;
+  /** Whether a next episode is available */
   hasNextEpisode?: boolean;
+  /** Time in seconds to skip intro to */
   skipIntroTime?: number;
+  /** Seconds before end to trigger onEnded */
   skipOutroTime?: number;
+  /** Enable auto skip intro/outro */
   enableSkip?: boolean;
+  /** Custom HLS.js loader for ad filtering */
   customHlsLoader?: typeof Hls.DefaultConfig.loader;
+  /** Additional CSS class for container */
   className?: string;
+  /** Enable debug logging */
   debug?: boolean;
-  seriesId?: string; 
+  /** Series ID for storing per-series settings */
+  seriesId?: string;
 }
 
+// ============================================================================
+// ICONS
+// All icons use consistent 24x24 viewBox for uniform sizing
+// ============================================================================
+
+const Icons = {
+  play: (
+    <svg viewBox="0 0 24 24" fill="currentColor" className="icon">
+      <path d="M8 5v14l11-7z" />
+    </svg>
+  ),
+  pause: (
+    <svg viewBox="0 0 24 24" fill="currentColor" className="icon">
+      <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
+    </svg>
+  ),
+  next: (
+    <svg viewBox="0 0 24 24" fill="currentColor" className="icon">
+      <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
+    </svg>
+  ),
+  fullscreen: (
+    <svg viewBox="0 0 24 24" fill="currentColor" className="icon">
+      <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z" />
+    </svg>
+  ),
+  exitFullscreen: (
+    <svg viewBox="0 0 24 24" fill="currentColor" className="icon">
+      <path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z" />
+    </svg>
+  ),
+  settings: (
+    <svg viewBox="0 0 24 24" fill="currentColor" className="icon">
+      <path d="M19.14 12.94c.04-.31.06-.63.06-.94 0-.31-.02-.63-.06-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z" />
+    </svg>
+  ),
+  airplay: (
+    <svg viewBox="0 0 24 24" fill="currentColor" className="icon">
+      <path d="M6 22h12l-6-6-6 6zM21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h4v-2H3V5h18v12h-4v2h4c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z" />
+    </svg>
+  ),
+};
+
+// ============================================================================
+// HOOKS
+// ============================================================================
+
+/**
+ * CAS (Contrast Adaptive Sharpening) Shader Hook
+ * 
+ * Applies real-time video enhancement using WebGL:
+ * - Sharpening filter for improved clarity
+ * - Slight saturation boost (1.15x)
+ * - Slight contrast boost (1.05x)
+ * 
+ * The shader renders to a canvas overlay on top of the video element,
+ * hiding the original video when active.
+ * 
+ * @param playerReady - Whether the Video.js player is ready
+ * @param casEnabled - Whether CAS enhancement is enabled
+ * @param containerRef - Ref to the player container element
+ * @param debug - Enable debug logging
+ */
+const useCasShader = (
+  playerReady: boolean,
+  casEnabled: boolean,
+  containerRef: RefObject<HTMLDivElement | null>,
+  debug: boolean = false
+) => {
+  const animationFrameRef = useRef<number | undefined>(undefined);
+
+  useEffect(() => {
+    if (!playerReady || !casEnabled) return;
+    
+    // Find the video element
+    const tech = containerRef.current?.querySelector('.vjs-tech') as HTMLVideoElement;
+    if (!tech || tech.getAttribute('data-cas-active') === 'true') return;
+
+    // Create canvas overlay for WebGL rendering
+    const canvas = document.createElement('canvas');
+    canvas.id = 'cas-canvas';
+    Object.assign(canvas.style, {
+      position: 'absolute', top: '0', left: '0', width: '100%', height: '100%',
+      pointerEvents: 'none', zIndex: '0', objectFit: 'contain'
+    });
+    tech.parentElement?.insertBefore(canvas, tech.nextSibling);
+
+    // Initialize WebGL context
+    const gl = canvas.getContext('webgl', { alpha: false, preserveDrawingBuffer: false, antialias: false });
+    if (!gl) { canvas.remove(); tech.style.opacity = '1'; return; }
+
+    // Vertex shader - simple passthrough with texture coordinate flip
+    const vs = `attribute vec2 position; varying vec2 v_texCoord; void main() { gl_Position = vec4(position,0,1); v_texCoord = position*0.5+0.5; v_texCoord.y=1.0-v_texCoord.y; }`;
+    
+    // Fragment shader - CAS algorithm with saturation/contrast boost
+    const fs = `precision mediump float; varying vec2 v_texCoord; uniform sampler2D u_image; uniform vec2 u_resolution; uniform float u_sharpness;
+      void main() {
+        vec2 tex = 1.0 / u_resolution; vec3 e = texture2D(u_image, v_texCoord).rgb;
+        vec3 a = texture2D(u_image, v_texCoord + vec2(0.0, -tex.y)).rgb;
+        vec3 c = texture2D(u_image, v_texCoord + vec2(-tex.x, 0.0)).rgb;
+        vec3 g = texture2D(u_image, v_texCoord + vec2(tex.x, 0.0)).rgb;
+        vec3 i = texture2D(u_image, v_texCoord + vec2(0.0, tex.y)).rgb;
+        float w = -1.0 / mix(8.0, 5.0, clamp(u_sharpness, 0.0, 1.0));
+        vec3 res = (a + c + g + i) * w + e; float div = 1.0 + 4.0 * w; vec3 final = res / div;
+        vec3 mn = min(min(min(a, c), g), i); vec3 mx = max(max(max(a, c), g), i);
+        final = clamp(final, min(mn, e), max(mx, e));
+        float lum = dot(final, vec3(0.2126, 0.7152, 0.0722));
+        gl_FragColor = vec4((mix(vec3(lum), final, 1.15) - 0.5) * 1.05 + 0.5, 1.0);
+      }`;
+
+    // Compile shader helper
+    const createShader = (type: number, src: string) => {
+      const s = gl.createShader(type); if (!s) return null;
+      gl.shaderSource(s, src); gl.compileShader(s);
+      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) { gl.deleteShader(s); return null; }
+      return s;
+    };
+
+    // Create and link shader program
+    const program = gl.createProgram();
+    const vsS = createShader(gl.VERTEX_SHADER, vs);
+    const fsS = createShader(gl.FRAGMENT_SHADER, fs);
+    if (!program || !vsS || !fsS) { canvas.remove(); tech.style.opacity = '1'; return; }
+
+    gl.attachShader(program, vsS); gl.attachShader(program, fsS); gl.linkProgram(program);
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) { canvas.remove(); tech.style.opacity = '1'; return; }
+
+    gl.useProgram(program);
+    
+    // Set up vertex buffer for fullscreen quad
+    const buffer = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, -1,1, 1,-1, 1,1]), gl.STATIC_DRAW);
+    const posLoc = gl.getAttribLocation(program, 'position');
+    gl.enableVertexAttribArray(posLoc); gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+
+    // Set up video texture
+    const texture = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
+    // Mark as active and hide original video
+    tech.setAttribute('data-cas-active', 'true'); 
+    tech.style.opacity = '0';
+
+    // Render loop - uploads video frame to texture and draws enhanced version
+    const render = () => {
+      if (!tech.videoWidth) { animationFrameRef.current = requestAnimationFrame(render); return; }
+      
+      // Resize canvas to match video resolution
+      if (canvas.width !== tech.videoWidth || canvas.height !== tech.videoHeight) {
+        canvas.width = tech.videoWidth; canvas.height = tech.videoHeight;
+        gl.viewport(0, 0, canvas.width, canvas.height);
+      }
+      
+      // Upload current video frame
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, tech);
+      
+      // Set shader uniforms
+      const resLoc = gl.getUniformLocation(program, 'u_resolution');
+      const sharpLoc = gl.getUniformLocation(program, 'u_sharpness');
+      if (resLoc) gl.uniform2f(resLoc, canvas.width, canvas.height);
+      if (sharpLoc) gl.uniform1f(sharpLoc, 0.6); // Sharpness intensity
+      
+      // Draw
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+      animationFrameRef.current = requestAnimationFrame(render);
+    };
+    render();
+
+    // Cleanup on unmount or disable
+    return () => {
+      if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+      gl.deleteTexture(texture); gl.deleteBuffer(buffer);
+      gl.detachShader(program, vsS); gl.deleteShader(vsS);
+      gl.detachShader(program, fsS); gl.deleteShader(fsS);
+      gl.deleteProgram(program); canvas.remove();
+      tech.style.opacity = '1'; tech.removeAttribute('data-cas-active');
+    };
+  }, [playerReady, casEnabled, containerRef, debug]);
+};
+
+/**
+ * Touch/Mouse Gesture Hook for Swipe-to-Seek
+ * 
+ * Handles horizontal swipe gestures on the video surface to seek:
+ * - Detects swipe direction (horizontal = seek, vertical = cancel)
+ * - Shows seek overlay with current seek position
+ * - Pauses video during seek, resumes on release
+ * - Adapts to rotated fullscreen mode (swaps axes)
+ * 
+ * @param containerRef - Ref to the player container
+ * @param playerRef - Ref to the Video.js player instance
+ * @param setSeekingTime - State setter for seek overlay display
+ */
+const usePlayerGestures = (
+  containerRef: RefObject<HTMLDivElement | null>,
+  playerRef: MutableRefObject<Player | null>,
+  setSeekingTime: (time: number | null) => void
+) => {
+  // Gesture state tracked in ref to avoid re-renders
+  const gestureRef = useRef({ 
+    startX: 0, 
+    startY: 0, 
+    startVideoTime: 0, 
+    isSeeking: false, 
+    wasPlaying: false, 
+    active: false, 
+    currentSeekTime: 0 
+  });
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    // Helper to extract position from touch or mouse event
+    const getPos = (e: TouchEvent | MouseEvent) => {
+      const touch = 'touches' in e ? (e.touches[0] || e.changedTouches?.[0]) : null;
+      return touch ? { x: touch.clientX, y: touch.clientY } : ('clientX' in e ? { x: e.clientX, y: e.clientY } : null);
+    };
+
+    // Start gesture - record initial position and video state
+    const handleStart = (e: TouchEvent | MouseEvent) => {
+      const target = e.target as HTMLElement;
+      // Don't interfere with control buttons
+      if (!container.contains(target) || target.closest('.player-controls, button')) return;
+      const pos = getPos(e); if (!pos) return;
+      const g = gestureRef.current;
+      g.startX = pos.x; g.startY = pos.y;
+      g.startVideoTime = playerRef.current?.currentTime() || 0;
+      g.wasPlaying = playerRef.current ? !playerRef.current.paused() : false;
+      g.isSeeking = false; g.active = true; g.currentSeekTime = g.startVideoTime;
+    };
+
+    // Move gesture - detect direction and update seek position
+    const handleMove = (e: TouchEvent | MouseEvent) => {
+      const g = gestureRef.current; if (!g.active) return;
+      const pos = getPos(e); if (!pos) return;
+      const dx = pos.x - g.startX, dy = pos.y - g.startY;
+      const isRotated = container.classList.contains('videojs-rotated-fullscreen');
+
+      // Threshold detection - determine if horizontal or vertical swipe
+      if (!g.isSeeking && (Math.abs(dx) > 10 || Math.abs(dy) > 10)) {
+        const isHorizontal = Math.abs(dx) > Math.abs(dy);
+        // In rotated mode, vertical becomes the seek direction
+        if (isRotated ? !isHorizontal : isHorizontal) { 
+          g.isSeeking = true; 
+          if (g.wasPlaying) playerRef.current?.pause(); 
+        } else { 
+          g.active = false; 
+        }
+      }
+
+      // Calculate new seek position
+      if (g.isSeeking) {
+        if (e.cancelable) e.preventDefault(); // Prevent scroll
+        const duration = playerRef.current?.duration() || 0, width = container.clientWidth || 1;
+        if (duration > 0) {
+          const delta = isRotated ? dy : dx;
+          // Seek sensitivity: 80% of duration across screen width
+          g.currentSeekTime = Math.max(0, Math.min(duration, g.startVideoTime + delta * (duration / width) * 0.8));
+          setSeekingTime(g.currentSeekTime);
+        }
+      }
+    };
+
+    // End gesture - apply seek and resume if needed
+    const handleEnd = () => {
+      const g = gestureRef.current;
+      if (g.isSeeking) { 
+        playerRef.current?.currentTime(g.currentSeekTime); 
+        setSeekingTime(null); 
+        if (g.wasPlaying) playerRef.current?.play(); 
+      }
+      g.active = false; g.isSeeking = false;
+    };
+
+    // Register event listeners
+    container.addEventListener('mousedown', handleStart);
+    container.addEventListener('touchstart', handleStart, { passive: true });
+    container.addEventListener('mousemove', handleMove);
+    container.addEventListener('touchmove', handleMove, { passive: false });
+    container.addEventListener('mouseup', handleEnd);
+    container.addEventListener('touchend', handleEnd);
+    
+    return () => {
+      container.removeEventListener('mousedown', handleStart);
+      container.removeEventListener('touchstart', handleStart);
+      container.removeEventListener('mousemove', handleMove);
+      container.removeEventListener('touchmove', handleMove);
+      container.removeEventListener('mouseup', handleEnd);
+      container.removeEventListener('touchend', handleEnd);
+    };
+  }, [containerRef, playerRef, setSeekingTime]);
+};
+
+// ============================================================================
+// MAIN COMPONENT
+// ============================================================================
+
 export default function VideoJsPlayer({
-  url,
-  poster,
-  autoPlay = true,
-  onReady,
-  onTimeUpdate,
-  onEnded,
-  onError,
-  onPlay,
+  url, 
+  poster, 
+  autoPlay = true, 
+  onReady, 
+  onTimeUpdate, 
+  onEnded, 
+  onError, 
+  onPlay, 
   onPause,
-  onNextEpisode,
-  hasNextEpisode = false,
-  skipIntroTime = 0,
-  skipOutroTime = 0,
+  onNextEpisode, 
+  hasNextEpisode = false, 
+  skipIntroTime = 0, 
+  skipOutroTime = 0, 
   enableSkip = false,
-  customHlsLoader,
-  className = '',
-  debug = false,
+  customHlsLoader, 
+  className = '', 
+  debug = false, 
   seriesId = 'global',
 }: VideoJsPlayerProps) {
+  
+  // ========== REFS ==========
   const containerRef = useRef<HTMLDivElement>(null);
   const videoWrapperRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<Player | null>(null);
   const hlsRef = useRef<Hls | null>(null);
-  const animationFrameRef = useRef<number | undefined>(undefined);
-  
-  // Core State
-  const [fullscreenLevel, setFullscreenLevel] = useState<0 | 1 | 2>(0);
-  const fullscreenLevelRef = useRef<0 | 1 | 2>(0);
+  const hasSkippedIntroRef = useRef(false);
+  const callbacksRef = useRef({ onReady, onTimeUpdate, onEnded, onError, onPlay, onPause });
+
+  // ========== STATE ==========
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(true);
   const [playerReady, setPlayerReady] = useState(false);
-  
-  // Mount points for control bar buttons
-  const [settingsMount, setSettingsMount] = useState<HTMLElement | null>(null);
-  const [nextMount, setNextMount] = useState<HTMLElement | null>(null);
-
-  // Settings UI State
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [playbackSpeed, setPlaybackSpeed] = useState(1.0);
-  const [casEnabled, setCasEnabled] = useState(true); // Default ON
-  
-  // Seeking State  
+  const [isPaused, setIsPaused] = useState(true);
   const [seekingTime, setSeekingTime] = useState<number | null>(null);
-  const gestureRef = useRef({
-    startX: 0, startY: 0, startTime: 0, startVideoTime: 0,
-    isSeeking: false, wasPlaying: false, active: false
-  });
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [casEnabled, setCasEnabled] = useState(true);
+  const [playbackRate, setPlaybackRate] = useState(1);
 
-  // Callbacks ref for stability
-  const callbacksRef = useRef({ onReady, onTimeUpdate, onEnded, onError, onPlay, onPause });
+  // Check for AirPlay support (Safari only)
+  const hasAirPlay = typeof window !== 'undefined' && 'WebKitPlaybackTargetAvailabilityEvent' in window;
+
+  // ========== EFFECTS ==========
+
+  // Keep callbacks ref in sync
   useEffect(() => { 
     callbacksRef.current = { onReady, onTimeUpdate, onEnded, onError, onPlay, onPause }; 
   }, [onReady, onTimeUpdate, onEnded, onError, onPlay, onPause]);
-  
-  useEffect(() => { fullscreenLevelRef.current = fullscreenLevel; }, [fullscreenLevel]);
 
-  // Check for AirPlay support
-  const hasAirPlay = typeof window !== 'undefined' && 'WebKitPlaybackTargetAvailabilityEvent' in window;
-
-  // Load persisted settings
+  // Load persisted settings on mount
   useEffect(() => {
-    try {
-      const savedSpeed = localStorage.getItem(`lunatv_speed_${seriesId}`);
-      if (savedSpeed) setPlaybackSpeed(parseFloat(savedSpeed));
-      const savedCas = localStorage.getItem('lunatv_cas_enabled');
-      setCasEnabled(savedCas !== 'false');
-    } catch (_e) { /* ignore */ }
+    try { setCasEnabled(localStorage.getItem('lunatv_cas_enabled') !== 'false'); } catch { /* ignore */ }
+    try { const s = localStorage.getItem(`lunatv_speed_${seriesId}`); if (s) setPlaybackRate(parseFloat(s)); } catch { /* ignore */ }
   }, [seriesId]);
 
-  // Utility: Format time
-  const formatTime = useCallback((seconds: number): string => {
-    if (!isFinite(seconds) || isNaN(seconds)) return '0:00';
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = Math.floor(seconds % 60);
-    return h > 0 ? `${h}:${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}` : `${m}:${s.toString().padStart(2,'0')}`;
-  }, []);
+  // ========== HANDLERS ==========
 
-  // Settings handlers
-  const handleSpeedChange = useCallback((speed: number) => {
-    setPlaybackSpeed(speed);
-    if (playerRef.current) playerRef.current.playbackRate(speed);
-    try { localStorage.setItem(`lunatv_speed_${seriesId}`, speed.toString()); } catch { /* localStorage unavailable */ }
-    setSettingsOpen(false);
-  }, [seriesId]);
-
-  const handleCasToggle = useCallback(() => {
-    setCasEnabled(prev => {
-      const newState = !prev;
-      try { localStorage.setItem('lunatv_cas_enabled', newState.toString()); } catch { /* localStorage unavailable */ }
-      return newState;
+  /** Toggle CAS enhancement and persist setting */
+  const toggleCas = useCallback(() => {
+    setCasEnabled(p => { 
+      const n = !p; 
+      try { localStorage.setItem('lunatv_cas_enabled', n.toString()); } catch { /* ignore */ } 
+      return n; 
     });
   }, []);
 
-  // Toggle controls visibility
-  const toggleControls = useCallback(() => {
-    if (playerRef.current) {
-      const current = playerRef.current.userActive();
-      playerRef.current.userActive(!current);
-      setControlsVisible(!current);
-    }
-  }, []);
+  /** Change playback speed and persist setting */
+  const changeSpeed = useCallback((rate: number) => {
+    setPlaybackRate(rate);
+    playerRef.current?.playbackRate(rate);
+    try { localStorage.setItem(`lunatv_speed_${seriesId}`, rate.toString()); } catch { /* ignore */ }
+  }, [seriesId]);
 
-  // Fullscreen handlers
-  const enterRotated = useCallback(() => { 
-    containerRef.current?.classList.add('videojs-rotated-fullscreen'); 
-    setFullscreenLevel(1); 
-    playerRef.current?.trigger('resize'); 
-  }, []);
-
-  const exitFullscreen = useCallback(() => { 
-    containerRef.current?.classList.remove('videojs-rotated-fullscreen'); 
-    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
-    setFullscreenLevel(0); 
-    playerRef.current?.trigger('resize'); 
-  }, []);
-
-  const toggleFullscreen = useCallback(() => {
-    if (fullscreenLevel === 0) {
-      enterRotated();
-    } else {
-      exitFullscreen();
-    }
-  }, [fullscreenLevel, enterRotated, exitFullscreen]);
-
-  // AirPlay handler
-  const showAirPlayPicker = useCallback(() => {
-    const video = containerRef.current?.querySelector('video');
-    if (video && 'webkitShowPlaybackTargetPicker' in video) {
-      (video as HTMLVideoElement & { webkitShowPlaybackTargetPicker: () => void }).webkitShowPlaybackTargetPicker();
-    }
-  }, []);
-
-  // HLS initialization
+  /** Initialize HLS.js for streaming playback */
   const initHls = useCallback((video: HTMLVideoElement, src: string) => {
-    if (hlsRef.current) hlsRef.current.destroy();
-    if (!Hls.isSupported()) { 
-      video.src = src; 
-      return; 
-    }
+    hlsRef.current?.destroy();
+    if (!Hls.isSupported()) { video.src = src; return; }
     const hls = new Hls({ 
       debug, 
       enableWorker: true, 
       lowLatencyMode: true, 
       loader: customHlsLoader || Hls.DefaultConfig.loader 
     });
-    hls.loadSource(src);
+    hls.loadSource(src); 
     hls.attachMedia(video);
-    hls.on(Hls.Events.ERROR, (_, data) => { 
-      if (data.fatal) callbacksRef.current.onError?.(data); 
-    });
+    hls.on(Hls.Events.ERROR, (_, data) => { if (data.fatal) callbacksRef.current.onError?.(data); });
     hlsRef.current = hls;
   }, [customHlsLoader, debug]);
 
-  // ==================== GESTURE HANDLING ====================
-  // Use document-level listeners but check if target is in control bar
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    const getPos = (e: TouchEvent | MouseEvent) => {
-      const touch = 'touches' in e ? (e.touches[0] || e.changedTouches?.[0]) : null;
-      if (touch) return { x: touch.clientX, y: touch.clientY };
-      if ('clientX' in e) return { x: e.clientX, y: e.clientY };
-      return null;
-    };
-
-    const handleStart = (e: TouchEvent | MouseEvent) => {
-      const target = e.target as HTMLElement;
-      if (!container.contains(target)) return;
-      // Ignore if clicking on control bar, buttons, or rotation button
-      if (target.closest('.vjs-control-bar, .vjs-big-play-button, .settings-popup, .rotation-button, button')) return;
-
-      const pos = getPos(e);
-      if (!pos) return;
-      
-      const gesture = gestureRef.current;
-      gesture.startX = pos.x;
-      gesture.startY = pos.y;
-      gesture.startTime = Date.now();
-      gesture.startVideoTime = playerRef.current?.currentTime() || 0;
-      gesture.wasPlaying = playerRef.current ? !playerRef.current.paused() : false;
-      gesture.isSeeking = false;
-      gesture.active = true;
-    };
-
-    const handleMove = (e: TouchEvent | MouseEvent) => {
-      const gesture = gestureRef.current;
-      if (!gesture.active) return;
-
-      const pos = getPos(e);
-      if (!pos) return;
-
-      const dx = pos.x - gesture.startX;
-      const dy = pos.y - gesture.startY;
-      const isRotated = fullscreenLevelRef.current === 1;
-
-      if (!gesture.isSeeking) {
-        const threshold = 10; // Lower threshold for easier swipe detection
-        if (Math.abs(dx) > threshold || Math.abs(dy) > threshold) {
-          const isHorizontalSwipe = Math.abs(dx) > Math.abs(dy);
-          const isSeekDirection = isRotated ? !isHorizontalSwipe : isHorizontalSwipe;
-          if (isSeekDirection) {
-            gesture.isSeeking = true;
-            if (gesture.wasPlaying) playerRef.current?.pause();
-          } else {
-            gesture.active = false;
-          }
-        }
+  /** Toggle rotated fullscreen mode (for mobile landscape) */
+  const toggleFullscreen = useCallback(() => {
+    if (!isFullscreen) { 
+      containerRef.current?.classList.add('videojs-rotated-fullscreen'); 
+      setIsFullscreen(true); 
+    } else {
+      containerRef.current?.classList.remove('videojs-rotated-fullscreen');
+      // Exit native fullscreen if active
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      if (document.fullscreenElement || (document as any).webkitFullscreenElement) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (document.exitFullscreen || (document as any).webkitExitFullscreen)?.call(document).catch(() => { /* ignore */ });
       }
+      setIsFullscreen(false);
+    }
+    // Trigger resize for proper video scaling
+    setTimeout(() => playerRef.current?.trigger('resize'), 50);
+  }, [isFullscreen]);
 
-      if (gesture.isSeeking) {
-        const duration = playerRef.current?.duration() || 0;
-        if (duration > 0) {
-          const delta = isRotated ? dy : dx;
-          const sensitivity = 0.5; // seconds per pixel - higher = faster seeking
-          const newTime = Math.max(0, Math.min(duration, gesture.startVideoTime + (delta * sensitivity)));
-          setSeekingTime(newTime);
-        }
-      }
-    };
+  /** Toggle play/pause */
+  const togglePlay = useCallback(() => { 
+    if (isPaused) {
+      playerRef.current?.play();
+    } else {
+      playerRef.current?.pause();
+    }
+  }, [isPaused]);
 
-    const handleEnd = (e: TouchEvent | MouseEvent) => {
-      const gesture = gestureRef.current;
-      
-      if (gesture.isSeeking && seekingTime !== null) {
-        playerRef.current?.currentTime(seekingTime);
-        setSeekingTime(null);
-        if (gesture.wasPlaying) playerRef.current?.play();
-      } else if (gesture.active && !gesture.isSeeking) {
-        const pos = getPos(e);
-        const dt = Date.now() - gesture.startTime;
-        const dist = pos ? Math.sqrt(Math.pow(pos.x - gesture.startX, 2) + Math.pow(pos.y - gesture.startY, 2)) : 0;
-        if (dt < 300 && dist < 15) {
-          toggleControls();
-        }
-      }
-      
-      gesture.active = false;
-      gesture.isSeeking = false;
-      gesture.startX = 0;
-      gesture.startY = 0;
-    };
+  /** Handle click/touch on progress bar to seek */
+  const handleSeek = useCallback((e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>) => {
+    const bar = e.currentTarget;
+    const rect = bar.getBoundingClientRect();
+    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    playerRef.current?.currentTime(pct * duration);
+  }, [duration]);
 
-    document.addEventListener('mousedown', handleStart, { capture: true });
-    document.addEventListener('touchstart', handleStart, { capture: true, passive: true });
-    document.addEventListener('mousemove', handleMove, { capture: true });
-    document.addEventListener('touchmove', handleMove, { capture: true, passive: true });
-    document.addEventListener('mouseup', handleEnd, { capture: true });
-    document.addEventListener('touchend', handleEnd, { capture: true });
-
-    return () => {
-      document.removeEventListener('mousedown', handleStart, { capture: true });
-      document.removeEventListener('touchstart', handleStart, { capture: true });
-      document.removeEventListener('mousemove', handleMove, { capture: true });
-      document.removeEventListener('touchmove', handleMove, { capture: true });
-      document.removeEventListener('mouseup', handleEnd, { capture: true });
-      document.removeEventListener('touchend', handleEnd, { capture: true });
-    };
-  }, [seekingTime, toggleControls]);
-
-  // ==================== MAIN PLAYER INITIALIZATION ====================
+  // ========== PLAYER INITIALIZATION ==========
+  
   useEffect(() => {
     if (!videoWrapperRef.current) return;
+    
+    // Cleanup previous instance
+    playerRef.current?.dispose(); 
+    playerRef.current = null; 
+    setPlayerReady(false);
+
+    // Create video element
     const wrapper = videoWrapperRef.current;
     wrapper.innerHTML = '';
-    
     const videoElement = document.createElement('video-js');
-    videoElement.classList.add('vjs-big-play-centered');
-    Object.assign(videoElement.style, { 
-      position: 'absolute', top: '0', left: '0', width: '100%', height: '100%' 
-    });
-    videoElement.setAttribute('crossOrigin', 'anonymous');
+    Object.assign(videoElement.style, { position: 'absolute', top: '0', left: '0', width: '100%', height: '100%' });
+    videoElement.setAttribute('crossOrigin', 'anonymous'); // Required for CAS shader
     wrapper.appendChild(videoElement);
 
+    // Initialize Video.js with minimal config (we use custom controls)
     const player = videojs(videoElement, {
-      controls: true, autoplay: autoPlay, preload: 'auto', fluid: false, fill: true,
-      poster, playsinline: true, html5: { vhs: false },
-      playbackRates: [0.5, 0.75, 1, 1.25, 1.5, 2]
+      controls: false, // Using custom React controls
+      autoplay: autoPlay, 
+      preload: 'auto', 
+      fluid: false, 
+      fill: true,
+      poster, 
+      playsinline: true, 
+      html5: { vhs: false } // Disable native VHS, using HLS.js
     });
+
     playerRef.current = player;
+    hasSkippedIntroRef.current = false;
 
-    // Inject settings mount into control bar
-    const injectMount = () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const controlBar = (player as any).controlBar;
-      if (!controlBar) return;
-      const el = controlBar.el() as HTMLElement;
-      if (!el) return;
-      
-      // Settings mount (before fullscreen)
-      if (!el.querySelector('.vjs-custom-settings-mount')) {
-        const mount = document.createElement('div');
-        mount.className = 'vjs-custom-settings-mount vjs-control';
-        mount.style.cssText = 'display: flex; align-items: center; height: 100%; margin-right: 8px;';
-        const fullscreenBtn = el.querySelector('.vjs-fullscreen-control');
-        if (fullscreenBtn) {
-          el.insertBefore(mount, fullscreenBtn);
-        } else {
-          el.appendChild(mount);
-        }
-        setSettingsMount(mount);
-      }
-      
-      // Next episode mount (after play button)
-      if (!el.querySelector('.vjs-custom-next-mount')) {
-        const nextMountEl = document.createElement('div');
-        nextMountEl.className = 'vjs-custom-next-mount vjs-control';
-        nextMountEl.style.cssText = 'display: flex; align-items: center; height: 100%;';
-        const playBtn = el.querySelector('.vjs-play-control');
-        if (playBtn && playBtn.nextSibling) {
-          el.insertBefore(nextMountEl, playBtn.nextSibling);
-        } else if (playBtn) {
-          playBtn.parentNode?.insertBefore(nextMountEl, playBtn.nextSibling);
-        }
-        setNextMount(nextMountEl);
-      }
-    };
-
+    // Player ready handler
     player.ready(() => {
       setPlayerReady(true);
+      player.playbackRate(playbackRate);
       callbacksRef.current.onReady?.(player);
-      injectMount();
-      setTimeout(injectMount, 200);
-      setTimeout(injectMount, 500);
-      
-      // Apply saved speed
-      try {
-        const savedSpeed = localStorage.getItem(`lunatv_speed_${seriesId}`);
-        if (savedSpeed) {
-          const speed = parseFloat(savedSpeed);
-          player.playbackRate(speed);
-          setPlaybackSpeed(speed);
-        }
-      } catch { /* localStorage unavailable */ }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (player as any).hotkeys?.({ volumeStep: 0.1, seekStep: 10, enableMute: true, enableFullscreen: true, enableNumbers: false });
     });
 
-    // Event listeners
+    // Event bindings
     player.on('useractive', () => setControlsVisible(true));
     player.on('userinactive', () => setControlsVisible(false));
-    player.on('play', () => callbacksRef.current.onPlay?.());
-    player.on('pause', () => callbacksRef.current.onPause?.());
-    player.on('ratechange', () => { 
-      const r = player.playbackRate(); 
-      if (r) setPlaybackSpeed(r); 
-    });
+    player.on('play', () => { setIsPaused(false); callbacksRef.current.onPlay?.(); });
+    player.on('pause', () => { setIsPaused(true); callbacksRef.current.onPause?.(); });
     player.on('ended', () => callbacksRef.current.onEnded?.());
+    player.on('durationchange', () => setDuration(player.duration() || 0));
     player.on('timeupdate', () => {
-      const t = player.currentTime() || 0;
-      const d = player.duration() || 0;
+      const t = player.currentTime() || 0, d = player.duration() || 0;
+      setCurrentTime(t); 
       callbacksRef.current.onTimeUpdate?.(t, d);
-      if (enableSkip && skipIntroTime > 0 && t < skipIntroTime) player.currentTime(skipIntroTime);
-      if (enableSkip && skipOutroTime > 0 && d - t <= skipOutroTime) callbacksRef.current.onEnded?.();
-    });
-    player.options_.inactivityTimeout = 3000;
-
-    // Load source
-    if (url?.includes('.m3u8')) {
-      player.ready(() => { 
-        const v = videoElement.querySelector('.vjs-tech') as HTMLVideoElement;
-        if (v) initHls(v, url);
-      });
-    } else {
-      player.src({ src: url, type: 'video/mp4' });
-    }
-
-    return () => {
-      if (hlsRef.current) hlsRef.current.destroy();
-      if (playerRef.current) playerRef.current.dispose();
-      setPlayerReady(false);
-      setSettingsMount(null);
-    };
-  }, [url, autoPlay, poster, enableSkip, skipIntroTime, skipOutroTime, initHls, seriesId]);
-
-  // ==================== CAS EFFECT ====================
-  useEffect(() => {
-    if (!playerReady || !casEnabled) return;
-    const tech = containerRef.current?.querySelector('.vjs-tech') as HTMLVideoElement;
-    if (!tech) return;
-    if (document.getElementById('cas-canvas')) return;
-    
-    const canvas = document.createElement('canvas');
-    canvas.id = 'cas-canvas';
-    Object.assign(canvas.style, { 
-      position: 'absolute', top: '0', left: '0', width: '100%', height: '100%', 
-      pointerEvents: 'none', zIndex: '1', objectFit: 'contain'
-    });
-    tech.parentElement?.insertBefore(canvas, tech.nextSibling);
-    
-    const gl = canvas.getContext('webgl', { alpha: false, preserveDrawingBuffer: false, antialias: false });
-    if (!gl) return;
-    
-    const vs = `attribute vec2 position; varying vec2 v_texCoord; void main() { gl_Position = vec4(position,0,1); v_texCoord = position*0.5+0.5; v_texCoord.y=1.0-v_texCoord.y; }`;
-    const fs = `precision mediump float; varying vec2 v_texCoord; uniform sampler2D u_image; uniform vec2 u_resolution; uniform float u_sharpness;
-      void main() {
-        vec2 tex = 1.0 / u_resolution;
-        vec3 e = texture2D(u_image, v_texCoord).rgb;
-        vec3 a = texture2D(u_image, v_texCoord + vec2(0.0, -tex.y)).rgb;
-        vec3 c = texture2D(u_image, v_texCoord + vec2(-tex.x, 0.0)).rgb;
-        vec3 g = texture2D(u_image, v_texCoord + vec2(tex.x, 0.0)).rgb;
-        vec3 i = texture2D(u_image, v_texCoord + vec2(0.0, tex.y)).rgb;
-        float sharp = clamp(u_sharpness, 0.0, 1.0);
-        float w = -1.0 / mix(8.0, 5.0, sharp);
-        vec3 res = (a + c + g + i) * w + e;
-        float div = 1.0 + 4.0 * w;
-        vec3 final = res / div;
-        vec3 mn = min(min(min(a, c), g), i); vec3 mx = max(max(max(a, c), g), i);
-        mn = min(mn, e); mx = max(mx, e);
-        final = clamp(final, mn, mx);
-        float luminance = dot(final, vec3(0.2126, 0.7152, 0.0722));
-        vec3 satColor = mix(vec3(luminance), final, 1.15);
-        vec3 contrastColor = (satColor - 0.5) * 1.05 + 0.5;
-        gl_FragColor = vec4(contrastColor, 1.0);
-      }`;
-    
-    const createShader = (type: number, src: string) => { 
-      const s = gl.createShader(type); if (!s) return null; 
-      gl.shaderSource(s, src); gl.compileShader(s); return s; 
-    };
-    
-    const program = gl.createProgram();
-    const vsS = createShader(gl.VERTEX_SHADER, vs);
-    const fsS = createShader(gl.FRAGMENT_SHADER, fs);
-    
-    if (program && vsS && fsS) {
-      gl.attachShader(program, vsS); gl.attachShader(program, fsS);
-      gl.linkProgram(program); gl.useProgram(program);
       
-      const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, -1,1, 1,-1, 1,1]), gl.STATIC_DRAW);
-      
-      const posLoc = gl.getAttribLocation(program, 'position');
-      gl.enableVertexAttribArray(posLoc);
-      gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
-      
-      const texture = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, texture);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-      
-      tech.style.opacity = '0';
-      
-      const render = () => {
-        if (!casEnabled) return;
-        if (tech.videoWidth > 0 && (canvas.width !== tech.videoWidth || canvas.height !== tech.videoHeight)) {
-          canvas.width = tech.videoWidth; canvas.height = tech.videoHeight;
-          gl.viewport(0, 0, canvas.width, canvas.height);
+      // Auto skip intro/outro
+      if (enableSkip) {
+        if (skipIntroTime > 0 && t < skipIntroTime && !hasSkippedIntroRef.current) { 
+          player.currentTime(skipIntroTime); 
+          hasSkippedIntroRef.current = true; 
         }
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, tech);
-        gl.uniform2f(gl.getUniformLocation(program, 'u_resolution'), canvas.width, canvas.height);
-        gl.uniform1f(gl.getUniformLocation(program, 'u_sharpness'), 0.6);
-        gl.drawArrays(gl.TRIANGLES, 0, 6);
-        animationFrameRef.current = requestAnimationFrame(render);
-      };
-      render();
+        if (skipOutroTime > 0 && d - t <= skipOutroTime) {
+          callbacksRef.current.onEnded?.();
+        }
+      }
+    });
+
+    // Load video source
+    if (url?.includes('.m3u8')) { 
+      player.ready(() => { 
+        const v = videoElement.querySelector('.vjs-tech') as HTMLVideoElement; 
+        if (v) initHls(v, url); 
+      }); 
+    } else { 
+      player.src({ src: url, type: 'video/mp4' }); 
     }
-    
+
+    // Cleanup
     return () => { 
-      if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
-      const c = document.getElementById('cas-canvas'); if (c) c.remove();
-      if (tech) tech.style.opacity = '1';
+      hlsRef.current?.destroy(); 
+      hlsRef.current = null; 
+      playerRef.current?.dispose(); 
+      playerRef.current = null; 
+      setPlayerReady(false); 
     };
-  }, [playerReady, casEnabled]);
+  }, [url, autoPlay, poster, enableSkip, skipIntroTime, skipOutroTime, initHls, playbackRate]);
 
-  // Button styles - adaptive, no forced sizes
-  const ctrlBtnStyle: React.CSSProperties = {
-    display: 'flex', 
-    alignItems: 'center', 
-    justifyContent: 'center',
-    cursor: 'pointer', 
-    color: 'white', 
-    opacity: 0.9,
-    background: 'transparent', 
-    border: 'none', 
-    padding: 4,
-    margin: 0,
+  // Handle window resize/orientation
+  useEffect(() => {
+    const handleResize = () => playerRef.current?.trigger('resize');
+    window.addEventListener('resize', handleResize); 
+    window.addEventListener('orientationchange', handleResize);
+    return () => { 
+      window.removeEventListener('resize', handleResize); 
+      window.removeEventListener('orientationchange', handleResize); 
+    };
+  }, []);
+
+  // Apply custom hooks
+  useCasShader(playerReady, casEnabled, containerRef, debug);
+  usePlayerGestures(containerRef, playerRef, setSeekingTime);
+
+  // ========== HELPERS ==========
+
+  /** Format seconds to MM:SS or HH:MM:SS */
+  const formatTime = (s: number) => {
+    if (!Number.isFinite(s)) return '0:00';
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = Math.floor(s % 60);
+    return h > 0 ? `${h}:${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}` : `${m}:${sec.toString().padStart(2, '0')}`;
   };
 
-  const rotationBtnStyle: React.CSSProperties = {
-    position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)',
-    zIndex: 50, opacity: controlsVisible ? 1 : 0, pointerEvents: controlsVisible ? 'auto' : 'none',
-    transition: 'opacity 0.3s',
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    width: 44, height: 44, background: 'rgba(0,0,0,0.5)', borderRadius: '50%',
-    border: 'none', cursor: 'pointer'
-  };
+  const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
 
-  const popupStyle: React.CSSProperties = {
-    position: 'absolute', bottom: 40, right: 0,
-    background: 'rgba(30,30,30,0.95)', borderRadius: 8, padding: 12,
-    minWidth: 180, zIndex: 9999
-  };
-
-  // Settings Button Content (rendered via portal into control bar)
-  const settingsPortalContent = settingsMount ? createPortal(
-    <>
-      {/* AirPlay Button */}
-      {hasAirPlay && (
-        <button className="custom-ctrl-btn" style={ctrlBtnStyle} onClick={(e) => { e.stopPropagation(); showAirPlayPicker(); }} title="AirPlay">
-          <svg viewBox="0 0 24 24" fill="currentColor" width={20} height={20}>
-            <path d="M6 22h12l-6-6-6 6zM21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h4v-2H3V5h18v12h-4v2h4c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/>
-          </svg>
-        </button>
-      )}
-      
-      {/* Settings Button */}
-      <div style={{ position: 'relative' }}>
-        <button className="custom-ctrl-btn" style={ctrlBtnStyle} onClick={(e) => { e.stopPropagation(); setSettingsOpen(!settingsOpen); }} title="Settings">
-          <svg viewBox="0 0 24 24" fill="currentColor" width={20} height={20}>
-            <path d="M19.14 12.94c.04-.31.06-.63.06-.94 0-.31-.02-.63-.06-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>
-          </svg>
-        </button>
-        
-        {/* Settings Popup */}
-        {settingsOpen && (
-          <div className="settings-popup" style={popupStyle} onClick={(e) => e.stopPropagation()}>
-            <div 
-              style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: 'white', padding: '8px 0', cursor: 'pointer' }}
-              onClick={handleCasToggle}
-            >
-              <span>Enhance HD</span>
-              <div style={{ 
-                width: 40, height: 22, background: casEnabled ? '#4caf50' : '#555', 
-                borderRadius: 11, position: 'relative', transition: 'background 0.2s'
-              }}>
-                <div style={{ 
-                  width: 18, height: 18, background: 'white', borderRadius: '50%', 
-                  position: 'absolute', top: 2, left: casEnabled ? 20 : 2, transition: 'left 0.2s'
-                }} />
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    </>,
-    settingsMount
-  ) : null;
-
-  // Next Episode Button (rendered near play button)
-  const nextEpisodePortalContent = (nextMount && hasNextEpisode && onNextEpisode) ? createPortal(
-    <button className="custom-ctrl-btn" style={ctrlBtnStyle} onClick={(e) => { e.stopPropagation(); onNextEpisode(); }} title="Next Episode">
-      <svg viewBox="0 0 24 24" fill="currentColor" width={20} height={20}>
-        <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/>
-      </svg>
-    </button>,
-    nextMount
-  ) : null;
+  // ========== RENDER ==========
 
   return (
-    <div 
-      className={`videojs-player-container ${className}`}
-      ref={containerRef}
-      style={{
-        position: fullscreenLevel === 1 ? 'fixed' : 'relative',
-        width: fullscreenLevel === 1 ? '100vh' : '100%',
-        height: fullscreenLevel === 1 ? '100vw' : '100%',
-        top: fullscreenLevel === 1 ? '50%' : undefined,
-        left: fullscreenLevel === 1 ? '50%' : undefined,
-        transform: fullscreenLevel === 1 ? 'translate(-50%, -50%) rotate(90deg)' : undefined,
-        zIndex: fullscreenLevel === 1 ? 99999 : undefined,
-        background: '#000',
-        overflow: 'hidden'
-      }}
-    >
-      <div ref={videoWrapperRef} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }} />
-      
-      {/* Rotation Button */}
-      <button className="rotation-button" style={rotationBtnStyle} onClick={(e) => { e.stopPropagation(); toggleFullscreen(); }}>
-        <svg viewBox="0 0 24 24" fill="white" width={24} height={24}>
-          <path d="M7.11 8.53L5.7 7.11C4.8 8.27 4.24 9.61 4.07 11h2.02c.14-.87.49-1.72 1.02-2.47zM6.09 13H4.07c.17 1.39.72 2.73 1.62 3.89l1.41-1.42c-.52-.75-.87-1.59-1.01-2.47zm1.01 5.32c1.16.9 2.51 1.44 3.9 1.61V17.9c-.87-.15-1.71-.49-2.46-1.03L7.1 18.32zM13 4.07V1L8.45 5.55 13 10V6.09c2.84.48 5 2.94 5 5.91s-2.16 5.43-5 5.91v2.02c3.95-.49 7-3.85 7-7.93s-3.05-7.44-7-7.93z"/>
-        </svg>
-      </button>
+    <div className={`player-container ${className}`} ref={containerRef}>
+      {/* Video.js wrapper - video element inserted here dynamically */}
+      <div ref={videoWrapperRef} className="video-wrapper" />
 
-      {/* Seek Overlay */}
-      {seekingTime !== null && (
-        <div style={{
-          position: 'absolute', top: 0, left: 0, width: '100%', height: '100%',
-          background: 'rgba(0,0,0,0.6)', display: 'flex', flexDirection: 'column',
-          alignItems: 'center', justifyContent: 'center', zIndex: 100, pointerEvents: 'none'
-        }}>
-          <div style={{ fontSize: 32, fontWeight: 'bold', color: 'white', marginBottom: 16, textShadow: '0 2px 8px rgba(0,0,0,0.8)' }}>
-            {formatTime(seekingTime)} / {formatTime(playerRef.current?.duration() || 0)}
+      {/* Custom Controls Overlay */}
+      <div className={`player-controls ${controlsVisible ? 'visible' : ''}`} onClick={(e) => e.stopPropagation()}>
+        
+        {/* Top Bar - Settings only */}
+        <div className="top-bar">
+          <button className="ctrl-btn" onClick={() => setSettingsOpen(!settingsOpen)} title="Settings">
+            {Icons.settings}
+          </button>
+        </div>
+
+        {/* Center - Large Play/Pause Button */}
+        <div className="center-area" onClick={togglePlay}>
+          <button className="big-play-btn">
+            {isPaused ? Icons.play : Icons.pause}
+          </button>
+        </div>
+
+        {/* Bottom Bar - Main Controls */}
+        <div className="bottom-bar">
+          {/* Play/Pause */}
+          <button className="ctrl-btn" onClick={togglePlay}>
+            {isPaused ? Icons.play : Icons.pause}
+          </button>
+          
+          {/* Next Episode (if available) */}
+          {hasNextEpisode && (
+            <button className="ctrl-btn" onClick={() => onNextEpisode?.()} title="Next">
+              {Icons.next}
+            </button>
+          )}
+
+          {/* Current Time */}
+          <div className="time-display">{formatTime(seekingTime ?? currentTime)}</div>
+
+          {/* Progress Bar */}
+          <div className="progress-bar" onClick={handleSeek} onTouchStart={handleSeek}>
+            <div className="progress-track">
+              <div className="progress-fill" style={{ width: `${progress}%` }} />
+              <div className="progress-thumb" style={{ left: `${progress}%` }} />
+            </div>
           </div>
-          <div style={{ width: '70%', height: 6, background: 'rgba(255,255,255,0.3)', borderRadius: 3, overflow: 'hidden' }}>
-            <div style={{ height: '100%', background: '#00ff00', width: `${(seekingTime / (playerRef.current?.duration() || 1)) * 100}%` }} />
+
+          {/* Duration */}
+          <div className="time-display">{formatTime(duration)}</div>
+
+          {/* Speed Control */}
+          <button 
+            className="ctrl-btn speed-btn" 
+            onClick={() => changeSpeed(playbackRate >= 2 ? 0.5 : playbackRate + 0.25)} 
+            title="Speed"
+          >
+            {playbackRate}x
+          </button>
+
+          {/* AirPlay (Safari only) */}
+          {hasAirPlay && (
+            <button 
+              className="ctrl-btn" 
+              onClick={() => {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                (containerRef.current?.querySelector('video') as any)?.webkitShowPlaybackTargetPicker?.();
+              }} 
+              title="AirPlay"
+            >
+              {Icons.airplay}
+            </button>
+          )}
+
+          {/* Fullscreen Toggle */}
+          <button className="ctrl-btn" onClick={toggleFullscreen} title="Fullscreen">
+            {isFullscreen ? Icons.exitFullscreen : Icons.fullscreen}
+          </button>
+        </div>
+      </div>
+
+      {/* Settings Popup */}
+      {settingsOpen && (
+        <div className="settings-popup" onClick={(e) => e.stopPropagation()}>
+          <div className="settings-header">Settings</div>
+          
+          {/* CAS Toggle */}
+          <div className="settings-item" onClick={toggleCas}>
+            <span>Enhance HD</span>
+            <div className={`toggle ${casEnabled ? 'on' : ''}`}>
+              <div className="toggle-knob" />
+            </div>
+          </div>
+          
+          {/* Speed Selector */}
+          <div className="settings-item">
+            <span>Speed</span>
+            <select value={playbackRate} onChange={(e) => changeSpeed(parseFloat(e.target.value))}>
+              {[0.5, 0.75, 1, 1.25, 1.5, 2].map(r => <option key={r} value={r}>{r}x</option>)}
+            </select>
           </div>
         </div>
       )}
 
-      {/* Portal content */}
-      {settingsPortalContent}
-      {nextEpisodePortalContent}
+      {/* Seek Overlay - Shows during swipe-to-seek */}
+      {seekingTime !== null && (
+        <div className="seek-overlay">
+          <div className="seek-time">{formatTime(seekingTime)} / {formatTime(duration)}</div>
+          <div className="seek-bar">
+            <div className="seek-fill" style={{ width: `${(seekingTime / (duration || 1)) * 100}%` }} />
+          </div>
+        </div>
+      )}
 
-      <style>{`
-        .videojs-player-container .video-js { 
-          position: absolute; 
-          top: 0; left: 0; 
-          width: 100%; 
-          height: 100%; 
-        }
-        .videojs-player-container .vjs-tech { 
-          width: 100% !important; 
-          height: 100% !important; 
-          object-fit: contain; 
-        }
-        .videojs-player-container .vjs-control-bar { 
-          display: flex !important; 
-          width: 100% !important; 
-          max-width: 100% !important;
-          background: rgba(43,51,63,0.85) !important;
-          box-sizing: border-box !important; 
-          padding: 0 4px !important;
-          align-items: center !important;
-          z-index: 10 !important;
-        }
-        .videojs-player-container .vjs-control-bar .vjs-button,
-        .videojs-player-container .vjs-control-bar .vjs-control:not(.vjs-progress-control):not(.vjs-time-control) {
-          width: 3em !important;
-          min-width: 3em !important;
-          flex-shrink: 0 !important;
-        }
-        .videojs-player-container .vjs-progress-control { 
-          flex: 1 1 auto !important; 
-        }
-        .videojs-player-container canvas { pointer-events: none; }
-        .videojs-player-container .vjs-custom-settings-mount { 
-          display: flex !important; 
-          align-items: center !important;
-          height: 100% !important;
-          margin-right: 4px !important;
-        }
-        .videojs-player-container .vjs-custom-next-mount {
-          display: flex !important;
-          align-items: center !important;
-          height: 100% !important;
-        }
-        .custom-ctrl-btn { 
-          width: 3em !important;
-          height: 100% !important;
-          display: flex !important;
-          align-items: center !important;
-          justify-content: center !important;
-          transition: opacity 0.15s ease; 
-          flex-shrink: 0 !important;
-        }
-        .custom-ctrl-btn svg {
-          width: 1.5em;
-          height: 1.5em;
-        }
-        .custom-ctrl-btn:hover, .custom-ctrl-btn:active { opacity: 1 !important; }
-        
-        /* Rotated fullscreen mode */
-        .videojs-rotated-fullscreen {
-          position: fixed !important;
-          top: 50% !important;
-          left: 50% !important;
-          width: 100vh !important;
-          height: 100vw !important;
-          transform: translate(-50%, -50%) rotate(90deg) !important;
-          z-index: 99999 !important;
-          background: #000 !important;
-        }
-        .videojs-rotated-fullscreen .vjs-control-bar {
-          position: absolute !important;
-          bottom: 0 !important;
-          left: 0 !important;
-          right: 0 !important;
-        }
-      `}</style>
+      <style>{CSS}</style>
     </div>
   );
 }
+
+// ============================================================================
+// CSS STYLES
+// ============================================================================
+
+const CSS = `
+/* ===== Container ===== */
+.player-container { 
+  position: relative; 
+  width: 100%; 
+  height: 100%; 
+  background: #000; 
+  overflow: hidden; 
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; 
+}
+
+.video-wrapper { 
+  position: absolute; 
+  inset: 0; 
+}
+
+.player-container .video-js { 
+  position: absolute; 
+  inset: 0; 
+  width: 100%; 
+  height: 100%; 
+}
+
+/* Hide Video.js native controls */
+.player-container .vjs-control-bar { display: none !important; }
+.player-container .vjs-big-play-button { display: none !important; }
+
+/* ===== Icon Sizing ===== */
+.icon { 
+  width: 24px; 
+  height: 24px; 
+  display: block; 
+}
+
+/* ===== Controls Overlay ===== */
+.player-controls { 
+  position: absolute; 
+  inset: 0; 
+  display: flex; 
+  flex-direction: column; 
+  justify-content: space-between; 
+  opacity: 0; 
+  transition: opacity 0.3s; 
+  pointer-events: none; 
+  z-index: 10; 
+  background: linear-gradient(to bottom, rgba(0,0,0,0.6) 0%, transparent 25%, transparent 75%, rgba(0,0,0,0.8) 100%); 
+}
+
+.player-controls.visible { 
+  opacity: 1; 
+  pointer-events: auto; 
+}
+
+/* ===== Top & Bottom Bars ===== */
+.top-bar, .bottom-bar { 
+  display: flex; 
+  align-items: center; 
+  gap: 8px; 
+  padding: 12px 16px; 
+}
+
+.top-bar { 
+  justify-content: flex-end; 
+}
+
+.bottom-bar { 
+  padding-bottom: max(12px, env(safe-area-inset-bottom)); 
+}
+
+/* ===== Control Buttons - Unified 44x44px ===== */
+.ctrl-btn { 
+  width: 44px; 
+  height: 44px; 
+  display: flex; 
+  align-items: center; 
+  justify-content: center; 
+  background: transparent; 
+  border: none; 
+  color: white; 
+  cursor: pointer; 
+  padding: 0; 
+  border-radius: 8px; 
+  transition: background 0.2s; 
+  flex-shrink: 0; 
+}
+
+.ctrl-btn:hover { 
+  background: rgba(255,255,255,0.1); 
+}
+
+.ctrl-btn:active { 
+  background: rgba(255,255,255,0.2); 
+  transform: scale(0.95); 
+}
+
+/* Speed Button with Text */
+.speed-btn { 
+  font-size: 13px; 
+  font-weight: 600; 
+  min-width: 44px; 
+}
+
+/* ===== Center Play Button ===== */
+.center-area { 
+  flex: 1; 
+  display: flex; 
+  align-items: center; 
+  justify-content: center; 
+  cursor: pointer; 
+}
+
+.big-play-btn { 
+  width: 72px; 
+  height: 72px; 
+  border-radius: 50%; 
+  background: rgba(0,0,0,0.5); 
+  border: 2px solid rgba(255,255,255,0.8); 
+  color: white; 
+  display: flex; 
+  align-items: center; 
+  justify-content: center; 
+  cursor: pointer; 
+  backdrop-filter: blur(8px); 
+  transition: transform 0.2s, background 0.2s; 
+}
+
+.big-play-btn:hover { 
+  background: rgba(0,0,0,0.7); 
+}
+
+.big-play-btn:active { 
+  transform: scale(0.95); 
+}
+
+.big-play-btn .icon { 
+  width: 36px; 
+  height: 36px; 
+}
+
+/* ===== Time Display ===== */
+.time-display { 
+  font-size: 13px; 
+  color: white; 
+  font-variant-numeric: tabular-nums; 
+  min-width: 45px; 
+  text-align: center; 
+  flex-shrink: 0; 
+}
+
+/* ===== Progress Bar ===== */
+.progress-bar { 
+  flex: 1; 
+  height: 44px; 
+  display: flex; 
+  align-items: center; 
+  cursor: pointer; 
+  padding: 0 4px; 
+  min-width: 60px; 
+}
+
+.progress-track { 
+  position: relative; 
+  width: 100%; 
+  height: 4px; 
+  background: rgba(255,255,255,0.3); 
+  border-radius: 2px; 
+}
+
+.progress-fill { 
+  height: 100%; 
+  background: #4CAF50; 
+  border-radius: 2px; 
+}
+
+.progress-thumb { 
+  position: absolute; 
+  top: 50%; 
+  width: 14px; 
+  height: 14px; 
+  background: white; 
+  border-radius: 50%; 
+  transform: translate(-50%, -50%); 
+  box-shadow: 0 2px 4px rgba(0,0,0,0.3); 
+}
+
+/* ===== Settings Popup ===== */
+.settings-popup { 
+  position: absolute; 
+  top: 60px; 
+  right: 16px; 
+  background: rgba(28,28,30,0.95); 
+  backdrop-filter: blur(20px); 
+  border-radius: 12px; 
+  padding: 8px 0; 
+  min-width: 200px; 
+  z-index: 100; 
+  border: 1px solid rgba(255,255,255,0.1); 
+}
+
+.settings-header { 
+  padding: 12px 16px; 
+  font-size: 15px; 
+  font-weight: 600; 
+  color: white; 
+  border-bottom: 1px solid rgba(255,255,255,0.1); 
+}
+
+.settings-item { 
+  display: flex; 
+  justify-content: space-between; 
+  align-items: center; 
+  padding: 12px 16px; 
+  color: white; 
+  cursor: pointer; 
+  font-size: 14px; 
+}
+
+.settings-item:hover { 
+  background: rgba(255,255,255,0.05); 
+}
+
+.settings-item select { 
+  background: transparent; 
+  border: 1px solid rgba(255,255,255,0.2); 
+  color: white; 
+  padding: 4px 8px; 
+  border-radius: 6px; 
+  font-size: 13px; 
+}
+
+/* ===== Toggle Switch ===== */
+.toggle { 
+  width: 44px; 
+  height: 26px; 
+  background: #555; 
+  border-radius: 13px; 
+  position: relative; 
+  transition: background 0.2s; 
+  flex-shrink: 0; 
+}
+
+.toggle.on { 
+  background: #4CAF50; 
+}
+
+.toggle-knob { 
+  position: absolute; 
+  top: 3px; 
+  left: 3px; 
+  width: 20px; 
+  height: 20px; 
+  background: white; 
+  border-radius: 50%; 
+  transition: left 0.2s; 
+}
+
+.toggle.on .toggle-knob { 
+  left: 21px; 
+}
+
+/* ===== Seek Overlay ===== */
+.seek-overlay { 
+  position: absolute; 
+  inset: 0; 
+  background: rgba(0,0,0,0.7); 
+  display: flex; 
+  flex-direction: column; 
+  align-items: center; 
+  justify-content: center; 
+  z-index: 50; 
+  pointer-events: none; 
+}
+
+.seek-time { 
+  font-size: 32px; 
+  font-weight: 600; 
+  color: white; 
+  margin-bottom: 16px; 
+}
+
+.seek-bar { 
+  width: 70%; 
+  height: 6px; 
+  background: rgba(255,255,255,0.3); 
+  border-radius: 3px; 
+  overflow: hidden; 
+}
+
+.seek-fill { 
+  height: 100%; 
+  background: #4CAF50; 
+}
+
+/* ===== Rotated Fullscreen Mode ===== */
+.videojs-rotated-fullscreen { 
+  position: fixed !important; 
+  width: 100vh !important; 
+  height: 100vw !important; 
+  top: 50% !important; 
+  left: 50% !important; 
+  transform: translate(-50%, -50%) rotate(90deg) !important; 
+  z-index: 99999 !important; 
+  background: #000 !important; 
+}
+
+@supports (width: 100dvh) { 
+  .videojs-rotated-fullscreen { 
+    width: 100dvh !important; 
+    height: 100dvw !important; 
+  } 
+}
+
+/* ===== Mobile Adjustments ===== */
+@media (max-width: 480px) {
+  .ctrl-btn { 
+    width: 40px; 
+    height: 40px; 
+  }
+  
+  .time-display { 
+    font-size: 12px; 
+    min-width: 38px; 
+  }
+  
+  .speed-btn { 
+    font-size: 12px; 
+    min-width: 40px; 
+  }
+  
+  .big-play-btn { 
+    width: 64px; 
+    height: 64px; 
+  }
+  
+  .big-play-btn .icon { 
+    width: 32px; 
+    height: 32px; 
+  }
+}
+`;

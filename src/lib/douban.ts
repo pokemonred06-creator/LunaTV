@@ -31,7 +31,7 @@ interface CacheItem<T> {
 }
 
 // 内存缓存
-const memoryCache = new Map<string, CacheItem<any>>();
+const memoryCache = new Map<string, CacheItem<unknown>>();
 
 // 获取带超时的缓存数据
 async function getCachedData<T>(
@@ -51,7 +51,7 @@ async function getCachedData<T>(
   if (memItem) {
     if (now - memItem.timestamp < cacheTime) {
       console.log(`[Douban Cache] Memory hit for ${key}. TTL: ${cacheTimeMinutes}m. Remaining: ${((cacheTime - (now - memItem.timestamp)) / 60000).toFixed(1)}m`);
-      return memItem.data;
+      return memItem.data as T;
     }
     console.log(`[Douban Cache] Memory expired for ${key}`);
     memoryCache.delete(key);

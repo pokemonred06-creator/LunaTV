@@ -1,4 +1,4 @@
-/* eslint-disable no-console */
+ 
 
 const CURRENT_VERSION = '100.0.3';
 

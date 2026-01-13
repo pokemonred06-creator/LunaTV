@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-/* eslint-disable */
 // 根据 NEXT_PUBLIC_SITE_NAME 动态生成 manifest.json
 
 const fs = require('fs');

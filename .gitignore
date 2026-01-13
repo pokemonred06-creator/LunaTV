@@ -44,6 +44,8 @@ sitemap-*.xml
 src/lib/runtime.ts
 public/manifest.json
 *.tar
+*.tar.gz
+chunks/
 
 # local docker config (may contain credentials)
 docker-compose.yml

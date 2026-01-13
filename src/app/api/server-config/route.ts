@@ -1,4 +1,4 @@
-/* eslint-disable no-console */
+ 
 
 import { NextRequest, NextResponse } from 'next/server';
 
@@ -15,6 +15,7 @@ export async function GET(request: NextRequest) {
     SiteName: config.SiteConfig.SiteName,
     StorageType: process.env.NEXT_PUBLIC_STORAGE_TYPE || 'localstorage',
     Version: CURRENT_VERSION,
+    DebugLogs: config.SiteConfig.DebugLogs || false,
   };
   return NextResponse.json(result);
 }

@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any,no-console */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import he from 'he';
 import Hls from 'hls.js';
 
@@ -32,7 +32,24 @@ function getDoubanImageProxyConfig(): {
 export function processImageUrl(originalUrl: string): string {
   if (!originalUrl) return originalUrl;
 
-  // 仅处理豆瓣图片代理
+  // 1. 处理特定域名的 HTTPS 升级
+  if (originalUrl.includes('lain.bgm.tv')) {
+    return originalUrl.replace('http://', 'https://');
+  }
+
+  // 2. 如果当前是 HTTPS 环境，但图片是 HTTP，则自动使用代理以避免混合内容错误
+  // 也会处理原本是 http:// 的 tyyswimg.com 等资源
+  const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:';
+  const isHttpRequest = originalUrl.startsWith('http://');
+  
+  if (isHttps && isHttpRequest) {
+    // 除了已处理的（如 doubanio 会在下面 case 中处理），其他所有 HTTP 图片走 server 代理
+    if (!originalUrl.includes('doubanio.com')) {
+      return `/api/image-proxy?url=${encodeURIComponent(originalUrl)}`;
+    }
+  }
+
+  // 3. 处理豆瓣图片代理
   if (!originalUrl.includes('doubanio.com')) {
     return originalUrl;
   }
@@ -308,4 +325,22 @@ export function cleanHtmlTags(text: string): string {
 
   // 使用 he 库解码 HTML 实体
   return he.decode(cleanedText);
+}
+
+/**
+ * 检查是否强制开启移动端布局
+ * 1. 域名以 m. 开头
+ * 2. URL 参数包含 mobile=1
+ */
+export function isForcedMobile(): boolean {
+  if (typeof window === 'undefined') return false;
+  const searchParams = new URLSearchParams(window.location.search);
+  const cookieMatch = document.cookie.match(/mobile=1/);
+  const storageMatch = localStorage.getItem('mobile') === '1';
+  
+  return (
+    searchParams.get('mobile') === '1' ||
+    !!cookieMatch ||
+    storageMatch
+  );
 }

@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 
 'use client';
 
@@ -9,8 +9,8 @@ import { Suspense, useEffect, useState } from 'react';
 import { CURRENT_VERSION } from '@/lib/version';
 import { checkForUpdates, UpdateStatus } from '@/lib/version_check';
 
-import { useSite } from '@/components/SiteProvider';
 import { LanguageToggle } from '@/components/LanguageToggle';
+import { useSite } from '@/components/SiteProvider';
 import { ThemeToggle } from '@/components/ThemeToggle';
 
 // 版本显示组件
@@ -123,7 +123,7 @@ function LoginPageClient() {
 
 
   return (
-    <div className='relative min-h-screen flex items-center justify-center px-4 overflow-hidden'>
+    <div className='relative min-h-screen flex items-center justify-center px-4 overflow-y-auto'>
       <div className='absolute top-4 right-4 flex items-center gap-2'>
         <LanguageToggle />
         <ThemeToggle />

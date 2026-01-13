@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any,react-hooks/exhaustive-deps,@typescript-eslint/no-empty-function */
+/* eslint-disable @typescript-eslint/no-explicit-any,react-hooks/exhaustive-deps */
 
 import { ExternalLink, Heart, Link, PlayCircleIcon, Radio, Trash2 } from 'lucide-react';
 import Image from 'next/image';
@@ -25,8 +25,8 @@ import { processImageUrl } from '@/lib/utils';
 import { useLongPress } from '@/hooks/useLongPress';
 
 import { ImagePlaceholder } from '@/components/ImagePlaceholder';
-import MobileActionSheet from '@/components/MobileActionSheet';
 import { useLanguage } from '@/components/LanguageProvider';
+import MobileActionSheet from '@/components/MobileActionSheet';
 
 export interface VideoCardProps {
   id?: string;

@@ -1,10 +1,8 @@
 #!/bin/bash
 
 # Configuration
-# Assuming 'synology' alias exists in ~/.ssh/config based on user rules.
-# If not, use: TARGET="red@192.168.50.8" and ensure password-less auth or use sshpass.
 TARGET="synology"
-DEST="~/LunaTV"
+REMOTE_DIR="/volume5/docker"
 IMAGE_TAR="lunatv_custom.tar"
 
 echo "--> Testing connection to $TARGET..."
@@ -14,24 +12,25 @@ if ! ssh -q $TARGET exit; then
     exit 1
 fi
 
-echo "--> Creating directory $DEST on remote..."
-ssh $TARGET "mkdir -p $DEST"
+echo "--> Copying image to $REMOTE_DIR..."
+scp -O $IMAGE_TAR $TARGET:$REMOTE_DIR/
 
-echo "--> Copying application files..."
-scp -O $IMAGE_TAR docker-compose.yml $TARGET:$DEST/
-
-echo "--> Deploying Docker container..."
-ssh $TARGET "cd $DEST && \
-    echo 'Loading Docker image (this may take a while)...' && \
-    /usr/local/bin/docker load -i $IMAGE_TAR && \
-    echo 'Stopping existing container...' && \
-    (/usr/local/bin/docker rm -f lunatv || true) && \
-    echo 'Creating cache directory...' && \
-    mkdir -p cache && \
-    chmod 777 cache && \
-    echo 'Starting services...' && \
-    /usr/local/bin/docker-compose up -d --remove-orphans && \
-    /usr/local/bin/docker system prune -f" # Optional cleanup
+echo "--> Deploying to Production at $REMOTE_DIR..."
+ssh $TARGET "echo 'Stopping container...' && \
+    (/usr/local/bin/docker-compose -f $REMOTE_DIR/docker-compose.yml stop lunatv || true) && \
+    echo 'Removing container...' && \
+    (/usr/local/bin/docker-compose -f $REMOTE_DIR/docker-compose.yml rm -f lunatv || true) && \
+    echo 'Removing old image...' && \
+    (/usr/local/bin/docker rmi lunatv:custom || true) && \
+    echo 'Loading Docker image...' && \
+    /usr/local/bin/docker load -i $REMOTE_DIR/$IMAGE_TAR && \
+    echo 'New Image ID:' && \
+    /usr/local/bin/docker images lunatv:custom --format '{{.ID}}' && \
+    echo 'Recreating lunatv container using explicit compose file...' && \
+    /usr/local/bin/docker-compose -f $REMOTE_DIR/docker-compose.yml up -d --force-recreate lunatv && \
+    echo 'Cleaning up...' && \
+    rm $REMOTE_DIR/$IMAGE_TAR && \
+    /usr/local/bin/docker image prune -f"
 
 echo "--> Deployment Complete!"
-echo "Check status directly on NAS or visit http://192.168.50.8:3000"
+echo "Check status at http://192.168.50.8:8899 (or configured port)"
