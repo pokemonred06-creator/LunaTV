@@ -116,6 +116,11 @@ const Icons = {
       <path d="M6 22h12l-6-6-6 6zM21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h4v-2H3V5h18v12h-4v2h4c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z" />
     </svg>
   ),
+  rotate: (
+    <svg viewBox="0 0 24 24" fill="currentColor" className="icon">
+      <path d="M7.11 8.53L5.7 7.11C4.8 8.27 4.24 9.61 4.07 11h2.02c.14-.87.49-1.72 1.02-2.47zM6.09 13H4.07c.17 1.39.72 2.73 1.62 3.89l1.41-1.42c-.52-.75-.87-1.59-1.01-2.47zm1.01 5.32c1.16.9 2.51 1.44 3.9 1.61V17.9c-.87-.15-1.71-.49-2.46-1.03L7.1 18.32zM13 4.07V1L8.45 5.55 13 10V6.09c2.84.48 5 2.94 5 5.91s-2.16 5.43-5 5.91v2.02c3.95-.49 7-3.85 7-7.93s-3.05-7.44-7-7.93z" />
+    </svg>
+  ),
 };
 
 // ============================================================================
@@ -416,6 +421,7 @@ export default function VideoJsPlayer({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [casEnabled, setCasEnabled] = useState(true);
   const [playbackRate, setPlaybackRate] = useState(1);
+  const [isRotatedFullscreen, setIsRotatedFullscreen] = useState(false);
 
   // Check for AirPlay support (Safari only)
   const hasAirPlay = typeof window !== 'undefined' && 'WebKitPlaybackTargetAvailabilityEvent' in window;
@@ -467,24 +473,59 @@ export default function VideoJsPlayer({
     hlsRef.current = hls;
   }, [customHlsLoader, debug]);
 
-  /** Toggle rotated fullscreen mode (for mobile landscape) */
+  /** Toggle native browser fullscreen mode */
   const toggleFullscreen = useCallback(() => {
-    if (!isFullscreen) { 
-      containerRef.current?.classList.add('videojs-rotated-fullscreen'); 
-      setIsFullscreen(true); 
-    } else {
-      containerRef.current?.classList.remove('videojs-rotated-fullscreen');
-      // Exit native fullscreen if active
+    const container = containerRef.current;
+    const video = container?.querySelector('video') as HTMLVideoElement | null;
+    if (!container) return;
+    
+    if (!isFullscreen) {
+      // Try native fullscreen API first (desktop browsers)
+      if (container.requestFullscreen) {
+        container.requestFullscreen().catch(() => { /* ignore */ });
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      if (document.fullscreenElement || (document as any).webkitFullscreenElement) {
+      } else if ((container as any).webkitRequestFullscreen) {
+        // Safari desktop
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (document.exitFullscreen || (document as any).webkitExitFullscreen)?.call(document).catch(() => { /* ignore */ });
+        (container as any).webkitRequestFullscreen();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } else if (video && (video as any).webkitEnterFullscreen) {
+        // iOS Safari - must use video element directly
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (video as any).webkitEnterFullscreen();
+      }
+      setIsFullscreen(true);
+    } else {
+      // Exit fullscreen
+      if (document.exitFullscreen) {
+        document.exitFullscreen().catch(() => { /* ignore */ });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } else if ((document as any).webkitExitFullscreen) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (document as any).webkitExitFullscreen();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } else if (video && (video as any).webkitExitFullscreen) {
+        // iOS Safari
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (video as any).webkitExitFullscreen();
       }
       setIsFullscreen(false);
     }
     // Trigger resize for proper video scaling
     setTimeout(() => playerRef.current?.trigger('resize'), 50);
   }, [isFullscreen]);
+
+  /** Toggle rotated/page fullscreen mode (CSS-based, for mobile landscape) */
+  const toggleRotatedFullscreen = useCallback(() => {
+    if (!isRotatedFullscreen) {
+      containerRef.current?.classList.add('videojs-rotated-fullscreen');
+      setIsRotatedFullscreen(true);
+    } else {
+      containerRef.current?.classList.remove('videojs-rotated-fullscreen');
+      setIsRotatedFullscreen(false);
+    }
+    setTimeout(() => playerRef.current?.trigger('resize'), 50);
+  }, [isRotatedFullscreen]);
 
   /** Toggle play/pause */
   const togglePlay = useCallback(() => { 
@@ -601,6 +642,21 @@ export default function VideoJsPlayer({
     };
   }, []);
 
+  // Sync fullscreen state with browser
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const isFS = !!(document.fullscreenElement || (document as any).webkitFullscreenElement);
+      setIsFullscreen(isFS);
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+    };
+  }, []);
+
   // Apply custom hooks
   useCasShader(playerReady, casEnabled, containerRef, debug);
   usePlayerGestures(containerRef, playerRef, setSeekingTime);
@@ -633,10 +689,19 @@ export default function VideoJsPlayer({
           </button>
         </div>
 
-        {/* Center - Large Play/Pause Button */}
+        {/* Center - Large Play/Pause + Floating Rotate Button */}
         <div className="center-area" onClick={togglePlay}>
           <button className="big-play-btn">
             {isPaused ? Icons.play : Icons.pause}
+          </button>
+          
+          {/* Floating Page/Rotate Fullscreen Button - Middle Left */}
+          <button 
+            className="rotate-fullscreen-btn" 
+            onClick={(e) => { e.stopPropagation(); toggleRotatedFullscreen(); }}
+            title="Page Fullscreen"
+          >
+            {Icons.rotate}
           </button>
         </div>
 
@@ -877,6 +942,34 @@ const CSS = `
 .big-play-btn .icon { 
   width: 36px; 
   height: 36px; 
+}
+
+/* ===== Floating Rotate Fullscreen Button ===== */
+.rotate-fullscreen-btn {
+  position: absolute;
+  left: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: rgba(0,0,0,0.5);
+  border: 1px solid rgba(255,255,255,0.3);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+  transition: transform 0.2s, background 0.2s;
+}
+
+.rotate-fullscreen-btn:hover {
+  background: rgba(0,0,0,0.7);
+}
+
+.rotate-fullscreen-btn:active {
+  transform: translateY(-50%) scale(0.95);
 }
 
 /* ===== Time Display ===== */
