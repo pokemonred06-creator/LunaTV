@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
 
 import Hls from 'hls.js';
@@ -793,9 +794,18 @@ export default function VideoJsPlayer({
     if (tapGateRef.current.moved) return;
     if (isScrubbing) return;
     const now = Date.now();
-    if (now - lastToggleTimeRef.current < 150) return;
+    // FIX 4: Increased debounce and use userActive() for consistent state
+    if (now - lastToggleTimeRef.current < 200) return;
     lastToggleTimeRef.current = now;
-    setControlsVisible((v) => !v);
+
+    const player = playerRef.current;
+    if (!player) return;
+
+    if ((player as any).userActive()) {
+      (player as any).userActive(false);
+    } else {
+      (player as any).userActive(true);
+    }
   }, [isScrubbing]);
   useEffect(() => {
     configRef.current = { enableSkip, skipIntroTime, skipOutroTime, autoPlay };
@@ -1320,7 +1330,12 @@ export default function VideoJsPlayer({
       <div
         className='tap-layer'
         onPointerDown={onTapStart}
-        onPointerMove={onTapMove}
+        onPointerMove={(e) => {
+          onTapMove(e);
+          // FIX 5: Report activity during interaction to prevent auto-hide
+          if (playerRef.current)
+            (playerRef.current as any).reportUserActivity();
+        }}
         onPointerUp={(e) => {
           if (e.pointerType === 'mouse' && e.button !== 0) return;
           onTapEnd();
@@ -1329,7 +1344,12 @@ export default function VideoJsPlayer({
         onPointerCancel={onTapEnd}
         onPointerLeave={onTapEnd}
         onTouchStart={onTapStart}
-        onTouchMove={onTapMove}
+        onTouchMove={(e) => {
+          onTapMove(e);
+          // FIX 5: Report activity during interaction to prevent auto-hide
+          if (playerRef.current)
+            (playerRef.current as any).reportUserActivity();
+        }}
         onTouchEnd={() => {
           onTapEnd();
           onTapToggleControls();
