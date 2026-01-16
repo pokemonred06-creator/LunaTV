@@ -297,6 +297,7 @@ const usePlayerGestures = (
   playerRef: MutableRefObject<Player | null>,
   duration: number,
   unifiedSeek: ReturnType<typeof useUnifiedSeek>,
+  controlsVisible: boolean, // FIX: Added prop
 ) => {
   const gestureRef = useRef({
     startX: 0,
@@ -319,13 +320,18 @@ const usePlayerGestures = (
     };
     const handleStart = (e: TouchEvent | MouseEvent) => {
       const target = e.target as HTMLElement;
-      if (
-        !container.contains(target) ||
-        target.closest(
-          'button, .progress-bar, .progress-track, .progress-fill, .progress-thumb, .settings-popup, select, input',
-        )
-      )
-        return;
+      if (!container.contains(target)) return;
+
+      // FIX: Only check for button interference if controls are actually visible
+      if (controlsVisible) {
+        if (
+          target.closest(
+            'button, .progress-bar, .progress-track, .progress-fill, .progress-thumb, .settings-popup, select, input',
+          )
+        ) {
+          return;
+        }
+      }
       const pos = getPos(e);
       if (!pos) return;
       const g = gestureRef.current;
@@ -398,7 +404,7 @@ const usePlayerGestures = (
       container.removeEventListener('touchend', handleEnd);
       container.removeEventListener('touchcancel', handleEnd);
     };
-  }, [containerRef, playerRef, duration, unifiedSeek]);
+  }, [containerRef, playerRef, duration, unifiedSeek, controlsVisible]); // FIX: Added controlsVisible dependency
 };
 
 const useCasShader = (
@@ -750,7 +756,13 @@ export default function VideoJsPlayer({
     duration,
     unifiedSeek,
   );
-  usePlayerGestures(containerRef, playerRef, duration, unifiedSeek);
+  usePlayerGestures(
+    containerRef,
+    playerRef,
+    duration,
+    unifiedSeek,
+    controlsVisible,
+  ); // FIX: Pass controlsVisible
   const onTapStart = useCallback(
     (e: ReactTouchEvent | ReactMouseEvent | ReactPointerEvent) => {
       tapGateRef.current.down = true;
