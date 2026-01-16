@@ -118,6 +118,17 @@ const Icons = {
       <path d='M8 5v14l11-7z' />
     </svg>
   ),
+  // FIX 2: Added Big Pause Icon
+  bigPause: (
+    <svg
+      viewBox='0 0 24 24'
+      fill='currentColor'
+      className='icon'
+      style={{ width: 48, height: 48 }}
+    >
+      <path d='M6 19h4V5H6v14zm8-14v14h4V5h-4z' />
+    </svg>
+  ),
 };
 
 const useUnifiedSeek = (
@@ -131,12 +142,22 @@ const useUnifiedSeek = (
     wasPlaying: false,
     showOverlay: false,
   });
+
+  // FIX 1: RequestAnimationFrame Ref for throttling
+  const rafRef = useRef<number | null>(null);
+
   const begin = useCallback(
     (opts?: { showOverlay?: boolean }) => {
+      // FIX 3: Prevent re-entry overwriting state
+      if (seekRef.current.active) return;
+
       const player = playerRef.current;
       seekRef.current.active = true;
       seekRef.current.showOverlay = !!opts?.showOverlay;
+
+      // Remember playback state BEFORE we pause
       seekRef.current.wasPlaying = player ? !player.paused() : false;
+
       if (seekRef.current.wasPlaying) {
         player?.pause();
         setIsPaused(true);
@@ -144,33 +165,53 @@ const useUnifiedSeek = (
     },
     [playerRef, setIsPaused],
   );
+
   const preview = useCallback(
     (time: number) => {
-      const player = playerRef.current;
-      const d = player?.duration?.() ?? 0;
-      const safe = d > 0 ? Math.max(0, Math.min(d, time)) : Math.max(0, time);
-      setCurrentTime(safe);
-      player?.currentTime(safe);
-      if (seekRef.current.showOverlay) setSeekingTime(safe);
+      // FIX 1: Throttle seek to animation frame to prevent black screen
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+
+      rafRef.current = requestAnimationFrame(() => {
+        const player = playerRef.current;
+        const d = player?.duration?.() ?? 0;
+        const safe = d > 0 ? Math.max(0, Math.min(d, time)) : Math.max(0, time);
+
+        setCurrentTime(safe);
+        // Using fastSeek if available helps, but standard currentTime in a raf loop is usually sufficient
+        player?.currentTime(safe);
+
+        if (seekRef.current.showOverlay) setSeekingTime(safe);
+      });
     },
     [playerRef, setCurrentTime, setSeekingTime],
   );
+
   const end = useCallback(() => {
+    // Cancel pending seeks
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+
     const player = playerRef.current;
     if (!seekRef.current.active) return;
+
     if (seekRef.current.showOverlay) setSeekingTime(null);
+
+    // FIX 3: Resume playback if it was playing before
     if (seekRef.current.wasPlaying) {
       player?.play();
       setIsPaused(false);
     }
+
     seekRef.current.active = false;
     seekRef.current.showOverlay = false;
   }, [playerRef, setIsPaused, setSeekingTime]);
+
   const cancel = useCallback(() => {
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
     if (seekRef.current.showOverlay) setSeekingTime(null);
     seekRef.current.active = false;
     seekRef.current.showOverlay = false;
   }, [setSeekingTime]);
+
   return { begin, preview, end, cancel };
 };
 
@@ -1323,19 +1364,18 @@ export default function VideoJsPlayer({
           {Icons.rotate}
         </button>
         <div className='center-area'>
-          {isPaused && (
-            <button
-              type='button'
-              className='big-play-btn'
-              onClick={(e) => {
-                e.stopPropagation();
-                togglePlay();
-              }}
-              aria-label={isPaused ? 'Play' : 'Pause'}
-            >
-              {Icons.bigPlay}
-            </button>
-          )}
+          {/* FIX 2: Render center button regardless of pause state, toggle icon */}
+          <button
+            type='button'
+            className='big-play-btn'
+            onClick={(e) => {
+              e.stopPropagation();
+              togglePlay();
+            }}
+            aria-label={isPaused ? 'Play' : 'Pause'}
+          >
+            {isPaused ? Icons.bigPlay : Icons.bigPause}
+          </button>
         </div>
         <div className='bottom-bar'>
           <button

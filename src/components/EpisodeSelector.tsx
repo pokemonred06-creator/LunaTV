@@ -524,7 +524,7 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
                           }`}
                     >
                       {/* Poster - Correct Aspect Ratio & Logic */}
-                      <div className='shrink-0 w-12 aspect-[2/3] bg-gray-300 dark:bg-gray-600 rounded overflow-hidden relative'>
+                      <div className='shrink-0 w-12 aspect-2/3 bg-gray-300 dark:bg-gray-600 rounded overflow-hidden relative'>
                         {!!source.poster && (
                           <img
                             src={processImageUrl(source.poster)}
