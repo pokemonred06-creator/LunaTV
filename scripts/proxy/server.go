@@ -25,6 +25,7 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"os"
 	"os/signal"
@@ -85,7 +86,7 @@ var (
 	privateIPBlocks []*net.IPNet
 )
 
-const DefaultUserAgent = "AptvPlayer/1.4.10"
+const DefaultUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
 // ===== Initialization & Security =====
 
@@ -144,9 +145,15 @@ func init() {
 		ForceAttemptHTTP2:     true,
 	}
 
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		log.Fatalf("Failed to create cookie jar: %v", err)
+	}
+
 	client = &http.Client{
 		Transport: transport,
 		Timeout:   60 * time.Second,
+		Jar:       jar,
 	}
 }
 
@@ -854,7 +861,11 @@ func handleSegment(w http.ResponseWriter, r *http.Request) {
 
 	// 2) Cache miss + no validators => singleflight
 	data, headers, err := sfGroup.Do(cacheKey, func() ([]byte, http.Header, error) {
-		resp, err := fetchWithRetry(r.Context(), "GET", targetURL, ua, nil)
+		// ✅ Resilience: Use detached context so client disconnects don't kill the fetch for others (or cache population)
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+
+		resp, err := fetchWithRetry(ctx, "GET", targetURL, ua, nil)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -1031,9 +1042,39 @@ func handleLogo(w http.ResponseWriter, r *http.Request) {
 	handlePassThrough(w, r, targetURL, r.URL.Query().Get("moontv-source"), "", 86400)
 }
 
+func handleFLV(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.Error(w, "Method Not Allowed", 405)
+		return
+	}
+
+	rawURL := r.URL.Query().Get("url")
+	if rawURL == "" {
+		http.Error(w, "Missing url", 400)
+		return
+	}
+
+	targetURL, err := url.QueryUnescape(rawURL)
+	if err != nil {
+		targetURL = rawURL
+	}
+	if err := validateTargetURL(targetURL); err != nil {
+		http.Error(w, "Invalid target URL", 403)
+		return
+	}
+
+	// FLV streams are long-lived, so we treat them like segments but with streaming
+	handlePassThrough(w, r, targetURL, r.URL.Query().Get("moontv-source"), "video/x-flv", 0)
+}
+
 func handlePassThrough(w http.ResponseWriter, r *http.Request, targetURL, sourceKey, defaultType string, cacheSeconds int) {
 	ua := getUserAgent(sourceKey)
 	reqHeaders := forwardableHeaders(r)
+
+	// Inject Referer for Huya/Douzhicloud to avoid 403 Forbidden
+	if strings.Contains(targetURL, "huya") || strings.Contains(targetURL, "douzhicloud") {
+		reqHeaders["Referer"] = "https://www.huya.com/"
+	}
 
 	if handleHeadProxy(w, r, targetURL, ua, reqHeaders) {
 		return
@@ -1041,7 +1082,8 @@ func handlePassThrough(w http.ResponseWriter, r *http.Request, targetURL, source
 
 	resp, err := fetchWithRetry(r.Context(), r.Method, targetURL, ua, reqHeaders)
 	if err != nil {
-		http.Error(w, "Fetch error", 502)
+		log.Printf("[Proxy Error] %s %s | Error: %v", r.Method, targetURL, err)
+		http.Error(w, fmt.Sprintf("Fetch error: %v", err), 502)
 		return
 	}
 	defer resp.Body.Close()
@@ -1111,7 +1153,8 @@ func handleImageProxy(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := fetchWithRetry(r.Context(), r.Method, finalURL, "Mozilla/5.0", headers)
 	if err != nil {
-		http.Error(w, "Fetch error", 502)
+		log.Printf("[Image Proxy Error] %s | Error: %v", finalURL, err)
+		http.Error(w, fmt.Sprintf("Fetch error: %v", err), 502)
 		return
 	}
 	defer resp.Body.Close()
@@ -1326,6 +1369,7 @@ func main() {
 	mux.HandleFunc("/api/proxy/segment", handleSegment)
 	mux.HandleFunc("/api/proxy/key", handleKey)
 	mux.HandleFunc("/api/proxy/logo", handleLogo)
+	mux.HandleFunc("/api/proxy/flv", handleFLV)
 	mux.HandleFunc("/api/image-proxy", handleImageProxy)
 	mux.HandleFunc("/health", handleHealth)
 

@@ -9,6 +9,7 @@ const nextConfig = {
   // },
 
   reactStrictMode: true,
+  optimizeFonts: false,
 
   // Proxy routes to Go server running on port 8080
   async rewrites() {

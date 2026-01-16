@@ -326,7 +326,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
     
     if (showMobileActions) {
       // Long press triggered (Magnify)
-      return `${baseClasses} scale-110 z-[500] brightness-110`;
+      return `${baseClasses} scale-110 z-500 brightness-110`;
     }
     
     if (isPressed) {
@@ -335,7 +335,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
     }
     
     // Idle state
-    return `${baseClasses} scale-100 hover:scale-[1.05] hover:z-[500]`;
+    return `${baseClasses} scale-100 hover:scale-[1.05] hover:z-500`;
   }, [showMobileActions, isPressed]);
 
   const config = useMemo(() => {
@@ -557,7 +557,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
       >
         {/* 海报容器 */}
         <div
-          className={`relative aspect-[2/3] overflow-hidden rounded-lg ${origin === 'live' ? 'ring-1 ring-gray-300/80 dark:ring-gray-600/80' : ''}`}
+          className={`relative aspect-2/3 overflow-hidden rounded-lg ${origin === 'live' ? 'ring-1 ring-gray-300/80 dark:ring-gray-600/80' : ''}`}
           style={{
             WebkitUserSelect: 'none',
             userSelect: 'none',
@@ -569,7 +569,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
           }}
         >
           {/* 骨架屏 */}
-          {!isLoading && <ImagePlaceholder aspectRatio='aspect-[2/3]' />}
+          {!isLoading && <ImagePlaceholder aspectRatio='aspect-2/3' />}
           {/* 图片 */}
           <Image
             src={processImageUrl(actualPoster)}
@@ -608,7 +608,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
 
           {/* 悬浮遮罩 */}
           <div
-            className='absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent transition-opacity duration-300 ease-in-out opacity-0 group-hover:opacity-100'
+            className='absolute inset-0 bg-linear-to-t from-black/80 via-black/20 to-transparent transition-opacity duration-300 ease-in-out opacity-0 group-hover:opacity-100'
             style={{
               WebkitUserSelect: 'none',
               userSelect: 'none',
@@ -870,7 +870,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
 
                     return (
                       <div
-                        className='absolute bottom-full mb-2 opacity-0 invisible group-hover/sources:opacity-100 group-hover/sources:visible transition-all duration-200 ease-out delay-100 pointer-events-none z-50 right-0 sm:right-0 -translate-x-0 sm:translate-x-0'
+                        className='absolute bottom-full mb-2 opacity-0 invisible group-hover/sources:opacity-100 group-hover/sources:visible transition-all duration-200 ease-out delay-100 pointer-events-none z-50 right-0 sm:right-0 translate-x-0 sm:translate-x-0'
                         style={{
                           WebkitUserSelect: 'none',
                           userSelect: 'none',
@@ -897,7 +897,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
                           <div className='space-y-0.5 sm:space-y-1'>
                             {displaySources.map((sourceName, index) => (
                               <div key={index} className='flex items-center gap-1 sm:gap-1.5'>
-                                <div className='w-0.5 h-0.5 sm:w-1 sm:h-1 bg-blue-400 rounded-full flex-shrink-0'></div>
+                                <div className='w-0.5 h-0.5 sm:w-1 sm:h-1 bg-blue-400 rounded-full shrink-0'></div>
                                 <span className='truncate text-[10px] sm:text-xs leading-tight' title={convert(sourceName)}>
                                   {convert(sourceName)}
                                 </span>
@@ -915,7 +915,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
                           )}
 
                           {/* 小箭头 */}
-                          <div className='absolute top-full right-2 sm:right-3 w-0 h-0 border-l-[4px] border-r-[4px] border-t-[4px] sm:border-l-[6px] sm:border-r-[6px] sm:border-t-[6px] border-transparent border-t-gray-800/90'></div>
+                          <div className='absolute top-full right-2 sm:right-3 w-0 h-0 border-l-4 border-r-4 border-t-4 sm:border-l-[6px] sm:border-r-[6px] sm:border-t-[6px] border-transparent border-t-gray-800/90'></div>
                         </div>
                       </div>
                     );

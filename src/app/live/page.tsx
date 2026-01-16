@@ -312,6 +312,13 @@ function useLiveCore() {
   };
 }
 
+// Helper to guess stream type from URL
+const guessType = (url: string) => {
+  if (url.includes('.flv') || url.includes('/huya/') || url.includes('douyu') || url.includes('.xs')) return 'flv';
+  if (url.includes('.m3u8')) return 'm3u8';
+  return 'm3u8'; // default
+};
+
 // 2. Player State Hook (Updated with FLV check logic)
 function usePlayerState(videoUrl: string, sourceKey?: string) {
   const [proxiedUrl, setProxiedUrl] = useState('');
@@ -342,8 +349,12 @@ function usePlayerState(videoUrl: string, sourceKey?: string) {
         const data = await res.json();
 
         if (!controller.signal.aborted) {
-          // If detected type is 'flv', ensure Video.js can handle it or block it if you prefer
-          const detected = data.type || 'm3u8';
+          let detected = data.type;
+          
+          // Fallback if detection fails or is unknown
+          if (!detected || detected === 'unknown') {
+             detected = guessType(videoUrl);
+          }
 
           // Allow: m3u8, unknown, and flv (if you have the tech)
           if (
@@ -364,11 +375,13 @@ function usePlayerState(videoUrl: string, sourceKey?: string) {
         }
       } catch (e: unknown) {
         if (e instanceof Error && e.name !== 'AbortError') {
-          console.warn('Precheck failed, attempting default m3u8 playback:', e);
+          console.warn('Precheck failed, attempting heuristic playback:', e);
+          const fallbackType = guessType(videoUrl);
           setUnsupportedType(null);
-          setStreamType('m3u8');
+          setStreamType(fallbackType as 'm3u8' | 'flv');
+          const typeParam = fallbackType === 'flv' ? 'flv' : 'm3u8';
           setProxiedUrl(
-            `/api/proxy/m3u8?url=${encodeURIComponent(videoUrl)}&moontv-source=${sourceKey}`,
+            `/api/proxy/${typeParam}?url=${encodeURIComponent(videoUrl)}&moontv-source=${sourceKey}`,
           );
         }
       } finally {
@@ -573,13 +586,20 @@ function LivePageClient() {
           overrideNative: !isIOS,
         },
       },
-      // If stream is FLV, techOrder should prioritize 'flvjs' if installed
-      techOrder: streamType === 'flv' ? ['flvjs', 'html5'] : ['html5'],
+      // Always include flvjs in techOrder to support fallback or auto-detection
+      techOrder: ['html5', 'flvjs'],
       controlBar: {
         pictureInPictureToggle: false,
       },
+      flvjs: {
+        mediaDataSource: {
+          isLive: true,
+          cors: true,
+          withCredentials: false,
+        },
+      },
     }),
-    [isIOS, streamType],
+    [isIOS],
   );
 
   const scrollToChannel = useCallback((id: string) => {
@@ -825,6 +845,7 @@ function LivePageClient() {
                       currentChannel?.logo || '',
                       currentSource?.key,
                     )}
+                    type={streamType === 'flv' ? 'video/x-flv' : 'application/x-mpegURL'}
                     autoPlay={true}
                     onReady={handlePlayerReady}
                     className='w-full h-full'
