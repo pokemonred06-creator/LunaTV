@@ -4,12 +4,12 @@ import Hls from 'hls.js';
 
 function getDoubanImageProxyConfig(): {
   proxyType:
-  | 'direct'
-  | 'server'
-  | 'img3'
-  | 'cmliussss-cdn-tencent'
-  | 'cmliussss-cdn-ali'
-  | 'custom';
+    | 'direct'
+    | 'server'
+    | 'img3'
+    | 'cmliussss-cdn-tencent'
+    | 'cmliussss-cdn-ali'
+    | 'custom';
   proxyUrl: string;
 } {
   const doubanImageProxyType =
@@ -39,9 +39,10 @@ export function processImageUrl(originalUrl: string): string {
 
   // 2. 如果当前是 HTTPS 环境，但图片是 HTTP，则自动使用代理以避免混合内容错误
   // 也会处理原本是 http:// 的 tyyswimg.com 等资源
-  const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:';
+  const isHttps =
+    typeof window !== 'undefined' && window.location.protocol === 'https:';
   const isHttpRequest = originalUrl.startsWith('http://');
-  
+
   if (isHttps && isHttpRequest) {
     // 除了已处理的（如 doubanio 会在下面 case 中处理），其他所有 HTTP 图片走 server 代理
     if (!originalUrl.includes('doubanio.com')) {
@@ -63,12 +64,12 @@ export function processImageUrl(originalUrl: string): string {
     case 'cmliussss-cdn-tencent':
       return originalUrl.replace(
         /img\d+\.doubanio\.com/g,
-        'img.doubanio.cmliussss.net'
+        'img.doubanio.cmliussss.net',
       );
     case 'cmliussss-cdn-ali':
       return originalUrl.replace(
         /img\d+\.doubanio\.com/g,
-        'img.doubanio.cmliussss.com'
+        'img.doubanio.cmliussss.com',
       );
     case 'custom':
       return `${proxyUrl}${encodeURIComponent(originalUrl)}`;
@@ -301,13 +302,22 @@ async function getVideoResolutionWithHls(m3u8Url: string): Promise<{
  * 从m3u8地址获取视频质量等级和网络信息
  * 使用混合策略：先尝试快速M3U8文本解析，如果没有分辨率标签则回退到HLS.js方法
  * @param m3u8Url m3u8播放列表的URL
+ * @param options Optional configuration including AbortSignal
  * @returns Promise<{quality: string, loadSpeed: string, pingTime: number}> 视频质量等级和网络信息
  */
-export async function getVideoResolutionFromM3u8(m3u8Url: string): Promise<{
+export async function getVideoResolutionFromM3u8(
+  m3u8Url: string,
+  options?: { signal?: AbortSignal },
+): Promise<{
   quality: string; // 如720p、1080p等
   loadSpeed: string; // 自动转换为KB/s或MB/s
   pingTime: number; // 网络延迟（毫秒）
 }> {
+  // Check if aborted before starting
+  if (options?.signal?.aborted) {
+    throw new DOMException('Aborted', 'AbortError');
+  }
+
   // 直接使用 HLS 方法，以确保测速准确（需要下载真实分片）
   // 之前的 Fast 方法只下载文本文件，导致测速结果极低且不准确
   return await getVideoResolutionWithHls(m3u8Url);
@@ -337,10 +347,6 @@ export function isForcedMobile(): boolean {
   const searchParams = new URLSearchParams(window.location.search);
   const cookieMatch = document.cookie.match(/mobile=1/);
   const storageMatch = localStorage.getItem('mobile') === '1';
-  
-  return (
-    searchParams.get('mobile') === '1' ||
-    !!cookieMatch ||
-    storageMatch
-  );
+
+  return searchParams.get('mobile') === '1' || !!cookieMatch || storageMatch;
 }

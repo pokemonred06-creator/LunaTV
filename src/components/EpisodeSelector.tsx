@@ -12,41 +12,29 @@ import React, {
 import { SearchResult } from '@/lib/types';
 import { getVideoResolutionFromM3u8, processImageUrl } from '@/lib/utils';
 
-// 定义视频信息类型
 interface VideoInfo {
   quality: string;
   loadSpeed: string;
   pingTime: number;
-  hasError?: boolean; // 添加错误状态标识
+  hasError?: boolean;
 }
 
 interface EpisodeSelectorProps {
-  /** 总集数 */
   totalEpisodes: number;
-  /** 剧集标题 */
   episodes_titles: string[];
-  /** 每页显示多少集，默认 50 */
   episodesPerPage?: number;
-  /** 当前选中的集数（1 开始） */
   value?: number;
-  /** 用户点击选集后的回调 */
   onChange?: (episodeNumber: number) => void;
-  /** 换源相关 */
   onSourceChange?: (source: string, id: string, title: string) => void;
   currentSource?: string;
   currentId?: string;
   videoTitle?: string;
-  videoYear?: string;
   availableSources?: SearchResult[];
   sourceSearchLoading?: boolean;
   sourceSearchError?: string | null;
-  /** 预计算的测速结果，避免重复测速 */
   precomputedVideoInfo?: Map<string, VideoInfo>;
 }
 
-/**
- * 选集组件，支持分页、自动滚动聚焦当前分页标签，以及换源功能。
- */
 const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
   totalEpisodes,
   episodes_titles,
@@ -63,21 +51,33 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
   precomputedVideoInfo,
 }) => {
   const router = useRouter();
+
+  // --- 1. Optimistic UI State ---
+  const [optimisticValue, setOptimisticValue] = useState(value);
+  const lastIntentRef = useRef(value);
+
+  useEffect(() => {
+    if (value === lastIntentRef.current) {
+      setOptimisticValue(value);
+    }
+  }, [value]);
+
   const pageCount = Math.ceil(totalEpisodes / episodesPerPage);
 
-  // 存储每个源的视频信息
+  // Video Info State
   const [videoInfoMap, setVideoInfoMap] = useState<Map<string, VideoInfo>>(
-    new Map()
+    new Map(),
   );
   const [attemptedSources, setAttemptedSources] = useState<Set<string>>(
-    new Set()
+    new Set(),
   );
 
-  // 使用 ref 来避免闭包问题
+  // Refs for async safety
   const attemptedSourcesRef = useRef<Set<string>>(new Set());
   const videoInfoMapRef = useRef<Map<string, VideoInfo>>(new Map());
+  const fetchRunIdRef = useRef(0);
 
-  // 同步状态到 ref
+  // Keep refs in sync with state for standard renders
   useEffect(() => {
     attemptedSourcesRef.current = attemptedSources;
   }, [attemptedSources]);
@@ -86,96 +86,105 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
     videoInfoMapRef.current = videoInfoMap;
   }, [videoInfoMap]);
 
-  // 主要的 tab 状态：'episodes' 或 'sources'
-  // 当只有一集时默认展示 "换源"，并隐藏 "选集" 标签
+  // Tab State
   const [activeTab, setActiveTab] = useState<'episodes' | 'sources'>(
-    totalEpisodes > 1 ? 'episodes' : 'sources'
+    totalEpisodes > 1 ? 'episodes' : 'sources',
   );
 
-  // 当前分页索引（0 开始）
-  const initialPage = Math.floor((value - 1) / episodesPerPage);
-  const [currentPage, setCurrentPage] = useState<number>(initialPage);
+  // --- 2. Memoized Sorted Sources ---
+  const sortedSources = useMemo(() => {
+    const arr = [...availableSources];
+    return arr.sort((a, b) => {
+      const aIsCurrent =
+        String(a.source) === String(currentSource) &&
+        String(a.id) === String(currentId);
+      const bIsCurrent =
+        String(b.source) === String(currentSource) &&
+        String(b.id) === String(currentId);
+      if (aIsCurrent && !bIsCurrent) return -1;
+      if (!aIsCurrent && bIsCurrent) return 1;
+      return 0;
+    });
+  }, [availableSources, currentSource, currentId]);
 
-  // 是否倒序显示
+  // --- 3. Lazy Page Initialization ---
+  const [currentPage, setCurrentPage] = useState(() =>
+    Math.floor((value - 1) / episodesPerPage),
+  );
   const [descending, setDescending] = useState<boolean>(false);
 
-  // 根据 descending 状态计算实际显示的分页索引
-  const displayPage = useMemo(() => {
-    if (descending) {
-      return pageCount - 1 - currentPage;
+  useEffect(() => {
+    if (value === lastIntentRef.current) {
+      const newPage = Math.floor((value - 1) / episodesPerPage);
+      if (activeTab === 'episodes' && newPage !== currentPage) {
+        setCurrentPage(newPage);
+      }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value, episodesPerPage]);
+
+  const displayPage = useMemo(() => {
+    if (descending) return pageCount - 1 - currentPage;
     return currentPage;
   }, [currentPage, descending, pageCount]);
 
-  // 获取视频信息的函数 - 移除 attemptedSources 依赖避免不必要的重新创建
-  const getVideoInfo = useCallback(async (source: SearchResult) => {
-    const sourceKey = `${source.source}-${source.id}`;
+  // --- Video Info Fetching (With AbortSignal) ---
+  const getVideoInfo = useCallback(
+    async (source: SearchResult, signal?: AbortSignal) => {
+      const sourceKey = `${source.source}-${source.id}`;
+      if (attemptedSourcesRef.current.has(sourceKey)) return;
 
-    // 使用 ref 获取最新的状态，避免闭包问题
-    if (attemptedSourcesRef.current.has(sourceKey)) {
-      return;
-    }
+      if (!source.episodes || source.episodes.length === 0) return;
+      const episodeUrl =
+        source.episodes.length > 1 ? source.episodes[1] : source.episodes[0];
 
-    // 获取第一集的URL
-    if (!source.episodes || source.episodes.length === 0) {
-      return;
-    }
-    const episodeUrl =
-      source.episodes.length > 1 ? source.episodes[1] : source.episodes[0];
+      attemptedSourcesRef.current.add(sourceKey);
+      setAttemptedSources((prev) => new Set(prev).add(sourceKey));
 
-    // 标记为已尝试
-    setAttemptedSources((prev) => new Set(prev).add(sourceKey));
+      try {
+        const info = await getVideoResolutionFromM3u8(episodeUrl, { signal });
+        setVideoInfoMap((prev) => new Map(prev).set(sourceKey, info));
+      } catch (error: unknown) {
+        if (error instanceof Error && error.name === 'AbortError') return;
 
-    try {
-      const info = await getVideoResolutionFromM3u8(episodeUrl);
-      setVideoInfoMap((prev) => new Map(prev).set(sourceKey, info));
-    } catch (error) {
-      // 失败时保存错误状态
-      setVideoInfoMap((prev) =>
-        new Map(prev).set(sourceKey, {
-          quality: '错误',
-          loadSpeed: '未知',
-          pingTime: 0,
-          hasError: true,
-        })
-      );
-    }
-  }, []);
+        setVideoInfoMap((prev) =>
+          new Map(prev).set(sourceKey, {
+            quality: '错误',
+            loadSpeed: '未知',
+            pingTime: 0,
+            hasError: true,
+          }),
+        );
+      }
+    },
+    [],
+  );
 
-  // 当有预计算结果时，先合并到videoInfoMap中
+  // --- Sync Logic (Fixed: Ref Sync & Retry Prevention) ---
   useEffect(() => {
     if (precomputedVideoInfo && precomputedVideoInfo.size > 0) {
-      // 原子性地更新两个状态，避免时序问题
       setVideoInfoMap((prev) => {
         const newMap = new Map(prev);
-        precomputedVideoInfo.forEach((value, key) => {
-          newMap.set(key, value);
-        });
+        precomputedVideoInfo.forEach((value, key) => newMap.set(key, value));
         return newMap;
       });
 
       setAttemptedSources((prev) => {
         const newSet = new Set(prev);
-        precomputedVideoInfo.forEach((info, key) => {
-          if (!info.hasError) {
-            newSet.add(key);
-          }
+        // Mark ALL keys as attempted (even errors) to prevent infinite retries
+        precomputedVideoInfo.forEach((_info, key) => {
+          newSet.add(key);
         });
-        return newSet;
-      });
 
-      // 同步更新 ref，确保 getVideoInfo 能立即看到更新
-      precomputedVideoInfo.forEach((info, key) => {
-        if (!info.hasError) {
-          attemptedSourcesRef.current.add(key);
-        }
+        // FIX: Sync ref IMMEDIATELY to prevent race conditions in the fetch loop
+        attemptedSourcesRef.current = newSet;
+
+        return newSet;
       });
     }
   }, [precomputedVideoInfo]);
 
-  // 读取本地"优选和测速"开关，默认开启
   const [optimizationEnabled, setOptimizationEnabled] = useState<boolean>(true);
-  
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('enableOptimization');
@@ -183,43 +192,49 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
         try {
           setOptimizationEnabled(JSON.parse(saved));
         } catch {
-          /* ignore */
+          /* parse error */
         }
       }
     }
   }, []);
 
-  // 当切换到换源tab并且有源数据时，异步获取视频信息 - 移除 attemptedSources 依赖避免循环触发
+  // --- 4. Robust Cancellable Fetch Loop ---
   useEffect(() => {
-    const fetchVideoInfosInBatches = async () => {
-      if (
-        !optimizationEnabled || // 若关闭测速则直接退出
-        activeTab !== 'sources' ||
-        availableSources.length === 0
-      )
-        return;
+    if (!optimizationEnabled || activeTab !== 'sources') return;
 
-      // 筛选出尚未测速的播放源
-      const pendingSources = availableSources.filter((source) => {
+    const runId = ++fetchRunIdRef.current;
+    const currentRunIdRef = fetchRunIdRef; // Capture ref for cleanup
+    const ac = new AbortController();
+
+    const runSpeedTests = async () => {
+      const pendingSources = sortedSources.filter((source) => {
         const sourceKey = `${source.source}-${source.id}`;
         return !attemptedSourcesRef.current.has(sourceKey);
       });
 
       if (pendingSources.length === 0) return;
 
-      const batchSize = Math.ceil(pendingSources.length / 2);
+      // Sequential loop with yielding to main thread
+      for (const source of pendingSources) {
+        if (runId !== currentRunIdRef.current) return;
 
-      for (let start = 0; start < pendingSources.length; start += batchSize) {
-        const batch = pendingSources.slice(start, start + batchSize);
-        await Promise.all(batch.map(getVideoInfo));
+        await getVideoInfo(source, ac.signal);
+
+        if (runId !== currentRunIdRef.current) return;
+        // Vital: Yield to main thread to keep UI responsive
+        await new Promise((resolve) => setTimeout(resolve, 0));
       }
     };
 
-    fetchVideoInfosInBatches();
-    // 依赖项保持与之前一致
-  }, [activeTab, availableSources, getVideoInfo, optimizationEnabled]);
+    runSpeedTests();
 
-  // 升序分页标签
+    return () => {
+      currentRunIdRef.current++;
+      ac.abort(); // Cancel pending network requests immediately
+    };
+  }, [activeTab, sortedSources, getVideoInfo, optimizationEnabled]);
+
+  // --- Pagination Logic ---
   const categoriesAsc = useMemo(() => {
     return Array.from({ length: pageCount }, (_, i) => {
       const start = i * episodesPerPage + 1;
@@ -228,10 +243,8 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
     });
   }, [pageCount, episodesPerPage, totalEpisodes]);
 
-  // 根据 descending 状态决定分页标签的排序和内容
   const categories = useMemo(() => {
     if (descending) {
-      // 倒序时，label 也倒序显示
       return [...categoriesAsc]
         .reverse()
         .map(({ start, end }) => `${end}-${start}`);
@@ -242,153 +255,128 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
   const categoryContainerRef = useRef<HTMLDivElement>(null);
   const buttonRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
-  // 添加鼠标悬停状态管理
-  const [isCategoryHovered, setIsCategoryHovered] = useState(false);
-
-  // 阻止页面竖向滚动
-  const preventPageScroll = useCallback((e: WheelEvent) => {
-    if (isCategoryHovered) {
-      e.preventDefault();
-    }
-  }, [isCategoryHovered]);
-
-  // 处理滚轮事件，实现横向滚动
-  const handleWheel = useCallback((e: WheelEvent) => {
-    if (isCategoryHovered && categoryContainerRef.current) {
-      e.preventDefault(); // 阻止默认的竖向滚动
-
-      const container = categoryContainerRef.current;
-      const scrollAmount = e.deltaY * 2; // 调整滚动速度
-
-      // 根据滚轮方向进行横向滚动
-      container.scrollBy({
-        left: scrollAmount,
-        behavior: 'smooth'
-      });
-    }
-  }, [isCategoryHovered]);
-
-  // 添加全局wheel事件监听器
+  // --- 5. Robust Scroll Listener ---
   useEffect(() => {
-    if (isCategoryHovered) {
-      // 鼠标悬停时阻止页面滚动
-      document.addEventListener('wheel', preventPageScroll, { passive: false });
-      document.addEventListener('wheel', handleWheel, { passive: false });
-    } else {
-      // 鼠标离开时恢复页面滚动
-      document.removeEventListener('wheel', preventPageScroll);
-      document.removeEventListener('wheel', handleWheel);
-    }
+    const el = categoryContainerRef.current;
+    if (!el || activeTab !== 'episodes') return;
+
+    const onWheel = (e: WheelEvent) => {
+      const rect = el.getBoundingClientRect();
+      const x = e.clientX;
+      const y = e.clientY;
+
+      const inside =
+        x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+      if (!inside) return;
+
+      const maxScrollLeft = el.scrollWidth - el.clientWidth;
+      if (maxScrollLeft <= 0) return;
+
+      const atLeft = el.scrollLeft <= 0;
+      const atRight = el.scrollLeft >= maxScrollLeft - 1;
+      const scrollingUp = e.deltaY < 0;
+      const scrollingDown = e.deltaY > 0;
+
+      if ((atLeft && scrollingUp) || (atRight && scrollingDown)) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+      el.scrollBy({ left: e.deltaY, behavior: 'auto' });
+    };
+
+    el.addEventListener('wheel', onWheel, { passive: false });
 
     return () => {
-      document.removeEventListener('wheel', preventPageScroll);
-      document.removeEventListener('wheel', handleWheel);
+      el.removeEventListener('wheel', onWheel);
     };
-  }, [isCategoryHovered, preventPageScroll, handleWheel]);
+  }, [activeTab]);
 
-  // 当分页切换时，将激活的分页标签滚动到视口中间
   useEffect(() => {
     const btn = buttonRefs.current[displayPage];
     const container = categoryContainerRef.current;
     if (btn && container) {
-      // 手动计算滚动位置，只滚动分页标签容器
       const containerRect = container.getBoundingClientRect();
       const btnRect = btn.getBoundingClientRect();
       const scrollLeft = container.scrollLeft;
-
-      // 计算按钮相对于容器的位置
       const btnLeft = btnRect.left - containerRect.left + scrollLeft;
-      const btnWidth = btnRect.width;
-      const containerWidth = containerRect.width;
+      const targetScrollLeft =
+        btnLeft - (containerRect.width - btnRect.width) / 2;
 
-      // 计算目标滚动位置，使按钮居中
-      const targetScrollLeft = btnLeft - (containerWidth - btnWidth) / 2;
-
-      // 平滑滚动到目标位置
-      container.scrollTo({
-        left: targetScrollLeft,
-        behavior: 'smooth',
-      });
+      container.scrollTo({ left: targetScrollLeft, behavior: 'smooth' });
     }
-  }, [displayPage, pageCount]);
-
-  // 处理换源tab点击，只在点击时才搜索
-  const handleSourceTabClick = () => {
-    setActiveTab('sources');
-  };
+  }, [displayPage, pageCount, activeTab]);
 
   const handleCategoryClick = useCallback(
     (index: number) => {
       if (descending) {
-        // 在倒序时，需要将显示索引转换为实际索引
         setCurrentPage(pageCount - 1 - index);
       } else {
         setCurrentPage(index);
       }
     },
-    [descending, pageCount]
+    [descending, pageCount],
   );
 
   const handleEpisodeClick = useCallback(
     (episodeNumber: number) => {
+      lastIntentRef.current = episodeNumber;
+      setOptimisticValue(episodeNumber);
       onChange?.(episodeNumber);
     },
-    [onChange]
+    [onChange],
   );
 
   const handleSourceClick = useCallback(
     (source: SearchResult) => {
       onSourceChange?.(source.source, source.id, source.title);
     },
-    [onSourceChange]
+    [onSourceChange],
   );
 
   const currentStart = currentPage * episodesPerPage + 1;
   const currentEnd = Math.min(
     currentStart + episodesPerPage - 1,
-    totalEpisodes
+    totalEpisodes,
   );
 
   return (
-    <div className='md:ml-2 px-4 py-0 h-full rounded-xl bg-black/10 dark:bg-white/5 flex flex-col border border-white/0 dark:border-white/30 overflow-hidden'>
-      {/* 主要的 Tab 切换 - 无缝融入设计 */}
+    <div className='md:ml-2 px-4 py-0 h-full rounded-xl bg-black/10 dark:bg-white/5 flex flex-col border border-white/0 dark:border-white/30 overflow-hidden relative'>
+      {/* Tabs */}
       <div className='flex mb-1 -mx-6 shrink-0'>
         {totalEpisodes > 1 && (
           <div
             onClick={() => setActiveTab('episodes')}
-            className={`flex-1 py-3 px-6 text-center cursor-pointer transition-all duration-200 font-medium
-              ${activeTab === 'episodes'
-                ? 'text-green-600 dark:text-green-400'
-                : 'text-gray-700 hover:text-green-600 bg-black/5 dark:bg-white/5 dark:text-gray-300 dark:hover:text-green-400 hover:bg-black/3 dark:hover:bg-white/3'
-              }
-            `.trim()}
+            className={`flex-1 py-3 px-6 text-center cursor-pointer transition-all duration-200 font-medium select-none
+              ${
+                activeTab === 'episodes'
+                  ? 'text-green-600 dark:text-green-400'
+                  : 'text-gray-700 hover:text-green-600 bg-black/5 dark:bg-white/5 dark:text-gray-300 dark:hover:text-green-400 hover:bg-black/3 dark:hover:bg-white/3'
+              }`}
           >
             选集
           </div>
         )}
         <div
-          onClick={handleSourceTabClick}
-          className={`flex-1 py-3 px-6 text-center cursor-pointer transition-all duration-200 font-medium
-            ${activeTab === 'sources'
-              ? 'text-green-600 dark:text-green-400'
-              : 'text-gray-700 hover:text-green-600 bg-black/5 dark:bg-white/5 dark:text-gray-300 dark:hover:text-green-400 hover:bg-black/3 dark:hover:bg-white/3'
-            }
-          `.trim()}
+          onClick={() => setActiveTab('sources')}
+          className={`flex-1 py-3 px-6 text-center cursor-pointer transition-all duration-200 font-medium select-none
+            ${
+              activeTab === 'sources'
+                ? 'text-green-600 dark:text-green-400'
+                : 'text-gray-700 hover:text-green-600 bg-black/5 dark:bg-white/5 dark:text-gray-300 dark:hover:text-green-400 hover:bg-black/3 dark:hover:bg-white/3'
+            }`}
         >
           换源
         </div>
       </div>
 
-      {/* 选集 Tab 内容 */}
+      {/* Episode List Tab */}
       {activeTab === 'episodes' && (
         <>
-          {/* 分类标签 */}
+          {/* Categories */}
           <div className='flex items-center gap-4 mb-4 border-b border-gray-300 dark:border-gray-700 -mx-6 px-6 shrink-0'>
             <div
-              className='flex-1 overflow-x-auto'
+              className='flex-1 overflow-x-auto scrollbar-hide'
               ref={categoryContainerRef}
-              onMouseEnter={() => setIsCategoryHovered(true)}
-              onMouseLeave={() => setIsCategoryHovered(false)}
             >
               <div className='flex gap-2 min-w-max'>
                 {categories.map((label, idx) => {
@@ -400,12 +388,12 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
                         buttonRefs.current[idx] = el;
                       }}
                       onClick={() => handleCategoryClick(idx)}
-                      className={`w-20 relative py-2 text-sm font-medium transition-colors whitespace-nowrap shrink-0 text-center 
-                        ${isActive
-                          ? 'text-green-500 dark:text-green-400'
-                          : 'text-gray-700 hover:text-green-600 dark:text-gray-300 dark:hover:text-green-400'
-                        }
-                      `.trim()}
+                      className={`w-20 relative py-2 text-sm font-medium transition-colors whitespace-nowrap shrink-0 text-center select-none
+                        ${
+                          isActive
+                            ? 'text-green-500 dark:text-green-400'
+                            : 'text-gray-700 hover:text-green-600 dark:text-gray-300 dark:hover:text-green-400'
+                        }`}
                     >
                       {label}
                       {isActive && (
@@ -416,13 +404,10 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
                 })}
               </div>
             </div>
-            {/* 向上/向下按钮 */}
+            {/* Sort Toggle */}
             <button
               className='shrink-0 w-8 h-8 rounded-md flex items-center justify-center text-gray-700 hover:text-green-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:text-green-400 dark:hover:bg-white/20 transition-colors transform translate-y-[-4px]'
-              onClick={() => {
-                // 切换集数排序（正序/倒序）
-                setDescending((prev) => !prev);
-              }}
+              onClick={() => setDescending((prev) => !prev)}
             >
               <svg
                 className='w-4 h-4'
@@ -440,38 +425,37 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
             </button>
           </div>
 
-          {/* 集数网格 */}
-          <div className='flex flex-wrap gap-3 overflow-y-auto flex-1 content-start pb-4'>
+          {/* Grid */}
+          <div className='flex flex-wrap gap-3 overflow-y-auto flex-1 content-start pb-4 min-h-0'>
             {(() => {
               const len = currentEnd - currentStart + 1;
               const episodes = Array.from({ length: len }, (_, i) =>
-                descending ? currentEnd - i : currentStart + i
+                descending ? currentEnd - i : currentStart + i,
               );
               return episodes;
             })().map((episodeNumber) => {
-              const isActive = episodeNumber === value;
+              const isActive = episodeNumber === optimisticValue;
+              const title = episodes_titles?.[episodeNumber - 1];
+
+              let displayText = String(episodeNumber);
+              if (title) {
+                const match = title.match(/(?:第)?(\d+)(?:集|话)/);
+                if (match) displayText = match[1];
+                else displayText = title;
+              }
+
               return (
                 <button
                   key={episodeNumber}
-                  onClick={() => handleEpisodeClick(episodeNumber - 1)}
-                  className={`h-10 min-w-10 px-3 py-2 flex items-center justify-center text-sm font-medium rounded-md transition-all duration-200 whitespace-nowrap font-mono
-                    ${isActive
-                      ? 'bg-green-500 text-white shadow-lg shadow-green-500/25 dark:bg-green-600'
-                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300 hover:scale-105 dark:bg-white/10 dark:text-gray-300 dark:hover:bg-white/20'
-                    }`.trim()}
+                  onClick={() => handleEpisodeClick(episodeNumber)}
+                  className={`h-10 min-w-10 px-3 py-2 flex items-center justify-center text-sm font-medium rounded-md transition-all duration-200 whitespace-nowrap font-mono select-none
+                    ${
+                      isActive
+                        ? 'bg-green-500 text-white shadow-lg shadow-green-500/25 dark:bg-green-600 scale-105'
+                        : 'bg-gray-200 text-gray-700 hover:bg-gray-300 hover:scale-105 active:scale-95 dark:bg-white/10 dark:text-gray-300 dark:hover:bg-white/20'
+                    }`}
                 >
-                  {(() => {
-                    const title = episodes_titles?.[episodeNumber - 1];
-                    if (!title) {
-                      return episodeNumber;
-                    }
-                    // 如果匹配"第X集"、"第X话"、"X集"、"X话"格式，提取中间的数字
-                    const match = title.match(/(?:第)?(\d+)(?:集|话)/);
-                    if (match) {
-                      return match[1];
-                    }
-                    return title;
-                  })()}
+                  {displayText}
                 </button>
               );
             })}
@@ -479,9 +463,9 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
         </>
       )}
 
-      {/* 换源 Tab 内容 */}
+      {/* Source List Tab */}
       {activeTab === 'sources' && (
-        <div className='flex flex-col h-full mt-4'>
+        <div className='flex flex-col h-full mt-4 min-h-0'>
           {sourceSearchLoading && (
             <div className='flex items-center justify-center py-8'>
               <div className='animate-spin rounded-full h-8 w-8 border-b-2 border-green-500'></div>
@@ -518,177 +502,123 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
           {!sourceSearchLoading &&
             !sourceSearchError &&
             availableSources.length > 0 && (
-              <div className='flex-1 overflow-y-auto space-y-2 pb-20'>
-                {availableSources
-                  .sort((a, b) => {
-                    const aIsCurrent =
-                      a.source?.toString() === currentSource?.toString() &&
-                      a.id?.toString() === currentId?.toString();
-                    const bIsCurrent =
-                      b.source?.toString() === currentSource?.toString() &&
-                      b.id?.toString() === currentId?.toString();
-                    if (aIsCurrent && !bIsCurrent) return -1;
-                    if (!aIsCurrent && bIsCurrent) return 1;
-                    return 0;
-                  })
-                  .map((source, index) => {
-                    const isCurrentSource =
-                      source.source?.toString() === currentSource?.toString() &&
-                      source.id?.toString() === currentId?.toString();
-                    return (
-                      <div
-                        key={`${source.source}-${source.id}`}
-                        onClick={() =>
-                          !isCurrentSource && handleSourceClick(source)
-                        }
-                        className={`flex items-start gap-3 px-2 py-3 rounded-lg transition-all select-none duration-200 relative
-                      ${isCurrentSource
-                            ? 'bg-green-500/10 dark:bg-green-500/20 border-green-500/30 border'
-                            : 'hover:bg-gray-200/50 dark:hover:bg-white/10 hover:scale-[1.02] cursor-pointer'
-                          }`.trim()}
-                      >
-                        {/* 封面 */}
-                        <div className='shrink-0 w-12 h-20 bg-gray-300 dark:bg-gray-600 rounded overflow-hidden'>
-                          {source.episodes && source.episodes.length > 0 && (
-                            <img
-                              src={processImageUrl(source.poster)}
-                              alt={source.title}
-                              className='w-full h-full object-cover'
-                              onError={(e) => {
-                                const target = e.target as HTMLImageElement;
-                                target.style.display = 'none';
-                              }}
-                            />
-                          )}
-                        </div>
+              <div className='flex-1 overflow-y-auto space-y-2 pb-20 pr-1'>
+                {sortedSources.map((source, index) => {
+                  const isCurrentSource =
+                    source.source?.toString() === currentSource?.toString() &&
+                    source.id?.toString() === currentId?.toString();
+                  const sourceKey = `${source.source}-${source.id}`;
+                  const videoInfo = videoInfoMap.get(sourceKey);
 
-                        {/* 信息区域 */}
-                        <div className='flex-1 min-w-0 flex flex-col justify-between h-20'>
-                          {/* 标题和分辨率 - 顶部 */}
-                          <div className='flex items-start justify-between gap-3 h-6'>
-                            <div className='flex-1 min-w-0 relative group/title'>
-                              <h3 className='font-medium text-base truncate text-gray-900 dark:text-gray-100 leading-none'>
+                  return (
+                    <div
+                      key={sourceKey}
+                      onClick={() =>
+                        !isCurrentSource && handleSourceClick(source)
+                      }
+                      className={`flex items-start gap-3 px-2 py-3 rounded-lg transition-all select-none duration-200 relative
+                          ${
+                            isCurrentSource
+                              ? 'bg-green-500/10 dark:bg-green-500/20 border-green-500/30 border'
+                              : 'hover:bg-gray-200/50 dark:hover:bg-white/10 hover:scale-[1.02] cursor-pointer'
+                          }`}
+                    >
+                      {/* Poster - Correct Aspect Ratio & Logic */}
+                      <div className='shrink-0 w-12 aspect-[2/3] bg-gray-300 dark:bg-gray-600 rounded overflow-hidden relative'>
+                        {!!source.poster && (
+                          <img
+                            src={processImageUrl(source.poster)}
+                            alt={source.title}
+                            loading='lazy'
+                            className='w-full h-full object-cover object-center'
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).style.display =
+                                'none';
+                            }}
+                          />
+                        )}
+                      </div>
+
+                      {/* Info */}
+                      <div className='flex-1 min-w-0 flex flex-col justify-between h-20'>
+                        <div className='flex items-start justify-between gap-3 h-6'>
+                          <div className='flex-1 min-w-0 relative group/title'>
+                            <h3 className='font-medium text-base truncate text-gray-900 dark:text-gray-100 leading-none'>
+                              {source.title}
+                            </h3>
+                            {index !== 0 && (
+                              <div className='absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-1 bg-gray-800 text-white text-xs rounded-md shadow-lg opacity-0 invisible group-hover/title:opacity-100 group-hover/title:visible transition-all duration-200 z-50 pointer-events-none whitespace-nowrap'>
                                 {source.title}
-                              </h3>
-                              {/* 标题级别的 tooltip - 第一个元素不显示 */}
-                              {index !== 0 && (
-                                <div className='absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-1 bg-gray-800 text-white text-xs rounded-md shadow-lg opacity-0 invisible group-hover/title:opacity-100 group-hover/title:visible transition-all duration-200 ease-out delay-100 whitespace-nowrap z-500 pointer-events-none'>
-                                  {source.title}
-                                  <div className='absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-800'></div>
-                                </div>
-                              )}
-                            </div>
-                            {(() => {
-                              const sourceKey = `${source.source}-${source.id}`;
-                              const videoInfo = videoInfoMap.get(sourceKey);
-
-                              if (videoInfo) {
-                                if (videoInfo.hasError) {
-                                  return (
-                                    <div className='bg-gray-500/10 dark:bg-gray-400/20 text-red-600 dark:text-red-400 px-1.5 py-0 rounded text-xs shrink-0 min-w-[50px] text-center'>
-                                      检测失败
-                                    </div>
-                                  );
-                                } else {
-                                  // 如果质量未知，不显示任何标签（leave it）
-                                  if (videoInfo.quality === '未知' || videoInfo.quality === 'Unknown') {
-                                    return null;
-                                  }
-
-                                  // 直接显示原始分辨率（包括 SD）
-                                  const displayQuality = videoInfo.quality;
-
-                                  // 根据分辨率设置不同颜色
-                                  const isUltraHigh = ['4K', '2K'].includes(
-                                    displayQuality
-                                  );
-                                  const isHigh = ['1080p', '720p'].includes(
-                                    displayQuality
-                                  );
-                                  const isNormal = ['480p', 'SD'].includes(
-                                    displayQuality
-                                  );
-
-                                  let textColorClasses =
-                                    'text-gray-500 dark:text-gray-400';
-
-                                  if (isUltraHigh) {
-                                    textColorClasses =
-                                      'text-purple-600 dark:text-purple-400';
-                                  } else if (isHigh) {
-                                    textColorClasses =
-                                      'text-green-600 dark:text-green-400';
-                                  } else if (isNormal) {
-                                    textColorClasses =
-                                      'text-yellow-600 dark:text-yellow-400';
-                                  }
-
-                                  return (
-                                    <div
-                                      className={`bg-gray-500/10 dark:bg-gray-400/20 ${textColorClasses} px-1.5 py-0 rounded text-xs shrink-0 min-w-[50px] text-center`}
-                                    >
-                                      {displayQuality}
-                                    </div>
-                                  );
-                                }
-                              }
-
-                              return null;
-                            })()}
-                          </div>
-
-                          {/* 源名称和集数信息 - 垂直居中 */}
-                          <div className='flex items-center justify-between'>
-                            <span className='text-xs px-2 py-1 border border-gray-500/60 rounded text-gray-700 dark:text-gray-300'>
-                              {source.source_name}
-                            </span>
-                            {source.episodes.length > 1 && (
-                              <span className='text-xs text-gray-500 dark:text-gray-400 font-medium'>
-                                {source.episodes.length} 集
-                              </span>
+                                <div className='absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-800'></div>
+                              </div>
                             )}
                           </div>
 
-                          {/* 网络信息 - 底部 */}
-                          <div className='flex items-end h-6'>
-                            {(() => {
-                              const sourceKey = `${source.source}-${source.id}`;
-                              const videoInfo = videoInfoMap.get(sourceKey);
-                              if (videoInfo) {
-                                if (!videoInfo.hasError) {
-                                  return (
-                                    <div className='flex items-end gap-3 text-xs'>
-                                      <div className='text-green-600 dark:text-green-400 font-medium text-xs'>
-                                        {videoInfo.loadSpeed}
-                                      </div>
-                                      <div className='text-orange-600 dark:text-orange-400 font-medium text-xs'>
-                                        {videoInfo.pingTime}ms
-                                      </div>
-                                    </div>
-                                  );
-                                } else {
-                                  return (
-                                    <div className='text-red-500/90 dark:text-red-400 font-medium text-xs'>
-                                      无测速数据
-                                    </div>
-                                  ); // 占位div
-                                }
-                              }
-                            })()}
-                          </div>
+                          {/* Quality Tags */}
+                          {videoInfo &&
+                            !videoInfo.hasError &&
+                            videoInfo.quality !== '未知' &&
+                            videoInfo.quality !== 'Unknown' && (
+                              <div
+                                className={`bg-gray-500/10 dark:bg-gray-400/20 px-1.5 py-0 rounded text-xs shrink-0 min-w-[50px] text-center
+                                ${
+                                  ['4K', '2K'].includes(videoInfo.quality)
+                                    ? 'text-purple-600 dark:text-purple-400'
+                                    : ['1080p', '720p'].includes(
+                                          videoInfo.quality,
+                                        )
+                                      ? 'text-green-600 dark:text-green-400'
+                                      : 'text-yellow-600 dark:text-yellow-400'
+                                }`}
+                              >
+                                {videoInfo.quality}
+                              </div>
+                            )}
+                          {videoInfo && videoInfo.hasError && (
+                            <div className='bg-gray-500/10 dark:bg-gray-400/20 text-red-600 dark:text-red-400 px-1.5 py-0 rounded text-xs shrink-0 min-w-[50px] text-center'>
+                              失败
+                            </div>
+                          )}
+                        </div>
+
+                        <div className='flex items-center justify-between'>
+                          <span className='text-xs px-2 py-1 border border-gray-500/60 rounded text-gray-700 dark:text-gray-300'>
+                            {source.source_name}
+                          </span>
+                          {source.episodes.length > 1 && (
+                            <span className='text-xs text-gray-500 dark:text-gray-400 font-medium'>
+                              {source.episodes.length} 集
+                            </span>
+                          )}
+                        </div>
+
+                        <div className='flex items-end h-6'>
+                          {videoInfo && !videoInfo.hasError ? (
+                            <div className='flex items-end gap-3 text-xs'>
+                              <span className='text-green-600 dark:text-green-400 font-medium'>
+                                {videoInfo.loadSpeed}
+                              </span>
+                              <span className='text-orange-600 dark:text-orange-400 font-medium'>
+                                {videoInfo.pingTime}ms
+                              </span>
+                            </div>
+                          ) : (
+                            <div className='text-red-500/90 dark:text-red-400 font-medium text-xs opacity-0'>
+                              .
+                            </div>
+                          )}
                         </div>
                       </div>
-                    );
-                  })}
+                    </div>
+                  );
+                })}
+
                 <div className='shrink-0 mt-auto pt-2 border-t border-gray-400 dark:border-gray-700'>
                   <button
-                    onClick={() => {
-                      if (videoTitle) {
-                        router.push(
-                          `/search?q=${encodeURIComponent(videoTitle)}`
-                        );
-                      }
-                    }}
+                    onClick={() =>
+                      videoTitle &&
+                      router.push(`/search?q=${encodeURIComponent(videoTitle)}`)
+                    }
                     className='w-full text-center text-xs text-gray-500 dark:text-gray-400 hover:text-green-500 dark:hover:text-green-400 transition-colors py-2'
                   >
                     影片匹配有误？点击去搜索
