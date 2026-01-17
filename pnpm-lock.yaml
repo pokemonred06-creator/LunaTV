@@ -38,9 +38,6 @@ importers:
       '@upstash/redis':
         specifier: ^1.35.8
         version: 1.35.8
-      artplayer:
-        specifier: ^5.3.0
-        version: 5.3.0
       bs58:
         specifier: ^6.0.0
         version: 6.0.0
@@ -2284,9 +2281,6 @@ packages:
     resolution: {integrity: sha512-3duEwti880xqi4eAMN8AyR4a0ByT90zoYdLlevfrvU43vb0YZwZVfxOgxWrLXXXpyugL0hNZc9G6BiB5B3nUug==}
     engines: {node: '>=8'}
 
-  artplayer@5.3.0:
-    resolution: {integrity: sha512-yExO39MpEg4P+bxgChxx1eJfiUPE4q1QQRLCmqGhlsj+ANuaoEkR8hF93LdI5ZyrAcIbJkuEndxEiUoKobifDw==}
-
   assert@2.0.0:
     resolution: {integrity: sha512-se5Cd+js9dXJnu6Ag2JFc00t+HmHOen+8Q+L7O9zI0PqQXr20uk2J0XQqMxZEeo5U50o8Nvmmx7dZrl+Ufr35A==}
 
@@ -3836,10 +3830,6 @@ packages:
   keyv@4.5.4:
     resolution: {integrity: sha512-oxVHkHR/EJf2CNXnWxRLW6mg7JyCCUcG0DtEGmL2ctUo1PNTin1PUil+r/+4r5MpVgC/fn1kjsx7mjSujKqIpw==}
 
-  kind-of@6.0.3:
-    resolution: {integrity: sha512-dcS1ul+9tmeD95T+x28/ehLgd9mENa3LsvDTtzm3vyBEO7RPptvAD+t44WVXaUjTBRcrpFeFlC8WCruUR456hw==}
-    engines: {node: '>=0.10.0'}
-
   language-subtag-registry@0.3.23:
     resolution: {integrity: sha512-0K65Lea881pHotoGEa5gDlMxt3pctLi2RplBb7Ezh4rRdLEOtgi7n4EwK9lamnUCkKBqaeKRVebTq6BAxSkpXQ==}
 
@@ -4294,9 +4284,6 @@ packages:
   opencollective-postinstall@2.0.3:
     resolution: {integrity: sha512-8AV/sCtuzUeTo8gQK5qDZzARrulB3egtLzFgteqB2tcT4Mw7B8Kt7JcDHmltjz6FOAHsvTevk70gZEbhM4ZS9Q==}
     hasBin: true
-
-  option-validator@2.0.6:
-    resolution: {integrity: sha512-tmZDan2LRIRQyhUGvkff68/O0R8UmF+Btmiiz0SmSw2ng3CfPZB9wJlIjHpe/MKUZqyIZkVIXCrwr1tIN+0Dzg==}
 
   optionator@0.8.3:
     resolution: {integrity: sha512-+IW9pACdk3XWmmTXG8m3upGUJst5XRGzxMRjXzAuJ1XnIFNvfhjjIuYkDvysnPQ7qzqVzLt78BCruntqRhWQbA==}
@@ -7874,10 +7861,6 @@ snapshots:
 
   arrify@2.0.1: {}
 
-  artplayer@5.3.0:
-    dependencies:
-      option-validator: 2.0.6
-
   assert@2.0.0:
     dependencies:
       es6-object-assign: 1.1.0
@@ -9787,8 +9770,6 @@ snapshots:
     dependencies:
       json-buffer: 3.0.1
 
-  kind-of@6.0.3: {}
-
   language-subtag-registry@0.3.23: {}
 
   language-tags@1.0.9:
@@ -10222,10 +10203,6 @@ snapshots:
   opencc-js@1.0.5: {}
 
   opencollective-postinstall@2.0.3: {}
-
-  option-validator@2.0.6:
-    dependencies:
-      kind-of: 6.0.3
 
   optionator@0.8.3:
     dependencies:

@@ -9,13 +9,14 @@ import type {
   RefObject,
   TouchEvent as ReactTouchEvent,
 } from 'react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import videojs from 'video.js';
 import Player from 'video.js/dist/types/player';
 import 'videojs-flvjs';
 
 import 'video.js/dist/video-js.css';
 
+// --- Interfaces ---
 interface WebKitHTMLVideoElement extends HTMLVideoElement {
   webkitEnterFullscreen?: () => void;
   webkitExitFullscreen?: () => void;
@@ -55,14 +56,16 @@ interface VideoJsPlayerProps {
   skipIntroTime?: number;
   skipOutroTime?: number;
   enableSkip?: boolean;
-  customHlsLoader?: typeof Hls.DefaultConfig.loader;
+  customHlsLoader?: any;
   className?: string;
   debug?: boolean;
   seriesId?: string;
   isLive?: boolean;
   videoJsOptions?: VideoJsOptions;
+  reloadTrigger?: number;
 }
 
+// --- Icons ---
 const Icons = {
   play: (
     <svg viewBox='0 0 24 24' fill='currentColor' className='icon'>
@@ -119,7 +122,6 @@ const Icons = {
       <path d='M8 5v14l11-7z' />
     </svg>
   ),
-  // FIX 2: Added Big Pause Icon
   bigPause: (
     <svg
       viewBox='0 0 24 24'
@@ -132,6 +134,7 @@ const Icons = {
   ),
 };
 
+// --- Hooks ---
 const useUnifiedSeek = (
   playerRef: MutableRefObject<Player | null>,
   setCurrentTime: (t: number) => void,
@@ -143,22 +146,15 @@ const useUnifiedSeek = (
     wasPlaying: false,
     showOverlay: false,
   });
-
-  // FIX 1: RequestAnimationFrame Ref for throttling
   const rafRef = useRef<number | null>(null);
 
   const begin = useCallback(
     (opts?: { showOverlay?: boolean }) => {
-      // FIX 3: Prevent re-entry overwriting state
       if (seekRef.current.active) return;
-
       const player = playerRef.current;
       seekRef.current.active = true;
       seekRef.current.showOverlay = !!opts?.showOverlay;
-
-      // Remember playback state BEFORE we pause
       seekRef.current.wasPlaying = player ? !player.paused() : false;
-
       if (seekRef.current.wasPlaying) {
         player?.pause();
         setIsPaused(true);
@@ -169,18 +165,13 @@ const useUnifiedSeek = (
 
   const preview = useCallback(
     (time: number) => {
-      // FIX 1: Throttle seek to animation frame to prevent black screen
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
-
       rafRef.current = requestAnimationFrame(() => {
         const player = playerRef.current;
         const d = player?.duration?.() ?? 0;
         const safe = d > 0 ? Math.max(0, Math.min(d, time)) : Math.max(0, time);
-
         setCurrentTime(safe);
-        // Using fastSeek if available helps, but standard currentTime in a raf loop is usually sufficient
         player?.currentTime(safe);
-
         if (seekRef.current.showOverlay) setSeekingTime(safe);
       });
     },
@@ -188,20 +179,14 @@ const useUnifiedSeek = (
   );
 
   const end = useCallback(() => {
-    // Cancel pending seeks
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
-
     const player = playerRef.current;
     if (!seekRef.current.active) return;
-
     if (seekRef.current.showOverlay) setSeekingTime(null);
-
-    // FIX 3: Resume playback if it was playing before
     if (seekRef.current.wasPlaying) {
       player?.play();
       setIsPaused(false);
     }
-
     seekRef.current.active = false;
     seekRef.current.showOverlay = false;
   }, [playerRef, setIsPaused, setSeekingTime]);
@@ -297,7 +282,7 @@ const usePlayerGestures = (
   playerRef: MutableRefObject<Player | null>,
   duration: number,
   unifiedSeek: ReturnType<typeof useUnifiedSeek>,
-  controlsVisible: boolean, // FIX: Added prop
+  controlsVisible: boolean,
 ) => {
   const gestureRef = useRef({
     startX: 0,
@@ -321,8 +306,6 @@ const usePlayerGestures = (
     const handleStart = (e: TouchEvent | MouseEvent) => {
       const target = e.target as HTMLElement;
       if (!container.contains(target)) return;
-
-      // FIX: Only check for button interference if controls are actually visible
       if (controlsVisible) {
         if (
           target.closest(
@@ -404,9 +387,10 @@ const usePlayerGestures = (
       container.removeEventListener('touchend', handleEnd);
       container.removeEventListener('touchcancel', handleEnd);
     };
-  }, [containerRef, playerRef, duration, unifiedSeek, controlsVisible]); // FIX: Added controlsVisible dependency
+  }, [containerRef, playerRef, duration, unifiedSeek, controlsVisible]);
 };
 
+// --- CAS Shader Hook ---
 const useCasShader = (
   playerReady: boolean,
   casEnabled: boolean,
@@ -423,6 +407,7 @@ const useCasShader = (
   );
   const techRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
   const hardStop = useCallback(() => {
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
@@ -442,11 +427,13 @@ const useCasShader = (
       techRef.current = null;
     }
   }, []);
+
   useEffect(() => {
     if (typeof document === 'undefined') return;
     if (!playerReady || !casEnabled || isPiPActive) {
       hardStop();
       const tech = getTechVideoEl();
+      // Remove zombie canvases
       const zombie = tech?.parentElement?.querySelector(
         `canvas[data-cas-canvas="1"][data-cas-owner="${ownerRef.current}"]`,
       ) as HTMLCanvasElement | null;
@@ -459,6 +446,7 @@ const useCasShader = (
       }
       return;
     }
+
     const tech = getTechVideoEl();
     if (tech) {
       const active = tech.getAttribute('data-cas-active') === 'true';
@@ -467,6 +455,7 @@ const useCasShader = (
       if (active && ownedByMe) return;
     }
     if (!tech || !tech.parentElement) return;
+
     const canvas = document.createElement('canvas');
     canvas.dataset.casCanvas = '1';
     canvas.dataset.casOwner = ownerRef.current;
@@ -480,27 +469,33 @@ const useCasShader = (
       zIndex: '0',
       objectFit: 'contain',
     });
+
     const existing = tech.parentElement.querySelector(
       `canvas[data-cas-canvas="1"][data-cas-owner="${ownerRef.current}"]`,
     );
     if (existing) existing.remove();
+
     tech.parentElement.insertBefore(canvas, tech.nextSibling);
     canvasRef.current = canvas;
     techRef.current = tech;
+
     const gl = canvas.getContext('webgl', {
       alpha: false,
       preserveDrawingBuffer: false,
       antialias: false,
     });
+
     if (!gl) {
       hardStop();
       return;
     }
+
     let texture: WebGLTexture | null = null,
       buffer: WebGLBuffer | null = null,
       program: WebGLProgram | null = null,
       vsS: WebGLShader | null = null,
       fsS: WebGLShader | null = null;
+
     const safeDeleteGL = () => {
       if (texture) gl.deleteTexture(texture);
       if (buffer) gl.deleteBuffer(buffer);
@@ -512,12 +507,14 @@ const useCasShader = (
       if (vsS) gl.deleteShader(vsS);
       if (fsS) gl.deleteShader(fsS);
     };
+
     let glCleaned = false;
     const cleanupGL = () => {
       if (glCleaned) return;
       glCleaned = true;
       safeDeleteGL();
     };
+
     const handleContextLost = (e: Event) => {
       e.preventDefault();
       if (debug) console.warn('CAS Shader: WebGL Context Lost');
@@ -528,13 +525,16 @@ const useCasShader = (
     canvas.addEventListener('webglcontextlost', handleContextLost, {
       passive: false,
     });
+
     const abortInit = () => {
       canvas.removeEventListener('webglcontextlost', handleContextLost);
       safeDeleteGL();
       hardStop();
     };
+
     const vsSource = `attribute vec2 position; varying vec2 v_texCoord; void main() { gl_Position = vec4(position,0,1); v_texCoord = position*0.5+0.5; v_texCoord.y=1.0-v_texCoord.y; }`;
     const fsSource = `precision mediump float; varying vec2 v_texCoord; uniform sampler2D u_image; uniform vec2 u_resolution; uniform float u_sharpness; void main() { vec2 tex = 1.0 / u_resolution; vec3 e = texture2D(u_image, v_texCoord).rgb; vec3 a = texture2D(u_image, v_texCoord + vec2(0.0, -tex.y)).rgb; vec3 c = texture2D(u_image, v_texCoord + vec2(-tex.x, 0.0)).rgb; vec3 g = texture2D(u_image, v_texCoord + vec2(tex.x, 0.0)).rgb; vec3 i = texture2D(u_image, v_texCoord + vec2(0.0, tex.y)).rgb; float w = -1.0 / mix(8.0, 5.0, clamp(u_sharpness, 0.0, 1.0)); vec3 res = (a + c + g + i) * w + e; float div = 1.0 + 4.0 * w; vec3 final = res / div; vec3 mn = min(min(min(a, c), g), i); vec3 mx = max(max(max(a, c), g), i); final = clamp(final, min(mn, e), max(mx, e)); float lum = dot(final, vec3(0.2126, 0.7152, 0.0722)); gl_FragColor = vec4((mix(vec3(lum), final, 1.15) - 0.5) * 1.05 + 0.5, 1.0); }`;
+
     const createShader = (type: number, src: string) => {
       const s = gl.createShader(type);
       if (!s) return null;
@@ -546,6 +546,7 @@ const useCasShader = (
       }
       return s;
     };
+
     program = gl.createProgram();
     vsS = createShader(gl.VERTEX_SHADER, vsSource);
     fsS = createShader(gl.FRAGMENT_SHADER, fsSource);
@@ -553,6 +554,7 @@ const useCasShader = (
       abortInit();
       return;
     }
+
     gl.attachShader(program, vsS);
     gl.attachShader(program, fsS);
     gl.linkProgram(program);
@@ -561,6 +563,7 @@ const useCasShader = (
       return;
     }
     gl.useProgram(program);
+
     buffer = gl.createBuffer();
     if (!buffer) {
       abortInit();
@@ -572,9 +575,11 @@ const useCasShader = (
       new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]),
       gl.STATIC_DRAW,
     );
+
     const posLoc = gl.getAttribLocation(program, 'position');
     gl.enableVertexAttribArray(posLoc);
     gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+
     texture = gl.createTexture();
     if (!texture) {
       abortInit();
@@ -585,16 +590,28 @@ const useCasShader = (
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
     const resLoc = gl.getUniformLocation(program, 'u_resolution');
     const sharpLoc = gl.getUniformLocation(program, 'u_sharpness');
+
     tech.setAttribute('data-cas-active', 'true');
     tech.dataset.casOwner = ownerRef.current;
-    tech.style.opacity = '0';
+
+    let isFirstRender = true;
+
     const render = () => {
+      // FIX: Guard against detached nodes
+      if (!tech.isConnected || !canvas.isConnected) {
+        cleanupGL();
+        hardStop();
+        return;
+      }
+
       if (!tech.videoWidth) {
         animationFrameRef.current = requestAnimationFrame(render);
         return;
       }
+
       const glCtx = gl as WebGLRenderingContext & {
         isContextLost?: () => boolean;
       };
@@ -603,6 +620,7 @@ const useCasShader = (
         hardStop();
         return;
       }
+
       if (
         canvas.width !== tech.videoWidth ||
         canvas.height !== tech.videoHeight
@@ -611,6 +629,7 @@ const useCasShader = (
         canvas.height = tech.videoHeight;
         gl.viewport(0, 0, canvas.width, canvas.height);
       }
+
       try {
         gl.texImage2D(
           gl.TEXTURE_2D,
@@ -620,18 +639,26 @@ const useCasShader = (
           gl.UNSIGNED_BYTE,
           tech,
         );
+
+        if (isFirstRender) {
+          tech.style.opacity = '0';
+          isFirstRender = false;
+        }
       } catch (e) {
-        if (debug) console.warn('CAS Shader stopped: Texture tainted', e);
+        if (debug) console.warn('CAS Shader stopped: Texture tainted/CORS', e);
         cleanupGL();
         hardStop();
         return;
       }
+
       if (resLoc) gl.uniform2f(resLoc, canvas.width, canvas.height);
       if (sharpLoc) gl.uniform1f(sharpLoc, 0.6);
       gl.drawArrays(gl.TRIANGLES, 0, 6);
       animationFrameRef.current = requestAnimationFrame(render);
     };
+
     render();
+
     return () => {
       canvas.removeEventListener('webglcontextlost', handleContextLost);
       cleanupGL();
@@ -651,6 +678,7 @@ const useCasShader = (
 const stopProp = (e: ReactMouseEvent | ReactTouchEvent | ReactPointerEvent) =>
   e.stopPropagation();
 
+// --- Main Component ---
 export default function VideoJsPlayer({
   url,
   type,
@@ -673,11 +701,14 @@ export default function VideoJsPlayer({
   seriesId = 'global',
   isLive = false,
   videoJsOptions,
+  reloadTrigger = 0,
 }: VideoJsPlayerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const videoWrapperRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<Player | null>(null);
   const hlsRef = useRef<Hls | null>(null);
+  const hlsCleanupRef = useRef<(() => void) | null>(null);
+  const networkErrorCountRef = useRef(0);
   const hasSkippedIntroRef = useRef(false);
   const hasTriggeredOutroRef = useRef(false);
   const progressBarRef = useRef<HTMLDivElement>(null);
@@ -719,6 +750,7 @@ export default function VideoJsPlayer({
     onEnter: (() => void) | null;
     onLeave: (() => void) | null;
   }>({ video: null, onEnter: null, onLeave: null });
+
   const [playbackRate, setPlaybackRate] = useState(() => {
     if (typeof window === 'undefined') return 1;
     try {
@@ -738,6 +770,7 @@ export default function VideoJsPlayer({
   const [duration, setDuration] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [casEnabled, setCasEnabled] = useState(true);
+  const casEnabledRef = useRef(casEnabled);
   const [isRotatedFullscreen, setIsRotatedFullscreen] = useState(false);
   const [pipSupported, setPipSupported] = useState(false);
   const [isPiPActive, setIsPiPActive] = useState(false);
@@ -745,6 +778,13 @@ export default function VideoJsPlayer({
   const hasAirPlay =
     typeof window !== 'undefined' &&
     'WebKitPlaybackTargetAvailabilityEvent' in window;
+
+  const finalUrl = useMemo(() => {
+    if (!reloadTrigger || reloadTrigger <= 0) return url;
+    const separator = url.includes('?') ? '&' : '?';
+    return `${url}${separator}t=${reloadTrigger}-${Date.now()}`;
+  }, [url, reloadTrigger]);
+
   const unifiedSeek = useUnifiedSeek(
     playerRef,
     setCurrentTime,
@@ -762,7 +802,8 @@ export default function VideoJsPlayer({
     duration,
     unifiedSeek,
     controlsVisible,
-  ); // FIX: Pass controlsVisible
+  );
+
   const onTapStart = useCallback(
     (e: ReactTouchEvent | ReactMouseEvent | ReactPointerEvent) => {
       tapGateRef.current.down = true;
@@ -779,6 +820,7 @@ export default function VideoJsPlayer({
     },
     [],
   );
+
   const onTapMove = useCallback(
     (e: ReactTouchEvent | ReactMouseEvent | ReactPointerEvent) => {
       if (!tapGateRef.current.down) return;
@@ -799,29 +841,30 @@ export default function VideoJsPlayer({
     },
     [],
   );
+
   const onTapEnd = useCallback(() => {
     tapGateRef.current.down = false;
   }, []);
+
   const onTapToggleControls = useCallback(() => {
     if (tapGateRef.current.moved) return;
     if (isScrubbing) return;
     const now = Date.now();
-    // FIX 4: Increased debounce and use userActive() for consistent state
     if (now - lastToggleTimeRef.current < 200) return;
     lastToggleTimeRef.current = now;
-
     const player = playerRef.current;
     if (!player) return;
-
     if ((player as any).userActive()) {
       (player as any).userActive(false);
     } else {
       (player as any).userActive(true);
     }
   }, [isScrubbing]);
+
   useEffect(() => {
     configRef.current = { enableSkip, skipIntroTime, skipOutroTime, autoPlay };
   }, [enableSkip, skipIntroTime, skipOutroTime, autoPlay]);
+
   useEffect(() => {
     callbacksRef.current = {
       onReady,
@@ -832,6 +875,7 @@ export default function VideoJsPlayer({
       onPause,
     };
   }, [onReady, onTimeUpdate, onEnded, onError, onPlay, onPause]);
+
   useEffect(() => {
     if (typeof document === 'undefined') return;
     setPipSupported(
@@ -843,6 +887,7 @@ export default function VideoJsPlayer({
         ).requestPictureInPicture === 'function',
     );
   }, []);
+
   useEffect(() => {
     try {
       const s = localStorage.getItem(`lunatv_speed_${seriesId}`);
@@ -851,23 +896,33 @@ export default function VideoJsPlayer({
       setPlaybackRate(1);
     }
   }, [seriesId]);
+
   useEffect(() => {
     playbackRateRef.current = playbackRate;
     if (playerRef.current) playerRef.current.playbackRate(playbackRate);
   }, [playbackRate]);
+
+  // FIX: Separate Effects to avoid looping/overrides
   useEffect(() => {
     try {
-      setCasEnabled(localStorage.getItem('lunatv_cas_enabled') !== 'false');
+      const stored = localStorage.getItem('lunatv_cas_enabled');
+      if (stored !== null) setCasEnabled(stored !== 'false');
     } catch {
       /* */
     }
   }, []);
+
+  useEffect(() => {
+    casEnabledRef.current = casEnabled;
+  }, [casEnabled]);
+
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
     };
   }, []);
+
   const getTechVideoEl = useCallback((): WebKitHTMLVideoElement | null => {
     const p = playerRef.current as unknown as {
       tech?: (safe: boolean) => VideoJsTech;
@@ -878,9 +933,11 @@ export default function VideoJsPlayer({
       ? (el as WebKitHTMLVideoElement)
       : null;
   }, []);
+
   const bumpTechEpoch = useCallback(() => {
     if (mountedRef.current) setTechEpoch((prev) => prev + 1);
   }, []);
+
   const attachIosFullscreen = useCallback(
     (videoEl: WebKitHTMLVideoElement | null) => {
       const prev = iosFsRef.current;
@@ -909,6 +966,7 @@ export default function VideoJsPlayer({
     },
     [],
   );
+
   const attachPiPListeners = useCallback((videoEl: HTMLVideoElement | null) => {
     const prev = pipRef.current;
     if (prev.video && prev.video !== videoEl && prev.onEnter && prev.onLeave) {
@@ -932,6 +990,7 @@ export default function VideoJsPlayer({
     videoEl.addEventListener('leavepictureinpicture', onLeave);
     pipRef.current = { video: videoEl, onEnter, onLeave };
   }, []);
+
   const toggleCas = useCallback(() => {
     setCasEnabled((p) => {
       const n = !p;
@@ -940,9 +999,16 @@ export default function VideoJsPlayer({
       } catch {
         /* */
       }
+      // Enterprise Polish: Update Live State
+      const video = getTechVideoEl();
+      if (video) {
+        video.crossOrigin = n ? 'anonymous' : null;
+        bumpTechEpoch();
+      }
       return n;
     });
-  }, []);
+  }, [getTechVideoEl, bumpTechEpoch]);
+
   const changeSpeed = useCallback(
     (rate: number) => {
       setPlaybackRate(rate);
@@ -954,6 +1020,7 @@ export default function VideoJsPlayer({
     },
     [seriesId],
   );
+
   const togglePiP = useCallback(() => {
     if (typeof document === 'undefined') return;
     if (document.pictureInPictureElement) {
@@ -966,13 +1033,51 @@ export default function VideoJsPlayer({
           .catch(() => {});
     }
   }, [getTechVideoEl]);
+
+  // ---------------------------------------------------------------------------
+  // Production-Grade HLS Initialization
+  // ---------------------------------------------------------------------------
   const initHls = useCallback(
-    (video: HTMLVideoElement, src: string) => {
-      hlsRef.current?.destroy();
+    (videoEl: HTMLVideoElement, sourceUrl: string) => {
+      if (!videoEl || !sourceUrl) return;
+
+      networkErrorCountRef.current = 0;
+
+      // 1. Strict Cleanup via Ref
+      if (hlsCleanupRef.current) {
+        hlsCleanupRef.current();
+        hlsCleanupRef.current = null;
+      } else if (hlsRef.current) {
+        // Fallback
+        try {
+          hlsRef.current.destroy();
+        } catch {
+          /* ignore */
+        }
+        hlsRef.current = null;
+      }
+
+      // 2. Native HLS fallback (Safari/iOS)
       if (!Hls.isSupported()) {
-        video.src = src;
+        if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
+          videoEl.src = sourceUrl;
+          videoEl.load();
+        } else {
+          if (mountedRef.current) {
+            callbacksRef.current.onError?.({ type: 'hls_not_supported' });
+          }
+        }
         return;
       }
+
+      // 3. HLS.JS Path (Single Flush)
+      try {
+        videoEl.removeAttribute('src');
+        videoEl.load();
+      } catch {
+        /* ignore */
+      }
+
       const hlsConfig: Partial<typeof Hls.DefaultConfig> = {
         debug,
         enableWorker: true,
@@ -988,17 +1093,126 @@ export default function VideoJsPlayer({
             }
           : {}),
       };
+
       const hls = new Hls(hlsConfig as typeof Hls.DefaultConfig);
-      hls.loadSource(src);
-      hls.attachMedia(video);
-      hls.on(Hls.Events.ERROR, (_, data) => {
-        if (data.fatal && mountedRef.current)
-          callbacksRef.current.onError?.(data);
-      });
       hlsRef.current = hls;
+
+      const onMediaAttached = () => {
+        if (hlsRef.current !== hls) return;
+        hls.loadSource(sourceUrl);
+      };
+
+      const onFragLoaded = () => {
+        if (hlsRef.current !== hls) return;
+        networkErrorCountRef.current = 0;
+      };
+
+      const onManifestParsed = () => {
+        if (hlsRef.current !== hls) return;
+        if (!mountedRef.current) return;
+        if (!configRef.current.autoPlay) return;
+
+        const player = playerRef.current;
+        if (!player) return;
+        if (!player.paused()) return;
+
+        const p = player.play();
+        if (p !== undefined) p.catch(() => {});
+      };
+
+      // FIX: Null refs inside cleanup to prevent double-destroy
+      const performCleanupAndDestroy = (err?: any) => {
+        if (hlsCleanupRef.current) hlsCleanupRef.current = null;
+        if (hlsRef.current === hls) hlsRef.current = null;
+
+        try {
+          hls.off(Hls.Events.MEDIA_ATTACHED, onMediaAttached);
+        } catch {
+          /* ignore */
+        }
+        try {
+          hls.off(Hls.Events.FRAG_LOADED, onFragLoaded);
+        } catch {
+          /* ignore */
+        }
+        try {
+          hls.off(Hls.Events.MANIFEST_PARSED, onManifestParsed);
+        } catch {
+          /* ignore */
+        }
+        try {
+          hls.off(Hls.Events.ERROR, onErrorHandler);
+        } catch {
+          /* ignore */
+        }
+
+        try {
+          hls.stopLoad();
+        } catch {
+          /* ignore */
+        }
+        try {
+          hls.detachMedia();
+        } catch {
+          /* ignore */
+        }
+        try {
+          hls.destroy();
+        } catch {
+          /* ignore */
+        }
+
+        if (err && mountedRef.current) callbacksRef.current.onError?.(err);
+      };
+
+      const onErrorHandler = (_evt: unknown, data: any) => {
+        if (hlsRef.current !== hls) return;
+        const isNet = data?.type === Hls.ErrorTypes.NETWORK_ERROR;
+        if (data?.fatal) {
+          if (isNet) {
+            networkErrorCountRef.current += 1;
+            if (networkErrorCountRef.current >= 3) {
+              performCleanupAndDestroy({
+                type: Hls.ErrorTypes.NETWORK_ERROR,
+                details: 'persistent_network_error',
+                fatal: true,
+                reason: 'threshold_exceeded',
+                original: data,
+              });
+            } else {
+              try {
+                hls.startLoad();
+              } catch {
+                performCleanupAndDestroy(data);
+              }
+            }
+            return;
+          }
+          if (data?.type === Hls.ErrorTypes.MEDIA_ERROR) {
+            try {
+              hls.recoverMediaError();
+            } catch {
+              performCleanupAndDestroy(data);
+            }
+            return;
+          }
+          performCleanupAndDestroy(data);
+        }
+      };
+
+      // Assign Cleanup Ref
+      hlsCleanupRef.current = () => performCleanupAndDestroy();
+
+      hls.on(Hls.Events.MEDIA_ATTACHED, onMediaAttached);
+      hls.on(Hls.Events.FRAG_LOADED, onFragLoaded);
+      hls.on(Hls.Events.MANIFEST_PARSED, onManifestParsed);
+      hls.on(Hls.Events.ERROR, onErrorHandler);
+
+      hls.attachMedia(videoEl);
     },
     [customHlsLoader, debug, isLive],
   );
+
   const toggleFullscreen = useCallback(() => {
     if (typeof document === 'undefined') return;
     const container = containerRef.current;
@@ -1031,6 +1245,7 @@ export default function VideoJsPlayer({
       if (mountedRef.current) playerRef.current?.trigger('resize');
     }, 50);
   }, [isFullscreen, getTechVideoEl]);
+
   const toggleRotatedFullscreen = useCallback(() => {
     if (!isRotatedFullscreen) {
       containerRef.current?.classList.add('videojs-rotated-fullscreen');
@@ -1043,10 +1258,15 @@ export default function VideoJsPlayer({
       if (mountedRef.current) playerRef.current?.trigger('resize');
     }, 50);
   }, [isRotatedFullscreen]);
+
   const togglePlay = useCallback(() => {
     if (isPaused) playerRef.current?.play();
     else playerRef.current?.pause();
   }, [isPaused]);
+
+  // ---------------------------------------------------------------------------
+  // Lifecycle 1: Player Creation (Run Once)
+  // ---------------------------------------------------------------------------
   useEffect(() => {
     if (!videoWrapperRef.current) return;
     const wrapper = videoWrapperRef.current;
@@ -1059,8 +1279,9 @@ export default function VideoJsPlayer({
       width: '100%',
       height: '100%',
     });
-    videoElement.setAttribute('crossOrigin', 'anonymous');
+    // NOTE: Removed forced crossOrigin here. Let CAS / Source Logic decide.
     wrapper.appendChild(videoElement);
+
     const player = videojs(videoElement, {
       controls: false,
       autoplay: false,
@@ -1070,36 +1291,42 @@ export default function VideoJsPlayer({
       poster,
       playsinline: true,
       userActions: { click: false, doubleClick: false },
-      html5: { vhs: false },
+      html5: {
+        vhs: { overrideNative: false },
+      },
       ...videoJsOptions,
     });
+
     playerRef.current = player;
+
     player.ready(() => {
       if (mountedRef.current) setPlayerReady(true);
       if (mountedRef.current) callbacksRef.current.onReady?.(player);
-      const tech = (
-        player as unknown as { tech?: (safe: boolean) => VideoJsTech }
-      )?.tech?.(true);
+
+      const tech = (player as any).tech?.(true);
       const v = tech?.el?.();
       if (v instanceof HTMLVideoElement) {
-        v.crossOrigin = 'anonymous';
+        // FIX: Conditional Property
+        v.crossOrigin = casEnabledRef.current ? 'anonymous' : null;
+
         attachIosFullscreen(v as WebKitHTMLVideoElement);
         attachPiPListeners(v);
         bumpTechEpoch();
       }
     });
+
     const handleLoadStart = () => {
-      const tech = (
-        player as unknown as { tech?: (safe: boolean) => VideoJsTech }
-      )?.tech?.(true);
+      const tech = (player as any).tech?.(true);
       const v = tech?.el?.();
       if (v instanceof HTMLVideoElement) {
-        v.crossOrigin = 'anonymous';
+        v.crossOrigin = casEnabledRef.current ? 'anonymous' : null;
+
         attachIosFullscreen(v as WebKitHTMLVideoElement);
         attachPiPListeners(v);
         bumpTechEpoch();
       }
     };
+
     player.on('loadstart', handleLoadStart);
     player.on('useractive', () => {
       if (mountedRef.current) setControlsVisible(true);
@@ -1155,61 +1382,87 @@ export default function VideoJsPlayer({
         }
       }
     });
+
     return () => {
       player.off('loadstart', handleLoadStart);
       attachIosFullscreen(null);
       attachPiPListeners(null);
-      hlsRef.current?.destroy();
-      hlsRef.current = null;
-      playerRef.current?.dispose();
+
+      // Strict Cleanup on Unmount (using ref)
+      if (hlsCleanupRef.current) {
+        hlsCleanupRef.current();
+        hlsCleanupRef.current = null;
+      } else if (hlsRef.current) {
+        try {
+          hlsRef.current.destroy();
+        } catch {
+          /* ignore */
+        }
+        hlsRef.current = null;
+      }
+
+      player.dispose();
       playerRef.current = null;
-    }; // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Run once on mount
+
+  // ---------------------------------------------------------------------------
+  // Lifecycle 2: Source Change (Re-init HLS & State)
+  // ---------------------------------------------------------------------------
   useEffect(() => {
     if (!playerReady || !playerRef.current || !mountedRef.current) return;
+
     const player = playerRef.current;
     const epoch = ++switchEpochRef.current;
+
+    // Snapshot state
     const d = player.duration() ?? 0;
     const t = player.currentTime() ?? 0;
     const wasPlaying = !player.paused();
     const isFiniteDuration = Number.isFinite(d) && d > 0;
+
     if (!isLive && isFiniteDuration && t > 0 && t < d - 2) {
       switchSnapshotRef.current = { time: t, wasPlaying };
     } else {
       switchSnapshotRef.current = null;
     }
+
     let restoreArmed = true;
-    hlsRef.current?.destroy();
-    hlsRef.current = null;
+    let attachedVideoEl: HTMLVideoElement | null = null;
+    let restore: () => void = () => {};
+
     hasSkippedIntroRef.current = false;
     hasTriggeredOutroRef.current = false;
+
     player.pause();
     player.playbackRate(playbackRateRef.current);
     player.poster(poster || '');
-    const tech = (
-      player as unknown as { tech?: (safe: boolean) => VideoJsTech }
-    )?.tech?.(true);
+
+    // Get tech element
+    const tech = (player as any).tech?.(true);
     const v = tech?.el?.();
     const videoEl = v instanceof HTMLVideoElement ? v : null;
+
     if (videoEl) {
-      try {
-        videoEl.removeAttribute('src');
-        videoEl.load();
-      } catch {
-        /* */
-      }
-      videoEl.crossOrigin = 'anonymous';
+      // FIX: Conditional CORS update for source change
+      videoEl.crossOrigin = casEnabledRef.current ? 'anonymous' : null;
+
       attachIosFullscreen(videoEl as WebKitHTMLVideoElement);
       attachPiPListeners(videoEl);
       bumpTechEpoch();
     }
-    const restore = () => {
+
+    restore = () => {
       if (!mountedRef.current || !restoreArmed) return;
       if (switchEpochRef.current !== epoch) return;
+
       const snap = switchSnapshotRef.current;
       if (!snap) return;
+
       const seekable = player.seekable?.();
       let target = snap.time;
+
       if (seekable && seekable.length > 0) {
         const start = seekable.start(0);
         const end = seekable.end(seekable.length - 1);
@@ -1221,63 +1474,104 @@ export default function VideoJsPlayer({
         const dur = player.duration() ?? 0;
         target = Math.min(Math.max(target, 0), Math.max(0, dur - 0.1));
       }
+
       switchSnapshotRef.current = null;
       player.currentTime(target);
+
       if (snap.wasPlaying) {
-        const p = player.play();
-        if (p !== undefined) p.catch(() => {});
+        player.play()?.catch(() => {});
       }
     };
-    player.one('loadedmetadata', restore);
+
+    if (videoEl) {
+      attachedVideoEl = videoEl;
+      videoEl.addEventListener('loadedmetadata', restore, { once: true });
+    } else {
+      player.one('loadedmetadata', restore);
+    }
+
+    // Determine Source Type
+    const isHlsMime =
+      type === 'application/x-mpegURL' ||
+      type === 'application/vnd.apple.mpegurl';
     const isHlsUrl =
-      url?.includes('.m3u8') ||
-      url?.includes('/proxy/m3u8') ||
-      url?.includes('m3u8?');
+      finalUrl?.includes('.m3u8') ||
+      finalUrl?.includes('/proxy/m3u8') ||
+      finalUrl?.includes('m3u8?');
     const isFlvUrl =
-      url?.includes('.flv') ||
-      url?.includes('/proxy/flv') ||
-      url?.includes('flv?');
+      finalUrl?.includes('.flv') ||
+      finalUrl?.includes('/proxy/flv') ||
+      finalUrl?.includes('flv?');
+
     const loadSource = (src: string, mime?: string) =>
       player.src({ src, type: mime });
-    if (type) {
-      if (
-        type === 'application/x-mpegURL' ||
-        type === 'application/vnd.apple.mpegurl'
-      ) {
-        if (videoEl) initHls(videoEl, url);
-        else loadSource(url, type);
+
+    // --- Strict Routing ---
+
+    // 1. HLS Path (Manual Init)
+    if (isHlsMime || (!type && isHlsUrl)) {
+      if (videoEl) {
+        initHls(videoEl, finalUrl);
+        // Attempt 1: Immediate Autoplay (Debounced)
+        if (configRef.current.autoPlay) {
+          if (videoEl.readyState >= 2) {
+            player.play()?.catch(() => {
+              if (mountedRef.current) setControlsVisible(true);
+            });
+          }
+        }
       } else {
-        loadSource(url, type);
+        if (mountedRef.current) {
+          callbacksRef.current.onError?.({
+            type: 'render_error',
+            message: 'HTMLVideoElement missing for HLS playback',
+          });
+        }
       }
-    } else if (isHlsUrl) {
-      if (videoEl) initHls(videoEl, url);
-      else loadSource(url, 'application/x-mpegURL');
-    } else if (isFlvUrl) {
-      loadSource(url, 'video/x-flv');
-    } else {
-      loadSource(url, 'video/mp4');
-    } // Autoplay on EVERY source load (not just first)
-    const tryAutoPlay = () => {
-      if (!mountedRef.current || !configRef.current.autoPlay) return;
-      const p = player.play();
-      if (p !== undefined)
-        p.catch(() => {
+      // STOP
+    }
+    // 2. Legacy/Native Path
+    else {
+      // Transition Cleanup using strict ref
+      if (hlsCleanupRef.current) {
+        hlsCleanupRef.current();
+        hlsCleanupRef.current = null;
+      } else if (hlsRef.current) {
+        try {
+          hlsRef.current.destroy();
+        } catch {
+          /* ignore */
+        }
+        hlsRef.current = null;
+      }
+
+      if (isFlvUrl) loadSource(finalUrl, 'video/x-flv');
+      else loadSource(finalUrl, type || 'video/mp4');
+
+      const tryAutoPlay = () => {
+        if (!mountedRef.current || !configRef.current.autoPlay) return;
+        player.play()?.catch(() => {
           if (mountedRef.current) setControlsVisible(true);
         });
-    };
-    if (firstLoadRef.current) {
-      firstLoadRef.current = false;
-      tryAutoPlay();
-    } else {
-      player.one('canplay', tryAutoPlay);
+      };
+
+      if (firstLoadRef.current) {
+        firstLoadRef.current = false;
+        tryAutoPlay();
+      } else {
+        player.one('canplay', tryAutoPlay);
+      }
     }
+
     return () => {
       restoreArmed = false;
-      player.off('loadedmetadata', restore);
-      player.off('canplay', tryAutoPlay);
+      if (attachedVideoEl) {
+        attachedVideoEl.removeEventListener('loadedmetadata', restore);
+      }
+      player.off?.('loadedmetadata', restore);
     };
   }, [
-    url,
+    finalUrl,
     type,
     poster,
     playerReady,
@@ -1287,6 +1581,7 @@ export default function VideoJsPlayer({
     bumpTechEpoch,
     isLive,
   ]);
+
   useEffect(() => {
     const handleFullscreenChange = () => {
       if (typeof document === 'undefined') return;
@@ -1317,6 +1612,7 @@ export default function VideoJsPlayer({
       }
     };
   }, []);
+
   useCasShader(
     playerReady,
     casEnabled,
@@ -1325,6 +1621,7 @@ export default function VideoJsPlayer({
     debug,
     techEpoch,
   );
+
   const formatTime = (s: number) => {
     if (!Number.isFinite(s)) return '0:00';
     const h = Math.floor(s / 3600),
@@ -1334,8 +1631,10 @@ export default function VideoJsPlayer({
       ? `${h}:${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`
       : `${m}:${sec.toString().padStart(2, '0')}`;
   };
+
   const displayTime = seekingTime ?? currentTime;
   const progress = duration > 0 ? (displayTime / duration) * 100 : 0;
+
   return (
     <div className={`player-container ${className}`} ref={containerRef}>
       <div ref={videoWrapperRef} className='video-wrapper' />
@@ -1344,7 +1643,6 @@ export default function VideoJsPlayer({
         onPointerDown={onTapStart}
         onPointerMove={(e) => {
           onTapMove(e);
-          // FIX 5: Report activity during interaction to prevent auto-hide
           if (playerRef.current)
             (playerRef.current as any).reportUserActivity();
         }}
@@ -1358,7 +1656,6 @@ export default function VideoJsPlayer({
         onTouchStart={onTapStart}
         onTouchMove={(e) => {
           onTapMove(e);
-          // FIX 5: Report activity during interaction to prevent auto-hide
           if (playerRef.current)
             (playerRef.current as any).reportUserActivity();
         }}
@@ -1396,7 +1693,6 @@ export default function VideoJsPlayer({
           {Icons.rotate}
         </button>
         <div className='center-area'>
-          {/* FIX 2: Render center button regardless of pause state, toggle icon */}
           <button
             type='button'
             className='big-play-btn'
@@ -1553,4 +1849,53 @@ export default function VideoJsPlayer({
   );
 }
 
-const CSS = `.player-container{position:relative;width:100%;height:100%;background:#000;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}.video-wrapper{position:absolute;inset:0}.player-container .video-js{position:absolute;inset:0;width:100%;height:100%}.player-container .vjs-control-bar,.player-container .vjs-big-play-button,.player-container .vjs-touch-overlay,.player-container .vjs-mobile-ui-play-toggle,.player-container .vjs-loading-spinner,.player-container .vjs-modal-dialog{display:none!important}.icon{width:24px;height:24px;display:block}.tap-layer{position:absolute;inset:0;z-index:9;pointer-events:auto;background:transparent}.player-controls{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:space-between;opacity:0;transition:opacity .3s;pointer-events:none;z-index:10}.player-controls.visible{opacity:1}.player-controls::before{content:'';position:absolute;inset:0;pointer-events:none;background:linear-gradient(to bottom,rgba(0,0,0,.6) 0%,transparent 25%,transparent 75%,rgba(0,0,0,.8) 100%)}.top-bar,.bottom-bar,.settings-popup{position:relative;pointer-events:none;z-index:11}.top-bar,.bottom-bar{display:flex;align-items:center;gap:8px;padding:12px 16px}.top-bar{justify-content:flex-end}.bottom-bar{padding-bottom:max(12px,env(safe-area-inset-bottom))}.ctrl-btn{width:44px;height:44px;display:flex;align-items:center;justify-content:center;background:transparent;border:none;color:#fff;cursor:pointer;padding:0;border-radius:8px;transition:background .2s;flex-shrink:0}.ctrl-btn:hover{background:rgba(255,255,255,.1)}.ctrl-btn:active{background:rgba(255,255,255,.2);transform:scale(.95)}.ctrl-btn.pip-active{color:#4CAF50}.speed-btn{font-size:13px;font-weight:600;min-width:44px}.center-area{flex:1;display:flex;align-items:center;justify-content:center;gap:20px;pointer-events:none;z-index:11}.big-play-btn{width:80px;height:80px;border-radius:50%;background:rgba(0,0,0,0.6);border:2px solid rgba(255,255,255,0.8);color:white;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px);cursor:pointer;pointer-events:none;transition:all 0.2s}.big-play-btn:hover{transform:scale(1.1);background:rgba(0,0,0,0.8)}.big-play-btn:active{transform:scale(0.95)}.rotate-fullscreen-btn{position:absolute;left:16px;top:50%;transform:translateY(-50%);width:44px;height:44px;border-radius:50%;background:rgba(0,0,0,.5);border:1px solid rgba(255,255,255,.3);color:#fff;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px);transition:transform .2s,background .2s;pointer-events:none;cursor:pointer;z-index:12}.rotate-fullscreen-btn:hover{background:rgba(0,0,0,.7)}.rotate-fullscreen-btn:active{transform:translateY(-50%) scale(.95)}.time-display{font-size:13px;color:#fff;font-variant-numeric:tabular-nums;min-width:45px;text-align:center;flex-shrink:0}.progress-bar{flex:1;height:44px;display:flex;align-items:center;cursor:pointer;padding:0 4px;min-width:60px;touch-action:none}.progress-track{position:relative;width:100%;height:4px;background:rgba(255,255,255,.3);border-radius:2px}.progress-fill{height:100%;background:#4CAF50;border-radius:2px}.progress-thumb{position:absolute;top:50%;width:14px;height:14px;background:#fff;border-radius:50%;transform:translate(-50%,-50%);box-shadow:0 2px 4px rgba(0,0,0,.3)}.settings-popup{position:absolute;top:60px;right:16px;background:rgba(28,28,30,.95);backdrop-filter:blur(20px);border-radius:12px;padding:8px 0;min-width:200px;border:1px solid rgba(255,255,255,.1)}.settings-header{padding:12px 16px;font-size:15px;font-weight:600;color:#fff;border-bottom:1px solid rgba(255,255,255,.1)}.settings-item{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;color:#fff;cursor:pointer;font-size:14px}.settings-item:hover{background:rgba(255,255,255,.05)}.settings-item select{background:transparent;border:1px solid rgba(255,255,255,.2);color:#fff;padding:4px 8px;border-radius:6px;font-size:13px}.toggle{width:44px;height:26px;background:#555;border-radius:13px;position:relative;transition:background .2s;flex-shrink:0}.toggle.on{background:#4CAF50}.toggle-knob{position:absolute;top:3px;left:3px;width:20px;height:20px;background:#fff;border-radius:50%;transition:left .2s}.seek-overlay{position:absolute;inset:0;background:rgba(0,0,0,.7);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:50;pointer-events:none}.seek-time{font-size:32px;font-weight:600;color:#fff;margin-bottom:16px}.seek-bar{width:70%;height:6px;background:rgba(255,255,255,.3);border-radius:3px;overflow:hidden}.seek-fill{height:100%;background:#4CAF50;border-radius:2px}.videojs-rotated-fullscreen{position:fixed!important;width:100vh!important;height:100vw!important;top:50%!important;left:50%!important;transform:translate(-50%,-50%) rotate(90deg)!important;z-index:99999!important;background:#000!important}@supports(width:100dvh){.videojs-rotated-fullscreen{width:100dvh!important;height:100dvw!important}}@media(max-width:480px){.ctrl-btn{width:40px;height:40px}.time-display{font-size:12px;min-width:38px}.speed-btn{font-size:12px;min-width:40px}}.player-controls.visible .top-bar,.player-controls.visible .bottom-bar,.player-controls.visible .settings-popup,.player-controls.visible .big-play-btn,.player-controls.visible .rotate-fullscreen-btn{pointer-events:auto}.player-controls:not(.visible) *{pointer-events:none!important}`;
+const CSS = `
+.player-container{position:relative;width:100%;height:100%;background:#000;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
+.video-wrapper{position:absolute;inset:0}
+.player-container .video-js{position:absolute;inset:0;width:100%;height:100%}
+.player-container .vjs-control-bar,.player-container .vjs-big-play-button,.player-container .vjs-touch-overlay,.player-container .vjs-mobile-ui-play-toggle,.player-container .vjs-loading-spinner,.player-container .vjs-modal-dialog{display:none!important}
+.icon{width:24px;height:24px;display:block}
+.tap-layer{position:absolute;inset:0;z-index:9;pointer-events:auto;background:transparent}
+.player-controls{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:space-between;opacity:0;transition:opacity .3s;pointer-events:none;z-index:10}
+.player-controls.visible{opacity:1}
+.player-controls::before{content:'';position:absolute;inset:0;pointer-events:none;background:linear-gradient(to bottom,rgba(0,0,0,.6) 0%,transparent 25%,transparent 75%,rgba(0,0,0,.8) 100%)}
+.top-bar,.bottom-bar,.settings-popup{position:relative;pointer-events:none;z-index:11}
+.top-bar,.bottom-bar{display:flex;align-items:center;gap:8px;padding:12px 16px}
+.top-bar{justify-content:flex-end}
+.bottom-bar{padding-bottom:max(12px,env(safe-area-inset-bottom))}
+.ctrl-btn{width:44px;height:44px;display:flex;align-items:center;justify-content:center;background:transparent;border:none;color:#fff;cursor:pointer;padding:0;border-radius:8px;transition:background .2s;flex-shrink:0}
+.ctrl-btn:hover{background:rgba(255,255,255,.1)}
+.ctrl-btn:active{background:rgba(255,255,255,.2);transform:scale(.95)}
+.ctrl-btn.pip-active{color:#4CAF50}
+.speed-btn{font-size:13px;font-weight:600;min-width:44px}
+.center-area{flex:1;display:flex;align-items:center;justify-content:center;gap:20px;pointer-events:none;z-index:11}
+.big-play-btn{width:80px;height:80px;border-radius:50%;background:rgba(0,0,0,0.6);border:2px solid rgba(255,255,255,0.8);color:white;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px);cursor:pointer;pointer-events:auto;transition:all 0.2s}
+.big-play-btn:hover{transform:scale(1.1);background:rgba(0,0,0,0.8)}
+.big-play-btn:active{transform:scale(0.95)}
+.rotate-fullscreen-btn{position:absolute;left:16px;top:50%;transform:translateY(-50%);width:44px;height:44px;border-radius:50%;background:rgba(0,0,0,.5);border:1px solid rgba(255,255,255,.3);color:#fff;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px);transition:transform .2s,background .2s;cursor:pointer;z-index:12;pointer-events:none}
+.player-controls.visible .rotate-fullscreen-btn { pointer-events: auto; }
+.rotate-fullscreen-btn:hover{background:rgba(0,0,0,.7)}
+.rotate-fullscreen-btn:active{transform:translateY(-50%) scale(.95)}
+.time-display{font-size:13px;color:#fff;font-variant-numeric:tabular-nums;min-width:45px;text-align:center;flex-shrink:0}
+.progress-bar{flex:1;height:44px;display:flex;align-items:center;cursor:pointer;padding:0 4px;min-width:60px;touch-action:none}
+.progress-track{position:relative;width:100%;height:4px;background:rgba(255,255,255,.3);border-radius:2px}
+.progress-fill{height:100%;background:#4CAF50;border-radius:2px}
+.progress-thumb{position:absolute;top:50%;width:14px;height:14px;background:#fff;border-radius:50%;transform:translate(-50%,-50%);box-shadow:0 2px 4px rgba(0,0,0,.3)}
+.settings-popup{position:absolute;top:60px;right:16px;background:rgba(28,28,30,.95);backdrop-filter:blur(20px);border-radius:12px;padding:8px 0;min-width:200px;border:1px solid rgba(255,255,255,.1);max-height:70vh;overflow-y:auto;-webkit-overflow-scrolling:touch;scrollbar-width:thin}
+.settings-header{padding:12px 16px;font-size:15px;font-weight:600;color:#fff;border-bottom:1px solid rgba(255,255,255,.1)}
+.settings-item{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;color:#fff;cursor:pointer;font-size:14px}
+.settings-item:hover{background:rgba(255,255,255,.05)}
+.settings-item select{background:transparent;border:1px solid rgba(255,255,255,.2);color:#fff;padding:4px 8px;border-radius:6px;font-size:13px}
+.toggle{width:44px;height:26px;background:#555;border-radius:13px;position:relative;transition:background .2s;flex-shrink:0}
+.toggle.on{background:#4CAF50}
+.toggle-knob{position:absolute;top:3px;left:3px;width:20px;height:20px;background:#fff;border-radius:50%;transition:left .2s}
+.seek-overlay{position:absolute;inset:0;background:rgba(0,0,0,.7);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:50;pointer-events:none}
+.seek-time{font-size:32px;font-weight:600;color:#fff;margin-bottom:16px}
+.seek-bar{width:70%;height:6px;background:rgba(255,255,255,.3);border-radius:3px;overflow:hidden}
+.seek-fill{height:100%;background:#4CAF50;border-radius:2px}
+.videojs-rotated-fullscreen{position:fixed!important;width:100vh!important;height:100vw!important;top:50%!important;left:50%!important;transform:translate(-50%,-50%) rotate(90deg)!important;z-index:99999!important;background:#000!important}
+@supports(width:100dvh){.videojs-rotated-fullscreen{width:100dvh!important;height:100dvw!important}}
+@media(max-width:480px){.ctrl-btn{width:40px;height:40px}.time-display{font-size:12px;min-width:38px}.speed-btn{font-size:12px;min-width:40px}}
+.player-controls.visible .top-bar,.player-controls.visible .bottom-bar,.player-controls.visible .settings-popup,.player-controls.visible .big-play-btn{pointer-events:auto}
+.player-controls:not(.visible) *{pointer-events:none!important}
+`;

@@ -29,7 +29,6 @@
     "@types/crypto-js": "^4.2.2",
     "@types/video.js": "^7.3.58",
     "@upstash/redis": "^1.35.8",
-    "artplayer": "^5.3.0",
     "bs58": "^6.0.0",
     "clsx": "^2.1.1",
     "crypto-js": "^4.2.0",

@@ -56,10 +56,11 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
   const [optimisticValue, setOptimisticValue] = useState(value);
   const lastIntentRef = useRef(value);
 
+  // FIX: Always sync state with prop.
+  // This allows external changes (like "Next Episode" button) to update the UI.
   useEffect(() => {
-    if (value === lastIntentRef.current) {
-      setOptimisticValue(value);
-    }
+    setOptimisticValue(value);
+    lastIntentRef.current = value;
   }, [value]);
 
   const pageCount = Math.ceil(totalEpisodes / episodesPerPage);
@@ -77,7 +78,6 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
   const videoInfoMapRef = useRef<Map<string, VideoInfo>>(new Map());
   const fetchRunIdRef = useRef(0);
 
-  // Keep refs in sync with state for standard renders
   useEffect(() => {
     attemptedSourcesRef.current = attemptedSources;
   }, [attemptedSources]);
@@ -113,12 +113,11 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
   );
   const [descending, setDescending] = useState<boolean>(false);
 
+  // FIX: Always auto-switch page when value changes externally
   useEffect(() => {
-    if (value === lastIntentRef.current) {
-      const newPage = Math.floor((value - 1) / episodesPerPage);
-      if (activeTab === 'episodes' && newPage !== currentPage) {
-        setCurrentPage(newPage);
-      }
+    const newPage = Math.floor((value - 1) / episodesPerPage);
+    if (activeTab === 'episodes' && newPage !== currentPage) {
+      setCurrentPage(newPage);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value, episodesPerPage]);
@@ -128,7 +127,7 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
     return currentPage;
   }, [currentPage, descending, pageCount]);
 
-  // --- Video Info Fetching (With AbortSignal) ---
+  // --- Video Info Fetching ---
   const getVideoInfo = useCallback(
     async (source: SearchResult, signal?: AbortSignal) => {
       const sourceKey = `${source.source}-${source.id}`;
@@ -145,8 +144,7 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
         const info = await getVideoResolutionFromM3u8(episodeUrl, { signal });
         setVideoInfoMap((prev) => new Map(prev).set(sourceKey, info));
       } catch (error: unknown) {
-        if (error instanceof Error && error.name === 'AbortError') return;
-
+        if ((error as Error)?.name === 'AbortError') return;
         setVideoInfoMap((prev) =>
           new Map(prev).set(sourceKey, {
             quality: '错误',
@@ -160,7 +158,7 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
     [],
   );
 
-  // --- Sync Logic (Fixed: Ref Sync & Retry Prevention) ---
+  // --- Sync Logic ---
   useEffect(() => {
     if (precomputedVideoInfo && precomputedVideoInfo.size > 0) {
       setVideoInfoMap((prev) => {
@@ -168,17 +166,12 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
         precomputedVideoInfo.forEach((value, key) => newMap.set(key, value));
         return newMap;
       });
-
       setAttemptedSources((prev) => {
         const newSet = new Set(prev);
-        // Mark ALL keys as attempted (even errors) to prevent infinite retries
         precomputedVideoInfo.forEach((_info, key) => {
           newSet.add(key);
         });
-
-        // FIX: Sync ref IMMEDIATELY to prevent race conditions in the fetch loop
         attemptedSourcesRef.current = newSet;
-
         return newSet;
       });
     }
@@ -192,7 +185,7 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
         try {
           setOptimizationEnabled(JSON.parse(saved));
         } catch {
-          /* parse error */
+          /* ignore */
         }
       }
     }
@@ -203,7 +196,6 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
     if (!optimizationEnabled || activeTab !== 'sources') return;
 
     const runId = ++fetchRunIdRef.current;
-    const currentRunIdRef = fetchRunIdRef; // Capture ref for cleanup
     const ac = new AbortController();
 
     const runSpeedTests = async () => {
@@ -214,14 +206,10 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
 
       if (pendingSources.length === 0) return;
 
-      // Sequential loop with yielding to main thread
       for (const source of pendingSources) {
-        if (runId !== currentRunIdRef.current) return;
-
+        if (runId !== fetchRunIdRef.current) return;
         await getVideoInfo(source, ac.signal);
-
-        if (runId !== currentRunIdRef.current) return;
-        // Vital: Yield to main thread to keep UI responsive
+        if (runId !== fetchRunIdRef.current) return;
         await new Promise((resolve) => setTimeout(resolve, 0));
       }
     };
@@ -229,8 +217,9 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
     runSpeedTests();
 
     return () => {
-      currentRunIdRef.current++;
-      ac.abort(); // Cancel pending network requests immediately
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      fetchRunIdRef.current++;
+      ac.abort();
     };
   }, [activeTab, sortedSources, getVideoInfo, optimizationEnabled]);
 
@@ -291,6 +280,7 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
     };
   }, [activeTab]);
 
+  // Auto-scroll category tab
   useEffect(() => {
     const btn = buttonRefs.current[displayPage];
     const container = categoryContainerRef.current;
