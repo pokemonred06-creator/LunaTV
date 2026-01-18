@@ -802,7 +802,7 @@ func handleSegment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.Header.Get("Range") != "" {
-		handleRangeRequest(w, r, targetURL, ua, sourceKey)
+		handleRangeRequest(w, r, targetURL, ua)
 		return
 	}
 
@@ -915,7 +915,7 @@ func handleSegment(w http.ResponseWriter, r *http.Request) {
 	w.Write(data)
 }
 
-func handleRangeRequest(w http.ResponseWriter, r *http.Request, targetURL, ua, sourceKey string) {
+func handleRangeRequest(w http.ResponseWriter, r *http.Request, targetURL, ua string) {
 	reqHeaders := forwardableHeaders(r)
 
 	if strings.Contains(targetURL, "huya") || strings.Contains(targetURL, "douzhicloud") {
