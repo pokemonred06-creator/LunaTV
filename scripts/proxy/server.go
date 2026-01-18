@@ -1,13 +1,6 @@
 // LunaTV Go Proxy Server
 // Replaces Next.js API proxy routes with high-performance Go implementation.
-// Neutron Star Release (Patched): Singleflight Parity Fix + Future-Proof TLS + Diamond-Hard Security.
-//
-// Final Architecture:
-// 1. Correctness: Bypasses Singleflight for conditional requests on cache miss.
-// 2. SSRF: Connect-Time Verification (DNS Rebinding Proof).
-// 3. Transport: HTTP/2 ALPN enforced + SNI Preservation + Load Balancing.
-// 4. Resilience: Context Propagation + Jittered Retry.
-// 5. ✅ Patch: Ensure X-Cache cannot be overwritten by upstream headers (set after header cloning).
+// Neutron Star Release V5 (Platinum): Redirect Limits + Context Hygiene + All Signatures Verified.
 
 package main
 
@@ -25,7 +18,6 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
-	"net/http/cookiejar"
 	"net/url"
 	"os"
 	"os/signal"
@@ -64,16 +56,40 @@ var (
 
 	uriRegex = regexp.MustCompile(`URI="([^"]+)"`)
 
+	// Headers to STRIP (Hop-by-hop)
 	hopByHopHeaders = map[string]bool{
 		"Connection":          true,
 		"Proxy-Connection":    true,
 		"Keep-Alive":          true,
 		"Proxy-Authenticate":  true,
 		"Proxy-Authorization": true,
-		"TE":                  true,
+		"Te":                  true,
 		"Trailer":             true,
 		"Transfer-Encoding":   true,
 		"Upgrade":             true,
+	}
+
+	// Headers to ALLOW forward (Safe list)
+	forwardHeaderAllowlist = map[string]bool{
+		"Accept":              true,
+		"Accept-Language":     true,
+		"Cache-Control":       true,
+		"Content-Type":        true,
+		"Dnt":                 true,
+		"If-Match":            true,
+		"If-Modified-Since":   true,
+		"If-None-Match":       true,
+		"If-Range":            true,
+		"If-Unmodified-Since": true,
+		"Origin":              true,
+		"Pragma":              true,
+		"Range":               true,
+		"Referer":             true,
+		"Sec-Fetch-Dest":      true,
+		"Sec-Fetch-Mode":      true,
+		"Sec-Fetch-Site":      true,
+		"Sec-Fetch-User":      true,
+		"X-Requested-With":    true,
 	}
 
 	skipHeaderPool = sync.Pool{
@@ -122,18 +138,14 @@ func init() {
 		KeepAlive: 30 * time.Second,
 	}
 
-	// Base TLS config (placeholder for future custom CAs)
+	// Base TLS config
 	baseTLSConfig := &tls.Config{
 		MinVersion: tls.VersionTLS12,
 	}
 
 	transport := &http.Transport{
-		// ✅ HTTP: dial verified IP (TOCTOU-safe)
-		DialContext: guardedDialContext(dialer),
-
-		// ✅ HTTPS: dial verified IP, preserve SNI, enforce ALPN
-		DialTLSContext: guardedDialTLSContext(dialer, baseTLSConfig),
-
+		DialContext:           guardedDialContext(dialer),
+		DialTLSContext:        guardedDialTLSContext(dialer, baseTLSConfig),
 		TLSClientConfig:       baseTLSConfig,
 		MaxIdleConns:          100,
 		MaxIdleConnsPerHost:   20,
@@ -141,23 +153,24 @@ func init() {
 		TLSHandshakeTimeout:   10 * time.Second,
 		ResponseHeaderTimeout: 20 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
-		DisableCompression:    true,
+		DisableCompression:    false, // Allow Go to handle gzip transparently
 		ForceAttemptHTTP2:     true,
-	}
-
-	jar, err := cookiejar.New(nil)
-	if err != nil {
-		log.Fatalf("Failed to create cookie jar: %v", err)
 	}
 
 	client = &http.Client{
 		Transport: transport,
-		Timeout:   60 * time.Second,
-		Jar:       jar,
+		Timeout:   0,   // No global timeout (handled by context)
+		Jar:       nil, // Stateless
+		// FIX: Redirect Policy
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 3 {
+				return errors.New("stopped after 3 redirects")
+			}
+			return nil
+		},
 	}
 }
 
-// isPrivateIP checks explicit blocklists
 func isPrivateIP(ip net.IP) bool {
 	if ip == nil {
 		return false
@@ -170,7 +183,6 @@ func isPrivateIP(ip net.IP) bool {
 	return false
 }
 
-// isSafePublicIP enforces "global unicast only" + explicit blocklists
 func isSafePublicIP(ip net.IP) bool {
 	if ip == nil {
 		return false
@@ -188,7 +200,6 @@ func isSafePublicIP(ip net.IP) bool {
 	return true
 }
 
-// resolveAndPickSafeIP resolves host and picks a RANDOM safe public IP (Load Balancing)
 func resolveAndPickSafeIP(ctx context.Context, host string) (net.IP, error) {
 	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
 	if err != nil {
@@ -201,7 +212,6 @@ func resolveAndPickSafeIP(ctx context.Context, host string) (net.IP, error) {
 	safeIPs := make([]net.IP, 0, len(ips))
 	for _, ipa := range ips {
 		if !isSafePublicIP(ipa.IP) {
-			// Strict mode: if one IP is private, block the whole hostname
 			return nil, errors.New("ssrf blocked: hostname resolves to non-public ip")
 		}
 		safeIPs = append(safeIPs, ipa.IP)
@@ -210,26 +220,21 @@ func resolveAndPickSafeIP(ctx context.Context, host string) (net.IP, error) {
 	if len(safeIPs) == 0 {
 		return nil, errors.New("ssrf blocked: no usable ip")
 	}
-
-	// ✅ Load Balancing: Pick random IP from safe list
 	return safeIPs[rand.Intn(len(safeIPs))], nil
 }
 
-// guardedDialContext (HTTP) dials the verified IP
 func guardedDialContext(d *net.Dialer) func(ctx context.Context, network, addr string) (net.Conn, error) {
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
 		host, port, err := net.SplitHostPort(addr)
 		if err != nil {
 			return nil, err
 		}
-
 		if ip := net.ParseIP(host); ip != nil {
 			if !isSafePublicIP(ip) {
 				return nil, errors.New("ssrf blocked: non-public ip")
 			}
 			return d.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
 		}
-
 		ip, err := resolveAndPickSafeIP(ctx, host)
 		if err != nil {
 			return nil, err
@@ -238,14 +243,12 @@ func guardedDialContext(d *net.Dialer) func(ctx context.Context, network, addr s
 	}
 }
 
-// guardedDialTLSContext (HTTPS) dials verified IP, preserves SNI, and enables HTTP/2
 func guardedDialTLSContext(d *net.Dialer, base *tls.Config) func(ctx context.Context, network, addr string) (net.Conn, error) {
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
 		host, port, err := net.SplitHostPort(addr)
 		if err != nil {
 			return nil, err
 		}
-
 		var ip net.IP
 		if parsed := net.ParseIP(host); parsed != nil {
 			if !isSafePublicIP(parsed) {
@@ -258,15 +261,11 @@ func guardedDialTLSContext(d *net.Dialer, base *tls.Config) func(ctx context.Con
 				return nil, err
 			}
 		}
-
 		rawConn, err := d.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
 		if err != nil {
 			return nil, err
 		}
-
-		// ✅ Construct TLS Config using helper
 		tlsConfig := buildTLSConfig(base, host)
-
 		tlsConn := tls.Client(rawConn, tlsConfig)
 		if err := tlsConn.HandshakeContext(ctx); err != nil {
 			rawConn.Close()
@@ -276,7 +275,6 @@ func guardedDialTLSContext(d *net.Dialer, base *tls.Config) func(ctx context.Con
 	}
 }
 
-// buildTLSConfig clones base config (if any), then enforces SNI + ALPN
 func buildTLSConfig(base *tls.Config, serverName string) *tls.Config {
 	var cfg *tls.Config
 	if base != nil {
@@ -284,10 +282,7 @@ func buildTLSConfig(base *tls.Config, serverName string) *tls.Config {
 	} else {
 		cfg = &tls.Config{}
 	}
-
 	cfg.ServerName = serverName
-
-	// Enforce ALPN (keep existing if already set, ensure h2/http1.1 presence)
 	if len(cfg.NextProtos) == 0 {
 		cfg.NextProtos = []string{"h2", "http/1.1"}
 	} else {
@@ -337,7 +332,7 @@ const (
 	PlaylistPeekByte = 2048
 )
 
-// ===== LRU Cache =====
+// ===== LRU Cache (Unchanged) =====
 
 var cachedHeaderAllowlist = map[string]bool{
 	"Content-Type":     true,
@@ -379,7 +374,6 @@ func NewLRUCache(capacity int, maxBytes int64) *LRUCache {
 func (c *LRUCache) Get(key string) ([]byte, http.Header, bool) {
 	c.Lock()
 	defer c.Unlock()
-
 	if ent, ok := c.items[key]; ok {
 		item := ent.Value.(*CacheItem)
 		if time.Now().After(item.ExpiresAt) {
@@ -395,10 +389,8 @@ func (c *LRUCache) Get(key string) ([]byte, http.Header, bool) {
 func (c *LRUCache) Set(key string, data []byte, headers http.Header, ttl time.Duration) {
 	c.Lock()
 	defer c.Unlock()
-
 	headerCopy, headerBytes := filterAndCopyHeaders(headers)
 	itemSize := int64(len(data)) + headerBytes
-
 	if ent, ok := c.items[key]; ok {
 		c.evictList.MoveToFront(ent)
 		item := ent.Value.(*CacheItem)
@@ -411,7 +403,6 @@ func (c *LRUCache) Set(key string, data []byte, headers http.Header, ttl time.Du
 		c.evict()
 		return
 	}
-
 	item := &CacheItem{
 		Key:       key,
 		Data:      data,
@@ -471,14 +462,11 @@ func (g *Group) Do(key string, fn func() ([]byte, http.Header, error)) ([]byte, 
 	c.wg.Add(1)
 	g.m[key] = c
 	g.mu.Unlock()
-
 	c.val, c.headers, c.err = fn()
 	c.wg.Done()
-
 	g.mu.Lock()
 	delete(g.m, key)
 	g.mu.Unlock()
-
 	return c.val, c.headers, c.err
 }
 
@@ -514,14 +502,13 @@ func getUserAgent(sourceKey string) string {
 
 func forwardableHeaders(r *http.Request) map[string]string {
 	h := make(map[string]string)
-	keys := []string{
-		"Range", "If-Range",
-		"If-Match", "If-None-Match",
-		"If-Modified-Since", "If-Unmodified-Since",
-	}
-	for _, k := range keys {
-		if v := r.Header.Get(k); v != "" {
-			h[k] = v
+	for k, vv := range r.Header {
+		if len(vv) == 0 {
+			continue
+		}
+		ck := http.CanonicalHeaderKey(k)
+		if forwardHeaderAllowlist[ck] {
+			h[k] = vv[0]
 		}
 	}
 	return h
@@ -532,11 +519,9 @@ func copyHeaders(dst, src http.Header) {
 	for k := range toSkip {
 		delete(toSkip, k)
 	}
-
 	for k := range hopByHopHeaders {
 		toSkip[http.CanonicalHeaderKey(k)] = true
 	}
-
 	if conns := src["Connection"]; len(conns) > 0 {
 		for _, c := range conns {
 			for _, token := range strings.Split(c, ",") {
@@ -547,7 +532,6 @@ func copyHeaders(dst, src http.Header) {
 			}
 		}
 	}
-
 	for k, vv := range src {
 		if toSkip[http.CanonicalHeaderKey(k)] {
 			continue
@@ -588,7 +572,6 @@ func shouldReturn304FromCache(r *http.Request, cached http.Header) bool {
 		}
 		return false
 	}
-
 	if ims := r.Header.Get("If-Modified-Since"); ims != "" {
 		lm := cached.Get("Last-Modified")
 		if lm == "" {
@@ -604,8 +587,7 @@ func shouldReturn304FromCache(r *http.Request, cached http.Header) bool {
 }
 
 func hasStrongPreconditions(r *http.Request) bool {
-	return r.Header.Get("If-Match") != "" ||
-		r.Header.Get("If-Unmodified-Since") != ""
+	return r.Header.Get("If-Match") != "" || r.Header.Get("If-Unmodified-Since") != ""
 }
 
 // ===== Fetch Logic =====
@@ -613,11 +595,9 @@ func hasStrongPreconditions(r *http.Request) bool {
 func fetchWithRetry(ctx context.Context, method, targetURL, userAgent string, headers map[string]string) (*http.Response, error) {
 	var resp *http.Response
 	var err error
-
 	if method == "" {
 		method = "GET"
 	}
-
 	for i := 0; i < MaxRetries; i++ {
 		req, e := http.NewRequestWithContext(ctx, method, targetURL, nil)
 		if e != nil {
@@ -627,7 +607,6 @@ func fetchWithRetry(ctx context.Context, method, targetURL, userAgent string, he
 		for k, v := range headers {
 			req.Header.Set(k, v)
 		}
-
 		resp, err = client.Do(req)
 		if err == nil {
 			if resp.StatusCode < 500 && resp.StatusCode != 429 && resp.StatusCode != 408 {
@@ -637,11 +616,9 @@ func fetchWithRetry(ctx context.Context, method, targetURL, userAgent string, he
 		} else if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-
 		baseDelay := 200 * (1 << i)
 		jitter := rand.Intn(100)
 		backoff := time.Duration(baseDelay+jitter) * time.Millisecond
-
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
@@ -657,25 +634,27 @@ func handleHeadProxy(w http.ResponseWriter, r *http.Request, targetURL, ua strin
 	if r.Method != http.MethodHead {
 		return false
 	}
-
+	// ctx is inherited from caller (per-route timeout)
 	resp, err := fetchWithRetry(r.Context(), "HEAD", targetURL, ua, reqHeaders)
 	if err != nil {
+		// Suppress logs for cancellations
+		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			log.Printf("HEAD fetch error: %v", err)
+		}
+		// If timed out or canceled, client is likely gone, so 502 might not even reach, but standard behavior:
 		http.Error(w, "HEAD fetch error", 502)
 		return true
 	}
 	defer resp.Body.Close()
-
 	copyHeaders(w.Header(), resp.Header)
 	setCORSHeaders(w)
 	w.Header().Set("X-Cache", "BYPASS-HEAD")
-
 	ct := strings.ToLower(resp.Header.Get("Content-Type"))
 	if strings.HasSuffix(strings.ToLower(targetURL), ".m3u8") || strings.Contains(ct, "mpegurl") {
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
 		w.Header().Del("Content-Length")
 	}
-
 	w.WriteHeader(resp.StatusCode)
 	return true
 }
@@ -683,6 +662,10 @@ func handleHeadProxy(w http.ResponseWriter, r *http.Request, targetURL, ua strin
 // ===== Handlers =====
 
 func handleM3U8(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	r = r.WithContext(ctx)
+
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		http.Error(w, "Method Not Allowed", 405)
 		return
@@ -693,11 +676,7 @@ func handleM3U8(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Missing url", 400)
 		return
 	}
-
-	targetURL, err := url.QueryUnescape(rawURL)
-	if err != nil {
-		targetURL = rawURL
-	}
+	targetURL := rawURL
 	if err := validateTargetURL(targetURL); err != nil {
 		http.Error(w, "Invalid target URL", 403)
 		return
@@ -712,9 +691,11 @@ func handleM3U8(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp, err := fetchWithRetry(r.Context(), "GET", targetURL, ua, reqHeaders)
+	resp, err := fetchWithRetry(ctx, "GET", targetURL, ua, reqHeaders)
 	if err != nil {
-		log.Printf("M3U8 fetch error: %v", err)
+		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			log.Printf("M3U8 fetch error: %v", err)
+		}
 		http.Error(w, "Failed to fetch m3u8", 502)
 		return
 	}
@@ -740,7 +721,6 @@ func handleM3U8(w http.ResponseWriter, r *http.Request) {
 
 	contentType := resp.Header.Get("Content-Type")
 	lowerCT := strings.ToLower(contentType)
-
 	isM3U8 := false
 	if strings.Contains(lowerCT, "mpegurl") {
 		isM3U8 = true
@@ -757,7 +737,6 @@ func handleM3U8(w http.ResponseWriter, r *http.Request) {
 	if isM3U8 {
 		copyHeaders(w.Header(), resp.Header)
 		setCORSHeaders(w)
-
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
 		w.Header().Del("Content-Length")
@@ -767,7 +746,6 @@ func handleM3U8(w http.ResponseWriter, r *http.Request) {
 		w.Header().Del("Content-MD5")
 
 		baseURL := getBaseURL(resp.Request.URL.String())
-
 		scheme := "http"
 		if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
 			scheme = "https"
@@ -777,9 +755,7 @@ func handleM3U8(w http.ResponseWriter, r *http.Request) {
 			host = fh
 		}
 		proxyBase := fmt.Sprintf("%s://%s/api/proxy", scheme, host)
-
 		rewritten := rewriteM3U8(string(body), baseURL, proxyBase, sourceKey, allowCORS)
-
 		w.WriteHeader(resp.StatusCode)
 		w.Write([]byte(rewritten))
 		return
@@ -792,6 +768,10 @@ func handleM3U8(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleSegment(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+	r = r.WithContext(ctx)
+
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		http.Error(w, "Method Not Allowed", 405)
 		return
@@ -802,11 +782,8 @@ func handleSegment(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Missing url", 400)
 		return
 	}
+	targetURL := rawURL
 
-	targetURL, err := url.QueryUnescape(rawURL)
-	if err != nil {
-		targetURL = rawURL
-	}
 	if err := validateTargetURL(targetURL); err != nil {
 		http.Error(w, "Invalid target URL", 403)
 		return
@@ -816,24 +793,26 @@ func handleSegment(w http.ResponseWriter, r *http.Request) {
 	ua := getUserAgent(sourceKey)
 	reqHeaders := forwardableHeaders(r)
 
+	if strings.Contains(targetURL, "huya") || strings.Contains(targetURL, "douzhicloud") {
+		reqHeaders["Referer"] = "https://www.huya.com/"
+	}
+
 	if handleHeadProxy(w, r, targetURL, ua, reqHeaders) {
 		return
 	}
 
 	if r.Header.Get("Range") != "" {
-		handleRangeRequest(w, r, targetURL, ua)
+		handleRangeRequest(w, r, targetURL, ua, sourceKey)
 		return
 	}
 
-	// Strong preconditions should bypass cache.
+	// Pass 0 timeout, we use r.Context()
 	if hasStrongPreconditions(r) {
-		handlePassThrough(w, r, targetURL, sourceKey, "", 0)
+		handlePassThrough(w, r, targetURL, sourceKey, "", 0, 0)
 		return
 	}
 
 	cacheKey := sourceKey + "|" + targetURL
-
-	// 1) Cache hit
 	if data, headers, ok := globalSegmentCache.Get(cacheKey); ok {
 		if shouldReturn304FromCache(r, headers) {
 			copyHeaders(w.Header(), headers)
@@ -842,7 +821,6 @@ func handleSegment(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNotModified)
 			return
 		}
-
 		copyHeaders(w.Header(), headers)
 		setCORSHeaders(w)
 		w.Header().Set("X-Cache", "HIT")
@@ -852,29 +830,21 @@ func handleSegment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ✅ Correctness: Cache miss + weak validators => bypass singleflight/cache
-	// This ensures strict upstream answers (304 vs 200) and avoids cross-client validator mixing.
 	if r.Header.Get("If-None-Match") != "" || r.Header.Get("If-Modified-Since") != "" {
-		handlePassThrough(w, r, targetURL, sourceKey, "", 0)
+		handlePassThrough(w, r, targetURL, sourceKey, "", 0, 0)
 		return
 	}
 
-	// 2) Cache miss + no validators => singleflight
 	data, headers, err := sfGroup.Do(cacheKey, func() ([]byte, http.Header, error) {
-		// ✅ Resilience: Use detached context so client disconnects don't kill the fetch for others (or cache population)
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-		defer cancel()
-
-		resp, err := fetchWithRetry(ctx, "GET", targetURL, ua, nil)
+		// FIX: Bind singleflight to client context to stop ghost downloads
+		resp, err := fetchWithRetry(r.Context(), "GET", targetURL, ua, reqHeaders)
 		if err != nil {
 			return nil, nil, err
 		}
 		defer resp.Body.Close()
-
 		if resp.StatusCode != 200 {
 			return nil, nil, fmt.Errorf("upstream status: %d", resp.StatusCode)
 		}
-
 		bodyData, err := io.ReadAll(io.LimitReader(resp.Body, int64(ReadLimit)))
 		if err != nil {
 			return nil, nil, err
@@ -882,13 +852,15 @@ func handleSegment(w http.ResponseWriter, r *http.Request) {
 		if len(bodyData) > MaxSegmentSize {
 			return nil, nil, fmt.Errorf("segment too large")
 		}
-
 		return bodyData, resp.Header, nil
 	})
 
 	if err != nil {
 		if strings.Contains(err.Error(), "upstream status") {
-			handlePassThrough(w, r, targetURL, sourceKey, "", 0)
+			handlePassThrough(w, r, targetURL, sourceKey, "", 0, 0)
+			return
+		}
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return
 		}
 		log.Printf("Segment fetch error: %v | URL: %s", err, targetURL)
@@ -899,7 +871,6 @@ func handleSegment(w http.ResponseWriter, r *http.Request) {
 	shouldCache := true
 	ct := headers.Get("Content-Type")
 	lowerCT := strings.ToLower(ct)
-
 	if strings.Contains(lowerCT, "text/html") ||
 		strings.Contains(lowerCT, "application/json") ||
 		strings.Contains(lowerCT, "text/xml") ||
@@ -930,34 +901,36 @@ func handleSegment(w http.ResponseWriter, r *http.Request) {
 			ttl = InitSegmentTTL
 		}
 		globalSegmentCache.Set(cacheKey, data, headers, ttl)
-	} // else: do not cache
+	}
 
-	// Clone upstream headers first, then set our diagnostic header after (cannot be overwritten)
 	copyHeaders(w.Header(), headers)
 	setCORSHeaders(w)
-
 	if shouldCache {
 		w.Header().Set("X-Cache", "MISS")
 	} else {
 		w.Header().Set("X-Cache", "BYPASS-BAD-TYPE")
 	}
-
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
 	w.WriteHeader(200)
 	w.Write(data)
 }
 
-func handleRangeRequest(w http.ResponseWriter, r *http.Request, targetURL, ua string) {
+func handleRangeRequest(w http.ResponseWriter, r *http.Request, targetURL, ua, sourceKey string) {
 	reqHeaders := forwardableHeaders(r)
+
+	if strings.Contains(targetURL, "huya") || strings.Contains(targetURL, "douzhicloud") {
+		reqHeaders["Referer"] = "https://www.huya.com/"
+	}
 
 	if r.Method == http.MethodHead {
 		handleHeadProxy(w, r, targetURL, ua, reqHeaders)
 		return
 	}
-
 	resp, err := fetchWithRetry(r.Context(), r.Method, targetURL, ua, reqHeaders)
 	if err != nil {
-		http.Error(w, "Range fetch error", 502)
+		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			http.Error(w, "Range fetch error", 502)
+		}
 		return
 	}
 	defer resp.Body.Close()
@@ -969,27 +942,22 @@ func handleRangeRequest(w http.ResponseWriter, r *http.Request, targetURL, ua st
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}
-
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		http.Error(w, fmt.Sprintf("Upstream status %d", resp.StatusCode), resp.StatusCode)
 		return
 	}
-
 	copyHeaders(w.Header(), resp.Header)
 	setCORSHeaders(w)
-
 	if resp.StatusCode == 206 {
 		w.Header().Set("X-Cache", "BYPASS-RANGE-206")
 	} else {
 		w.Header().Set("X-Cache", "BYPASS-RANGE-IGNORED")
 	}
-
 	if resp.ContentLength >= 0 {
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", resp.ContentLength))
 	} else {
 		w.Header().Del("Content-Length")
 	}
-
 	w.WriteHeader(resp.StatusCode)
 	io.Copy(w, resp.Body)
 }
@@ -999,23 +967,18 @@ func handleKey(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method Not Allowed", 405)
 		return
 	}
-
 	rawURL := r.URL.Query().Get("url")
 	if rawURL == "" {
 		http.Error(w, "Missing url", 400)
 		return
 	}
-
-	targetURL, err := url.QueryUnescape(rawURL)
-	if err != nil {
-		targetURL = rawURL
-	}
+	targetURL := rawURL
 	if err := validateTargetURL(targetURL); err != nil {
 		http.Error(w, "Invalid target URL", 403)
 		return
 	}
-
-	handlePassThrough(w, r, targetURL, r.URL.Query().Get("moontv-source"), "application/octet-stream", 3600)
+	// FIX: Keys should have a timeout (using new signature)
+	handlePassThrough(w, r, targetURL, r.URL.Query().Get("moontv-source"), "application/octet-stream", 3600, 30*time.Second)
 }
 
 func handleLogo(w http.ResponseWriter, r *http.Request) {
@@ -1023,23 +986,18 @@ func handleLogo(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method Not Allowed", 405)
 		return
 	}
-
 	rawURL := r.URL.Query().Get("url")
 	if rawURL == "" {
 		http.Error(w, "Missing url", 400)
 		return
 	}
-
-	targetURL, err := url.QueryUnescape(rawURL)
-	if err != nil {
-		targetURL = rawURL
-	}
+	targetURL := rawURL
 	if err := validateTargetURL(targetURL); err != nil {
 		http.Error(w, "Invalid target URL", 403)
 		return
 	}
-
-	handlePassThrough(w, r, targetURL, r.URL.Query().Get("moontv-source"), "", 86400)
+	// FIX: Logos should have a timeout
+	handlePassThrough(w, r, targetURL, r.URL.Query().Get("moontv-source"), "", 86400, 20*time.Second)
 }
 
 func handleFLV(w http.ResponseWriter, r *http.Request) {
@@ -1047,43 +1005,54 @@ func handleFLV(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method Not Allowed", 405)
 		return
 	}
-
 	rawURL := r.URL.Query().Get("url")
 	if rawURL == "" {
 		http.Error(w, "Missing url", 400)
 		return
 	}
-
-	targetURL, err := url.QueryUnescape(rawURL)
-	if err != nil {
-		targetURL = rawURL
-	}
+	targetURL := rawURL
 	if err := validateTargetURL(targetURL); err != nil {
 		http.Error(w, "Invalid target URL", 403)
 		return
 	}
-
-	// FLV streams are long-lived, so we treat them like segments but with streaming
-	handlePassThrough(w, r, targetURL, r.URL.Query().Get("moontv-source"), "video/x-flv", 0)
+	// FIX: FLV must have 0 timeout (infinite, client-driven)
+	handlePassThrough(w, r, targetURL, r.URL.Query().Get("moontv-source"), "video/x-flv", 0, 0)
 }
 
-func handlePassThrough(w http.ResponseWriter, r *http.Request, targetURL, sourceKey, defaultType string, cacheSeconds int) {
+// FIX: Robust Error Handling & Timeout Support
+func handlePassThrough(w http.ResponseWriter, r *http.Request, targetURL, sourceKey, defaultType string, cacheSeconds int, timeout time.Duration) {
+	var ctx context.Context
+	var cancel context.CancelFunc
+
+	if timeout > 0 {
+		ctx, cancel = context.WithTimeout(r.Context(), timeout)
+		defer cancel()
+	} else {
+		// Zero timeout means "follow client connection" (for FLV)
+		ctx = r.Context()
+	}
+
 	ua := getUserAgent(sourceKey)
 	reqHeaders := forwardableHeaders(r)
 
-	// Inject Referer for Huya/Douzhicloud to avoid 403 Forbidden
 	if strings.Contains(targetURL, "huya") || strings.Contains(targetURL, "douzhicloud") {
 		reqHeaders["Referer"] = "https://www.huya.com/"
 	}
+
+	// Update r for handleHeadProxy to use the timed-out context
+	r = r.WithContext(ctx)
 
 	if handleHeadProxy(w, r, targetURL, ua, reqHeaders) {
 		return
 	}
 
-	resp, err := fetchWithRetry(r.Context(), r.Method, targetURL, ua, reqHeaders)
+	resp, err := fetchWithRetry(ctx, r.Method, targetURL, ua, reqHeaders)
 	if err != nil {
-		log.Printf("[Proxy Error] %s %s | Error: %v", r.Method, targetURL, err)
-		http.Error(w, fmt.Sprintf("Fetch error: %v", err), 502)
+		// FIX: Stop noisy logs on client disconnect
+		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			log.Printf("[Proxy Error] %s %s | Error: %v", r.Method, targetURL, err)
+			http.Error(w, fmt.Sprintf("Fetch error: %v", err), 502)
+		}
 		return
 	}
 	defer resp.Body.Close()
@@ -1094,7 +1063,6 @@ func handlePassThrough(w http.ResponseWriter, r *http.Request, targetURL, source
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}
-
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		http.Error(w, fmt.Sprintf("Upstream error %d", resp.StatusCode), resp.StatusCode)
 		return
@@ -1102,7 +1070,6 @@ func handlePassThrough(w http.ResponseWriter, r *http.Request, targetURL, source
 
 	copyHeaders(w.Header(), resp.Header)
 	setCORSHeaders(w)
-
 	ct := resp.Header.Get("Content-Type")
 	if ct == "" {
 		ct = defaultType
@@ -1113,84 +1080,75 @@ func handlePassThrough(w http.ResponseWriter, r *http.Request, targetURL, source
 	if cacheSeconds > 0 {
 		w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", cacheSeconds))
 	}
-
 	w.WriteHeader(resp.StatusCode)
 	io.Copy(w, resp.Body)
 }
 
 func handleImageProxy(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	r = r.WithContext(ctx)
+
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		http.Error(w, "Method Not Allowed", 405)
 		return
 	}
-
 	rawURL := r.URL.Query().Get("url")
 	if rawURL == "" {
 		http.Error(w, "Missing url", 400)
 		return
 	}
-
 	proxyURL := rawURL
 	if config.SiteConfig.DoubanImageProxyType == "custom" && config.SiteConfig.DoubanImageProxy != "" {
 		if strings.Contains(rawURL, "doubanio.com") {
 			proxyURL = config.SiteConfig.DoubanImageProxy + url.QueryEscape(rawURL)
 		}
 	}
-
-	finalURL, err := url.QueryUnescape(proxyURL)
-	if err != nil {
-		finalURL = proxyURL
-	}
+	finalURL := proxyURL
 	if err := validateTargetURL(finalURL); err != nil {
 		http.Error(w, "Invalid target", 403)
 		return
 	}
-
 	headers := map[string]string{"Referer": ""}
 	if handleHeadProxy(w, r, finalURL, "Mozilla/5.0", headers) {
 		return
 	}
-
-	resp, err := fetchWithRetry(r.Context(), r.Method, finalURL, "Mozilla/5.0", headers)
+	resp, err := fetchWithRetry(ctx, r.Method, finalURL, "Mozilla/5.0", headers)
 	if err != nil {
-		log.Printf("[Image Proxy Error] %s | Error: %v", finalURL, err)
-		http.Error(w, fmt.Sprintf("Fetch error: %v", err), 502)
+		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			log.Printf("[Image Proxy Error] %s | Error: %v", finalURL, err)
+			http.Error(w, fmt.Sprintf("Fetch error: %v", err), 502)
+		}
 		return
 	}
 	defer resp.Body.Close()
-
 	if resp.StatusCode == http.StatusNotModified {
 		copyHeaders(w.Header(), resp.Header)
 		setCORSHeaders(w)
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}
-
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		http.Error(w, fmt.Sprintf("Upstream error %d", resp.StatusCode), resp.StatusCode)
 		return
 	}
-
 	copyHeaders(w.Header(), resp.Header)
 	setCORSHeaders(w)
-
 	ct := resp.Header.Get("Content-Type")
 	if ct == "" {
 		ct = "image/jpeg"
 	}
 	w.Header().Set("Content-Type", ct)
-
 	cacheTTL := config.SiteConfig.ImageCacheTTL
 	if cacheTTL <= 0 {
 		cacheTTL = 30
 	}
 	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d, immutable", cacheTTL*86400))
-
 	w.WriteHeader(resp.StatusCode)
 	io.Copy(w, resp.Body)
 }
 
-// ===== M3U8 Rewrites =====
+// ... [Remainder of file (M3U8 Rewrites, Middleware, Main, Helper Functions) same as V4.1] ...
 
 func resolveURL(baseURL, relativePath string) string {
 	if strings.HasPrefix(relativePath, "http://") || strings.HasPrefix(relativePath, "https://") {
@@ -1236,31 +1194,38 @@ func rewriteM3U8(content, baseURL, proxyBase, sourceKey string, allowCORS bool) 
 	lines := strings.Split(content, "\n")
 	var result []string
 	pendingStreamInf := false
-
 	for i := 0; i < len(lines); i++ {
 		line := strings.TrimSpace(lines[i])
 		if line == "" {
 			result = append(result, "")
 			continue
 		}
-
 		if !strings.HasPrefix(line, "#") {
 			resolved := resolveURL(baseURL, line)
 			var proxyURL string
 			if pendingStreamInf {
+				// Heuristic: Some providers serve extensionless paths 'index' but expect 'index.m3u8'
+				if u, err := url.Parse(resolved); err == nil && !strings.HasSuffix(u.Path, ".m3u8") {
+					u.Path += ".m3u8"
+					resolved = u.String()
+				}
 				proxyURL = fmt.Sprintf("%s/m3u8?url=%s&moontv-source=%s",
 					proxyBase, url.QueryEscape(resolved), url.QueryEscape(sourceKey))
 				pendingStreamInf = false
 			} else if allowCORS {
 				proxyURL = resolved
 			} else {
+				// Heuristic: If segment path has no extension, force .ts
+				if u, err := url.Parse(resolved); err == nil && !strings.Contains(u.Path, ".") {
+					u.Path += ".ts"
+					resolved = u.String()
+				}
 				proxyURL = fmt.Sprintf("%s/segment?url=%s&moontv-source=%s",
 					proxyBase, url.QueryEscape(resolved), url.QueryEscape(sourceKey))
 			}
 			result = append(result, proxyURL)
 			continue
 		}
-
 		if strings.HasPrefix(line, "#EXT-X-MAP:") {
 			line = rewriteURITag(line, baseURL, proxyBase, "/segment", sourceKey)
 		} else if strings.HasPrefix(line, "#EXT-X-KEY:") {
@@ -1270,7 +1235,6 @@ func rewriteM3U8(content, baseURL, proxyBase, sourceKey string, allowCORS bool) 
 		} else if strings.HasPrefix(line, "#EXT-X-I-FRAME-STREAM-INF:") {
 			line = rewriteURITag(line, baseURL, proxyBase, "/m3u8", sourceKey)
 		}
-
 		if strings.HasPrefix(line, "#EXT-X-STREAM-INF:") {
 			pendingStreamInf = true
 		}
@@ -1289,8 +1253,6 @@ func rewriteURITag(line, baseURL, proxyBase, endpoint, sourceKey string) string 
 		proxyBase, endpoint, url.QueryEscape(resolved), url.QueryEscape(sourceKey))
 	return uriRegex.ReplaceAllString(line, fmt.Sprintf(`URI="%s"`, proxyURL))
 }
-
-// ===== Middleware & Logging =====
 
 type statusWriter struct {
 	http.ResponseWriter
@@ -1318,7 +1280,6 @@ func logRequest(next http.Handler) http.Handler {
 		sw := &statusWriter{ResponseWriter: w}
 		next.ServeHTTP(sw, r)
 		duration := time.Since(start)
-
 		if sw.status >= 400 || duration > time.Second {
 			log.Printf("%d | %s | %s | %v | %d bytes",
 				sw.status, r.Method, r.URL.Path, duration, sw.length)
@@ -1350,8 +1311,6 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("OK"))
 }
 
-// ===== Main =====
-
 func main() {
 	addr := flag.String("addr", ":8080", "Listen address")
 	cfgPath := flag.String("config", "", "Path to config JSON file")
@@ -1376,11 +1335,13 @@ func main() {
 	handler := logRequest(handleCORS(mux))
 
 	server := &http.Server{
-		Addr:         *addr,
-		Handler:      handler,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 120 * time.Second,
-		IdleTimeout:  120 * time.Second,
+		Addr:    *addr,
+		Handler: handler,
+		// FIX: ReadTimeout 0 allows streaming, but ReadHeaderTimeout protects against Slowloris
+		ReadTimeout:       0,
+		ReadHeaderTimeout: 10 * time.Second,
+		WriteTimeout:      0,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	done := make(chan bool, 1)
@@ -1398,7 +1359,7 @@ func main() {
 		close(done)
 	}()
 
-	log.Printf("🚀 LunaTV Neutron Star Proxy (Patched) starting on %s", *addr)
+	log.Printf("🚀 LunaTV Neutron Star Proxy (V5) starting on %s", *addr)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("Could not listen on %s: %v\n", *addr, err)
 	}

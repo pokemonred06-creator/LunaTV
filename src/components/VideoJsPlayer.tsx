@@ -3,11 +3,10 @@
 
 import Hls from 'hls.js';
 import type {
-  MouseEvent as ReactMouseEvent,
   MutableRefObject,
   PointerEvent as ReactPointerEvent,
   RefObject,
-  TouchEvent as ReactTouchEvent,
+  SyntheticEvent,
 } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import videojs from 'video.js';
@@ -21,12 +20,22 @@ interface WebKitHTMLVideoElement extends HTMLVideoElement {
   webkitEnterFullscreen?: () => void;
   webkitExitFullscreen?: () => void;
   webkitShowPlaybackTargetPicker?: () => void;
+  webkitRequestFullscreen?: () => void;
+  webkitSetPresentationMode?: (
+    mode: 'inline' | 'picture-in-picture' | 'fullscreen',
+  ) => void;
+  webkitPresentationMode?: 'inline' | 'picture-in-picture' | 'fullscreen';
 }
-interface VideoJsTech {
-  el(): WebKitHTMLVideoElement;
-  on?(event: string, handler: () => void): void;
-  off?(event: string, handler: () => void): void;
+
+interface VideoJsPlayerInstance extends Omit<Player, 'tech'> {
+  tech?: (safe?: boolean) => {
+    el?: () => WebKitHTMLVideoElement;
+    on?: (event: string, handler: () => void) => void;
+    off?: (event: string, handler: () => void) => void;
+  };
+  inactivityTimeout?: (value?: number) => number;
 }
+
 interface VideoJsOptions {
   controls?: boolean;
   autoplay?: boolean | string;
@@ -40,6 +49,7 @@ interface VideoJsOptions {
   sources?: { src: string; type: string }[];
   [key: string]: unknown;
 }
+
 interface VideoJsPlayerProps {
   url: string;
   type?: string;
@@ -68,47 +78,92 @@ interface VideoJsPlayerProps {
 // --- Icons ---
 const Icons = {
   play: (
-    <svg viewBox='0 0 24 24' fill='currentColor' className='icon'>
+    <svg
+      viewBox='0 0 24 24'
+      fill='currentColor'
+      className='icon'
+      aria-hidden='true'
+    >
       <path d='M8 5v14l11-7z' />
     </svg>
   ),
   pause: (
-    <svg viewBox='0 0 24 24' fill='currentColor' className='icon'>
+    <svg
+      viewBox='0 0 24 24'
+      fill='currentColor'
+      className='icon'
+      aria-hidden='true'
+    >
       <path d='M6 19h4V5H6v14zm8-14v14h4V5h-4z' />
     </svg>
   ),
   next: (
-    <svg viewBox='0 0 24 24' fill='currentColor' className='icon'>
+    <svg
+      viewBox='0 0 24 24'
+      fill='currentColor'
+      className='icon'
+      aria-hidden='true'
+    >
       <path d='M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z' />
     </svg>
   ),
   fullscreen: (
-    <svg viewBox='0 0 24 24' fill='currentColor' className='icon'>
+    <svg
+      viewBox='0 0 24 24'
+      fill='currentColor'
+      className='icon'
+      aria-hidden='true'
+    >
       <path d='M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z' />
     </svg>
   ),
   exitFullscreen: (
-    <svg viewBox='0 0 24 24' fill='currentColor' className='icon'>
+    <svg
+      viewBox='0 0 24 24'
+      fill='currentColor'
+      className='icon'
+      aria-hidden='true'
+    >
       <path d='M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z' />
     </svg>
   ),
   settings: (
-    <svg viewBox='0 0 24 24' fill='currentColor' className='icon'>
+    <svg
+      viewBox='0 0 24 24'
+      fill='currentColor'
+      className='icon'
+      aria-hidden='true'
+    >
       <path d='M19.14 12.94c.04-.31.06-.63.06-.94 0-.31-.02-.63-.06-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z' />
     </svg>
   ),
   airplay: (
-    <svg viewBox='0 0 24 24' fill='currentColor' className='icon'>
+    <svg
+      viewBox='0 0 24 24'
+      fill='currentColor'
+      className='icon'
+      aria-hidden='true'
+    >
       <path d='M6 22h12l-6-6-6 6zM21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h4v-2H3V5h18v12h-4v2h4c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z' />
     </svg>
   ),
   pip: (
-    <svg viewBox='0 0 24 24' fill='currentColor' className='icon'>
+    <svg
+      viewBox='0 0 24 24'
+      fill='currentColor'
+      className='icon'
+      aria-hidden='true'
+    >
       <path d='M19 11h-8v6h8v-6zm4 8V4.98C23 3.88 22.1 3 21 3H3c-1.1 0-2 .88-2 1.98V19c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2zm-2 .02H3V4.97h18v14.05z' />
     </svg>
   ),
   rotate: (
-    <svg viewBox='0 0 24 24' fill='currentColor' className='icon'>
+    <svg
+      viewBox='0 0 24 24'
+      fill='currentColor'
+      className='icon'
+      aria-hidden='true'
+    >
       <path d='M7.11 8.53L5.7 7.11C4.8 8.27 4.24 9.61 4.07 11h2.02c.14-.87.49-1.72 1.02-2.47zM6.09 13H4.07c.17 1.39.72 2.73 1.62 3.89l1.41-1.42c-.52-.75-.87-1.59-1.01-2.47zm1.01 5.32c1.16.9 2.51 1.44 3.9 1.61V17.9c-.87-.15-1.71-.49-2.46-1.03L7.1 18.32zM13 4.07V1L8.45 5.55 13 10V6.09c2.84.48 5 2.94 5 5.91s-2.16 5.43-5 5.91v2.02c3.95-.49 7-3.85 7-7.93s-3.05-7.44-7-7.93z' />
     </svg>
   ),
@@ -118,6 +173,7 @@ const Icons = {
       fill='currentColor'
       className='icon'
       style={{ width: 48, height: 48 }}
+      aria-hidden='true'
     >
       <path d='M8 5v14l11-7z' />
     </svg>
@@ -128,6 +184,7 @@ const Icons = {
       fill='currentColor'
       className='icon'
       style={{ width: 48, height: 48 }}
+      aria-hidden='true'
     >
       <path d='M6 19h4V5H6v14zm8-14v14h4V5h-4z' />
     </svg>
@@ -136,7 +193,7 @@ const Icons = {
 
 // --- Hooks ---
 const useUnifiedSeek = (
-  playerRef: MutableRefObject<Player | null>,
+  playerRef: MutableRefObject<VideoJsPlayerInstance | null>,
   setCurrentTime: (t: number) => void,
   setIsPaused: (p: boolean) => void,
   setSeekingTime: (t: number | null) => void,
@@ -147,6 +204,7 @@ const useUnifiedSeek = (
     showOverlay: false,
   });
   const rafRef = useRef<number | null>(null);
+  const lastPreviewRef = useRef<number>(0);
 
   const begin = useCallback(
     (opts?: { showOverlay?: boolean }) => {
@@ -155,6 +213,9 @@ const useUnifiedSeek = (
       seekRef.current.active = true;
       seekRef.current.showOverlay = !!opts?.showOverlay;
       seekRef.current.wasPlaying = player ? !player.paused() : false;
+      lastPreviewRef.current =
+        player?.currentTime?.() ?? lastPreviewRef.current ?? 0;
+
       if (seekRef.current.wasPlaying) {
         player?.pause();
         setIsPaused(true);
@@ -165,14 +226,22 @@ const useUnifiedSeek = (
 
   const preview = useCallback(
     (time: number) => {
+      lastPreviewRef.current = Number.isFinite(time) ? time : 0;
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       rafRef.current = requestAnimationFrame(() => {
-        const player = playerRef.current;
-        const d = player?.duration?.() ?? 0;
-        const safe = d > 0 ? Math.max(0, Math.min(d, time)) : Math.max(0, time);
+        const p = playerRef.current;
+        const d = p?.duration?.() ?? 0;
+        const hasFiniteDuration = Number.isFinite(d) && d > 0;
+        const safe = hasFiniteDuration
+          ? Math.max(0, Math.min(d, lastPreviewRef.current))
+          : Math.max(0, lastPreviewRef.current);
+
         setCurrentTime(safe);
-        player?.currentTime(safe);
         if (seekRef.current.showOverlay) setSeekingTime(safe);
+
+        if (p && Number.isFinite(safe)) {
+          p.currentTime(safe);
+        }
       });
     },
     [playerRef, setCurrentTime, setSeekingTime],
@@ -183,8 +252,19 @@ const useUnifiedSeek = (
     const player = playerRef.current;
     if (!seekRef.current.active) return;
     if (seekRef.current.showOverlay) setSeekingTime(null);
+
+    const d = player?.duration?.() ?? 0;
+    const hasFiniteDuration = Number.isFinite(d) && d > 0;
+    const target = hasFiniteDuration
+      ? Math.max(0, Math.min(d, lastPreviewRef.current))
+      : Math.max(0, lastPreviewRef.current);
+
+    if (player && Number.isFinite(target)) player.currentTime(target);
+
     if (seekRef.current.wasPlaying) {
-      player?.play();
+      player?.play()?.catch(() => {
+        if (player) player.trigger('useractive');
+      });
       setIsPaused(false);
     }
     seekRef.current.active = false;
@@ -198,7 +278,18 @@ const useUnifiedSeek = (
     seekRef.current.showOverlay = false;
   }, [setSeekingTime]);
 
-  return { begin, preview, end, cancel };
+  useEffect(() => {
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    };
+  }, []);
+
+  const isActive = useCallback(() => seekRef.current.active, []);
+
+  return useMemo(
+    () => ({ begin, preview, end, cancel, isActive }),
+    [begin, preview, end, cancel, isActive],
+  );
 };
 
 const useProgressBarScrub = (
@@ -207,10 +298,12 @@ const useProgressBarScrub = (
   unifiedSeek: ReturnType<typeof useUnifiedSeek>,
 ) => {
   const [isScrubbing, setIsScrubbing] = useState(false);
+  const pointerIdRef = useRef<number | null>(null);
+
   const getTimeFromX = useCallback(
     (clientX: number) => {
       const bar = progressBarRef.current;
-      if (!bar || duration <= 0) return 0;
+      if (!bar || duration <= 0 || !Number.isFinite(duration)) return 0;
       const rect = bar.getBoundingClientRect();
       return (
         Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)) * duration
@@ -218,68 +311,97 @@ const useProgressBarScrub = (
     },
     [duration, progressBarRef],
   );
+
   const handleScrubStart = useCallback(
-    (
-      e:
-        | ReactMouseEvent<HTMLDivElement>
-        | ReactTouchEvent<HTMLDivElement>
-        | ReactPointerEvent<HTMLDivElement>,
-    ) => {
-      if ('touches' in e && e.cancelable) e.preventDefault();
-      let clientX = 0;
-      if ('touches' in e) {
-        const t = e.touches[0];
-        if (!t) return;
-        clientX = t.clientX;
-      } else {
-        clientX = (e as ReactMouseEvent).clientX;
+    (e: ReactPointerEvent<HTMLDivElement>) => {
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      if ((e as unknown as { isPrimary?: boolean }).isPrimary === false) return;
+      if (e.cancelable) e.preventDefault();
+      e.stopPropagation();
+
+      pointerIdRef.current = e.pointerId;
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
       }
+
       setIsScrubbing(true);
       unifiedSeek.begin({ showOverlay: false });
-      unifiedSeek.preview(getTimeFromX(clientX));
+      unifiedSeek.preview(getTimeFromX(e.clientX));
     },
     [getTimeFromX, unifiedSeek],
   );
+
   useEffect(() => {
     if (!isScrubbing) return;
     if (typeof document === 'undefined') return;
-    const handleGlobalMove = (e: MouseEvent | TouchEvent) => {
-      if (e.cancelable) e.preventDefault();
-      let clientX = 0;
-      if ('touches' in e) {
-        const t = e.touches[0];
-        if (!t) return;
-        clientX = t.clientX;
-      } else {
-        clientX = (e as MouseEvent).clientX;
+
+    const releaseCaptureSafe = () => {
+      const bar = progressBarRef.current;
+      const pid = pointerIdRef.current;
+      if (bar && pid != null) {
+        try {
+          bar.releasePointerCapture(pid);
+        } catch {
+          /* ignore */
+        }
       }
-      unifiedSeek.preview(getTimeFromX(clientX));
+      pointerIdRef.current = null;
     };
-    const handleGlobalUp = () => {
+
+    const handleGlobalMove = (e: PointerEvent) => {
+      const pid = pointerIdRef.current;
+      if (pid != null && e.pointerId !== pid) return;
+      if (e.cancelable) e.preventDefault();
+      unifiedSeek.preview(getTimeFromX(e.clientX));
+    };
+
+    const handleGlobalEnd = (e: PointerEvent) => {
+      const pid = pointerIdRef.current;
+      if (pid != null && e.pointerId !== pid) return;
+      if (e.cancelable) e.preventDefault();
+      releaseCaptureSafe();
       setIsScrubbing(false);
+      const t = getTimeFromX(e.clientX);
+      unifiedSeek.preview(t);
       unifiedSeek.end();
     };
-    document.addEventListener('mousemove', handleGlobalMove);
-    document.addEventListener('touchmove', handleGlobalMove, {
+
+    const handleLostCapture = (e: Event) => {
+      if (e instanceof PointerEvent) handleGlobalEnd(e);
+      else {
+        releaseCaptureSafe();
+        setIsScrubbing(false);
+        unifiedSeek.end();
+      }
+    };
+
+    document.addEventListener('pointermove', handleGlobalMove, {
       passive: false,
     });
-    document.addEventListener('mouseup', handleGlobalUp);
-    document.addEventListener('touchend', handleGlobalUp);
-    document.addEventListener('touchcancel', handleGlobalUp);
+    document.addEventListener('pointerup', handleGlobalEnd, { passive: false });
+    document.addEventListener('pointercancel', handleGlobalEnd, {
+      passive: false,
+    });
+    const bar = progressBarRef.current;
+    if (bar) bar.addEventListener('lostpointercapture', handleLostCapture);
+
     return () => {
-      document.removeEventListener('mousemove', handleGlobalMove);
-      document.removeEventListener('touchmove', handleGlobalMove);
-      document.removeEventListener('mouseup', handleGlobalUp);
-      document.removeEventListener('touchend', handleGlobalUp);
-      document.removeEventListener('touchcancel', handleGlobalUp);
+      releaseCaptureSafe();
+      document.removeEventListener('pointermove', handleGlobalMove);
+      document.removeEventListener('pointerup', handleGlobalEnd);
+      document.removeEventListener('pointercancel', handleGlobalEnd);
+      if (bar) bar.removeEventListener('lostpointercapture', handleLostCapture);
     };
-  }, [isScrubbing, getTimeFromX, unifiedSeek]);
+  }, [isScrubbing, getTimeFromX, unifiedSeek, progressBarRef]);
+
   return { handleScrubStart, isScrubbing };
 };
 
 const usePlayerGestures = (
   containerRef: RefObject<HTMLDivElement | null>,
-  playerRef: MutableRefObject<Player | null>,
+  playerRef: MutableRefObject<VideoJsPlayerInstance | null>,
   duration: number,
   unifiedSeek: ReturnType<typeof useUnifiedSeek>,
   controlsVisible: boolean,
@@ -290,20 +412,36 @@ const usePlayerGestures = (
     startVideoTime: 0,
     isSeeking: false,
     active: false,
+    pointerId: null as number | null,
+    captured: false,
   });
+
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
-    const getPos = (e: TouchEvent | MouseEvent) => {
-      const touch =
-        'touches' in e ? e.touches[0] || e.changedTouches?.[0] : null;
-      return touch
-        ? { x: touch.clientX, y: touch.clientY }
-        : 'clientX' in e
-          ? { x: e.clientX, y: e.clientY }
-          : null;
+
+    const safeCapture = (pid: number) => {
+      if (gestureRef.current.captured) return;
+      try {
+        container.setPointerCapture(pid);
+        gestureRef.current.captured = true;
+      } catch {
+        /* empty */
+      }
     };
-    const handleStart = (e: TouchEvent | MouseEvent) => {
+    const safeRelease = (pid: number) => {
+      if (!gestureRef.current.captured) return;
+      try {
+        container.releasePointerCapture(pid);
+      } catch {
+        /* empty */
+      }
+      gestureRef.current.captured = false;
+    };
+
+    const handleStart = (e: PointerEvent) => {
+      if (!e.isPrimary) return;
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
       const target = e.target as HTMLElement;
       if (!container.contains(target)) return;
       if (controlsVisible) {
@@ -311,41 +449,45 @@ const usePlayerGestures = (
           target.closest(
             'button, .progress-bar, .progress-track, .progress-fill, .progress-thumb, .settings-popup, select, input',
           )
-        ) {
+        )
           return;
-        }
       }
-      const pos = getPos(e);
-      if (!pos) return;
-      const g = gestureRef.current;
-      g.startX = pos.x;
-      g.startY = pos.y;
-      g.active = true;
-      g.isSeeking = false;
-      g.startVideoTime = playerRef.current?.currentTime() || 0;
+
+      gestureRef.current.pointerId = e.pointerId;
+      gestureRef.current.startX = e.clientX;
+      gestureRef.current.startY = e.clientY;
+      gestureRef.current.active = true;
+      gestureRef.current.isSeeking = false;
+      gestureRef.current.captured = false;
+      gestureRef.current.startVideoTime = playerRef.current?.currentTime() || 0;
     };
-    const handleMove = (e: TouchEvent | MouseEvent) => {
+
+    const handleMove = (e: PointerEvent) => {
       const g = gestureRef.current;
       if (!g.active) return;
-      const pos = getPos(e);
-      if (!pos) return;
-      const dx = pos.x - g.startX,
-        dy = pos.y - g.startY;
+      if (g.pointerId != null && e.pointerId !== g.pointerId) return;
+
+      const dx = e.clientX - g.startX;
+      const dy = e.clientY - g.startY;
       const isRotated = container.classList.contains(
         'videojs-rotated-fullscreen',
       );
+
       if (!g.isSeeking && (Math.abs(dx) > 10 || Math.abs(dy) > 10)) {
         const shouldSeek = isRotated
           ? Math.abs(dy) > Math.abs(dx)
           : Math.abs(dx) > Math.abs(dy);
         if (shouldSeek) {
           g.isSeeking = true;
+          safeCapture(e.pointerId);
           if (e.cancelable) e.preventDefault();
           unifiedSeek.begin({ showOverlay: true });
           g.startVideoTime =
             playerRef.current?.currentTime() || g.startVideoTime;
         } else {
           g.active = false;
+          g.pointerId = null;
+          g.captured = false;
         }
       }
       if (g.isSeeking) {
@@ -355,14 +497,19 @@ const usePlayerGestures = (
           : container.clientWidth || 1;
         if (duration > 0) {
           const delta = isRotated ? dy : dx;
-          unifiedSeek.preview(
-            g.startVideoTime + delta * (duration / span) * 0.8,
-          );
+          const raw = g.startVideoTime + delta * (duration / span) * 0.8;
+          const clamped = Math.max(0, Math.min(duration, raw));
+          unifiedSeek.preview(clamped);
         }
       }
     };
-    const handleEnd = (e: TouchEvent | MouseEvent) => {
+
+    const handleEnd = (e: PointerEvent) => {
       const g = gestureRef.current;
+      if (g.pointerId != null && e.pointerId !== g.pointerId) return;
+
+      if (g.captured) safeRelease(e.pointerId);
+
       if (g.isSeeking) {
         if (e.cancelable) e.preventDefault();
         e.stopPropagation();
@@ -370,27 +517,41 @@ const usePlayerGestures = (
       }
       g.active = false;
       g.isSeeking = false;
+      g.pointerId = null;
+      g.captured = false;
     };
-    container.addEventListener('mousedown', handleStart);
-    container.addEventListener('touchstart', handleStart, { passive: false });
-    container.addEventListener('mousemove', handleMove);
-    container.addEventListener('touchmove', handleMove, { passive: false });
-    container.addEventListener('mouseup', handleEnd);
-    container.addEventListener('touchend', handleEnd);
-    container.addEventListener('touchcancel', handleEnd);
+
+    const handleLostGestureCapture = (e: Event) => {
+      if (e instanceof PointerEvent) handleEnd(e);
+      else {
+        if (gestureRef.current.isSeeking) unifiedSeek.end();
+        gestureRef.current.active = false;
+        gestureRef.current.isSeeking = false;
+        gestureRef.current.pointerId = null;
+        gestureRef.current.captured = false;
+      }
+    };
+
+    container.addEventListener('pointerdown', handleStart);
+    container.addEventListener('pointermove', handleMove);
+    container.addEventListener('pointerup', handleEnd);
+    container.addEventListener('pointercancel', handleEnd);
+    container.addEventListener('lostpointercapture', handleLostGestureCapture);
+
     return () => {
-      container.removeEventListener('mousedown', handleStart);
-      container.removeEventListener('touchstart', handleStart);
-      container.removeEventListener('mousemove', handleMove);
-      container.removeEventListener('touchmove', handleMove);
-      container.removeEventListener('mouseup', handleEnd);
-      container.removeEventListener('touchend', handleEnd);
-      container.removeEventListener('touchcancel', handleEnd);
+      container.removeEventListener('pointerdown', handleStart);
+      container.removeEventListener('pointermove', handleMove);
+      container.removeEventListener('pointerup', handleEnd);
+      container.removeEventListener('pointercancel', handleEnd);
+      container.removeEventListener(
+        'lostpointercapture',
+        handleLostGestureCapture,
+      );
     };
   }, [containerRef, playerRef, duration, unifiedSeek, controlsVisible]);
 };
 
-// --- CAS Shader Hook ---
+// --- CAS Shader Hook (Unchanged) ---
 const useCasShader = (
   playerReady: boolean,
   casEnabled: boolean,
@@ -398,6 +559,7 @@ const useCasShader = (
   isPiPActive: boolean,
   debug: boolean = false,
   techEpoch: number,
+  disableCas: () => void,
 ) => {
   const animationFrameRef = useRef<number | undefined>(undefined);
   const ownerRef = useRef<string>(
@@ -407,6 +569,7 @@ const useCasShader = (
   );
   const techRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const failuresRef = useRef(0);
 
   const hardStop = useCallback(() => {
     if (animationFrameRef.current) {
@@ -430,10 +593,11 @@ const useCasShader = (
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
+    if (failuresRef.current > 3) return;
+
     if (!playerReady || !casEnabled || isPiPActive) {
       hardStop();
       const tech = getTechVideoEl();
-      // Remove zombie canvases
       const zombie = tech?.parentElement?.querySelector(
         `canvas[data-cas-canvas="1"][data-cas-owner="${ownerRef.current}"]`,
       ) as HTMLCanvasElement | null;
@@ -474,7 +638,6 @@ const useCasShader = (
       `canvas[data-cas-canvas="1"][data-cas-owner="${ownerRef.current}"]`,
     );
     if (existing) existing.remove();
-
     tech.parentElement.insertBefore(canvas, tech.nextSibling);
     canvasRef.current = canvas;
     techRef.current = tech;
@@ -484,7 +647,6 @@ const useCasShader = (
       preserveDrawingBuffer: false,
       antialias: false,
     });
-
     if (!gl) {
       hardStop();
       return;
@@ -495,7 +657,6 @@ const useCasShader = (
       program: WebGLProgram | null = null,
       vsS: WebGLShader | null = null,
       fsS: WebGLShader | null = null;
-
     const safeDeleteGL = () => {
       if (texture) gl.deleteTexture(texture);
       if (buffer) gl.deleteBuffer(buffer);
@@ -507,17 +668,11 @@ const useCasShader = (
       if (vsS) gl.deleteShader(vsS);
       if (fsS) gl.deleteShader(fsS);
     };
-
-    let glCleaned = false;
     const cleanupGL = () => {
-      if (glCleaned) return;
-      glCleaned = true;
       safeDeleteGL();
     };
-
     const handleContextLost = (e: Event) => {
       e.preventDefault();
-      if (debug) console.warn('CAS Shader: WebGL Context Lost');
       canvas.removeEventListener('webglcontextlost', handleContextLost);
       cleanupGL();
       hardStop();
@@ -525,7 +680,6 @@ const useCasShader = (
     canvas.addEventListener('webglcontextlost', handleContextLost, {
       passive: false,
     });
-
     const abortInit = () => {
       canvas.removeEventListener('webglcontextlost', handleContextLost);
       safeDeleteGL();
@@ -546,7 +700,6 @@ const useCasShader = (
       }
       return s;
     };
-
     program = gl.createProgram();
     vsS = createShader(gl.VERTEX_SHADER, vsSource);
     fsS = createShader(gl.FRAGMENT_SHADER, fsSource);
@@ -554,7 +707,6 @@ const useCasShader = (
       abortInit();
       return;
     }
-
     gl.attachShader(program, vsS);
     gl.attachShader(program, fsS);
     gl.linkProgram(program);
@@ -563,7 +715,6 @@ const useCasShader = (
       return;
     }
     gl.useProgram(program);
-
     buffer = gl.createBuffer();
     if (!buffer) {
       abortInit();
@@ -575,11 +726,9 @@ const useCasShader = (
       new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]),
       gl.STATIC_DRAW,
     );
-
     const posLoc = gl.getAttribLocation(program, 'position');
     gl.enableVertexAttribArray(posLoc);
     gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
-
     texture = gl.createTexture();
     if (!texture) {
       abortInit();
@@ -590,28 +739,22 @@ const useCasShader = (
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-
     const resLoc = gl.getUniformLocation(program, 'u_resolution');
     const sharpLoc = gl.getUniformLocation(program, 'u_sharpness');
 
     tech.setAttribute('data-cas-active', 'true');
     tech.dataset.casOwner = ownerRef.current;
-
     let isFirstRender = true;
-
     const render = () => {
-      // FIX: Guard against detached nodes
       if (!tech.isConnected || !canvas.isConnected) {
         cleanupGL();
         hardStop();
         return;
       }
-
       if (!tech.videoWidth) {
         animationFrameRef.current = requestAnimationFrame(render);
         return;
       }
-
       const glCtx = gl as WebGLRenderingContext & {
         isContextLost?: () => boolean;
       };
@@ -620,7 +763,6 @@ const useCasShader = (
         hardStop();
         return;
       }
-
       if (
         canvas.width !== tech.videoWidth ||
         canvas.height !== tech.videoHeight
@@ -629,7 +771,6 @@ const useCasShader = (
         canvas.height = tech.videoHeight;
         gl.viewport(0, 0, canvas.width, canvas.height);
       }
-
       try {
         gl.texImage2D(
           gl.TEXTURE_2D,
@@ -639,26 +780,24 @@ const useCasShader = (
           gl.UNSIGNED_BYTE,
           tech,
         );
-
         if (isFirstRender) {
           tech.style.opacity = '0';
           isFirstRender = false;
         }
       } catch (e) {
+        failuresRef.current += 1;
         if (debug) console.warn('CAS Shader stopped: Texture tainted/CORS', e);
         cleanupGL();
         hardStop();
+        if (failuresRef.current > 3) disableCas();
         return;
       }
-
       if (resLoc) gl.uniform2f(resLoc, canvas.width, canvas.height);
       if (sharpLoc) gl.uniform1f(sharpLoc, 0.6);
       gl.drawArrays(gl.TRIANGLES, 0, 6);
       animationFrameRef.current = requestAnimationFrame(render);
     };
-
     render();
-
     return () => {
       canvas.removeEventListener('webglcontextlost', handleContextLost);
       cleanupGL();
@@ -672,11 +811,9 @@ const useCasShader = (
     debug,
     hardStop,
     techEpoch,
+    disableCas,
   ]);
 };
-
-const stopProp = (e: ReactMouseEvent | ReactTouchEvent | ReactPointerEvent) =>
-  e.stopPropagation();
 
 // --- Main Component ---
 export default function VideoJsPlayer({
@@ -705,7 +842,7 @@ export default function VideoJsPlayer({
 }: VideoJsPlayerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const videoWrapperRef = useRef<HTMLDivElement>(null);
-  const playerRef = useRef<Player | null>(null);
+  const playerRef = useRef<VideoJsPlayerInstance | null>(null);
   const hlsRef = useRef<Hls | null>(null);
   const hlsCleanupRef = useRef<(() => void) | null>(null);
   const networkErrorCountRef = useRef(0);
@@ -713,6 +850,8 @@ export default function VideoJsPlayer({
   const hasTriggeredOutroRef = useRef(false);
   const progressBarRef = useRef<HTMLDivElement>(null);
   const mountedRef = useRef(true);
+  const inactivityTimeoutRef = useRef<number | null>(null);
+
   const configRef = useRef({
     enableSkip,
     skipIntroTime,
@@ -751,6 +890,9 @@ export default function VideoJsPlayer({
     onLeave: (() => void) | null;
   }>({ video: null, onEnter: null, onLeave: null });
 
+  const [isUiInteracting, setIsUiInteracting] = useState(false);
+  const uiInteractTimeoutRef = useRef<number | null>(null);
+
   const [playbackRate, setPlaybackRate] = useState(() => {
     if (typeof window === 'undefined') return 1;
     try {
@@ -769,7 +911,15 @@ export default function VideoJsPlayer({
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [casEnabled, setCasEnabled] = useState(true);
+  const [casEnabled, setCasEnabled] = useState(() => {
+    if (typeof window === 'undefined') return true;
+    try {
+      const item = localStorage.getItem('lunatv_cas_enabled');
+      return item !== 'false';
+    } catch {
+      return true;
+    }
+  });
   const casEnabledRef = useRef(casEnabled);
   const [isRotatedFullscreen, setIsRotatedFullscreen] = useState(false);
   const [pipSupported, setPipSupported] = useState(false);
@@ -778,6 +928,7 @@ export default function VideoJsPlayer({
   const hasAirPlay =
     typeof window !== 'undefined' &&
     'WebKitPlaybackTargetAvailabilityEvent' in window;
+  const settingsOpenRef = useRef(settingsOpen);
 
   const finalUrl = useMemo(() => {
     if (!reloadTrigger || reloadTrigger <= 0) return url;
@@ -804,66 +955,74 @@ export default function VideoJsPlayer({
     controlsVisible,
   );
 
-  const onTapStart = useCallback(
-    (e: ReactTouchEvent | ReactMouseEvent | ReactPointerEvent) => {
-      tapGateRef.current.down = true;
-      tapGateRef.current.moved = false;
-      if ('touches' in e) {
-        const t = e.touches[0];
-        if (!t) return;
-        tapGateRef.current.startX = t.clientX;
-        tapGateRef.current.startY = t.clientY;
-      } else {
-        tapGateRef.current.startX = e.clientX;
-        tapGateRef.current.startY = e.clientY;
-      }
-    },
-    [],
-  );
-
-  const onTapMove = useCallback(
-    (e: ReactTouchEvent | ReactMouseEvent | ReactPointerEvent) => {
-      if (!tapGateRef.current.down) return;
-      let clientX = 0,
-        clientY = 0;
-      if ('touches' in e) {
-        const t = e.touches[0];
-        if (!t) return;
-        clientX = t.clientX;
-        clientY = t.clientY;
-      } else {
-        clientX = e.clientX;
-        clientY = e.clientY;
-      }
-      const dx = Math.abs(clientX - tapGateRef.current.startX);
-      const dy = Math.abs(clientY - tapGateRef.current.startY);
-      if (dx > 10 || dy > 10) tapGateRef.current.moved = true;
-    },
-    [],
-  );
-
-  const onTapEnd = useCallback(() => {
-    tapGateRef.current.down = false;
-  }, []);
-
-  const onTapToggleControls = useCallback(() => {
-    if (tapGateRef.current.moved) return;
-    if (isScrubbing) return;
-    const now = Date.now();
-    if (now - lastToggleTimeRef.current < 200) return;
-    lastToggleTimeRef.current = now;
-    const player = playerRef.current;
-    if (!player) return;
-    if ((player as any).userActive()) {
-      (player as any).userActive(false);
-    } else {
-      (player as any).userActive(true);
-    }
+  const isScrubbingRef = useRef(false);
+  useEffect(() => {
+    isScrubbingRef.current = isScrubbing;
   }, [isScrubbing]);
+  const seekingTimeRef = useRef<number | null>(null);
+  useEffect(() => {
+    seekingTimeRef.current = seekingTime;
+  }, [seekingTime]);
+  const unifiedSeekRef = useRef(unifiedSeek);
+  useEffect(() => {
+    unifiedSeekRef.current = unifiedSeek;
+  }, [unifiedSeek]);
+  useEffect(() => {
+    settingsOpenRef.current = settingsOpen;
+  }, [settingsOpen]);
 
   useEffect(() => {
-    configRef.current = { enableSkip, skipIntroTime, skipOutroTime, autoPlay };
-  }, [enableSkip, skipIntroTime, skipOutroTime, autoPlay]);
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (settingsOpenRef.current) {
+          e.stopPropagation();
+          setSettingsOpen(false);
+        } else {
+          const fsEl =
+            document.fullscreenElement ||
+            (document as any).webkitFullscreenElement;
+          if (fsEl) {
+            if (document.exitFullscreen)
+              document.exitFullscreen().catch(() => {});
+            else if ((document as any).webkitExitFullscreen)
+              (document as any).webkitExitFullscreen();
+          } else if (isRotatedFullscreen) {
+            containerRef.current?.classList.remove(
+              'videojs-rotated-fullscreen',
+            );
+            setIsRotatedFullscreen(false);
+          }
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isRotatedFullscreen]);
+
+  useEffect(() => {
+    const id = 'lunatv-player-css-v1';
+    if (document.getElementById(id)) return;
+    const style = document.createElement('style');
+    style.id = id;
+    style.textContent = CSS;
+    document.head.appendChild(style);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (uiInteractTimeoutRef.current) {
+        window.clearTimeout(uiInteractTimeoutRef.current);
+        uiInteractTimeoutRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     callbacksRef.current = {
@@ -877,66 +1036,181 @@ export default function VideoJsPlayer({
   }, [onReady, onTimeUpdate, onEnded, onError, onPlay, onPause]);
 
   useEffect(() => {
-    if (typeof document === 'undefined') return;
-    setPipSupported(
-      !!document.pictureInPictureEnabled &&
-        typeof (
-          HTMLVideoElement.prototype as unknown as {
-            requestPictureInPicture: unknown;
-          }
-        ).requestPictureInPicture === 'function',
-    );
-  }, []);
-
-  useEffect(() => {
-    try {
-      const s = localStorage.getItem(`lunatv_speed_${seriesId}`);
-      setPlaybackRate(s ? parseFloat(s) : 1);
-    } catch {
-      setPlaybackRate(1);
-    }
-  }, [seriesId]);
-
-  useEffect(() => {
-    playbackRateRef.current = playbackRate;
-    if (playerRef.current) playerRef.current.playbackRate(playbackRate);
-  }, [playbackRate]);
-
-  // FIX: Separate Effects to avoid looping/overrides
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem('lunatv_cas_enabled');
-      if (stored !== null) setCasEnabled(stored !== 'false');
-    } catch {
-      /* */
-    }
-  }, []);
+    configRef.current = { enableSkip, skipIntroTime, skipOutroTime, autoPlay };
+  }, [enableSkip, skipIntroTime, skipOutroTime, autoPlay]);
 
   useEffect(() => {
     casEnabledRef.current = casEnabled;
   }, [casEnabled]);
+  useEffect(() => {
+    playbackRateRef.current = playbackRate;
+  }, [playbackRate]);
 
   useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
+    if (!playerReady || !playerRef.current) return;
+    const p = playerRef.current;
+    if (inactivityTimeoutRef.current === null && p.inactivityTimeout) {
+      const v = p.inactivityTimeout();
+      inactivityTimeoutRef.current = typeof v === 'number' ? v : 2000;
+    }
+  }, [playerReady]);
+
+  // FIX: Mark Interaction Helper with Smart Whitelist (iOS/Android Safe)
+  const markUiInteraction = useCallback(
+    (e?: SyntheticEvent | Event, opts: { stop?: boolean } = {}) => {
+      const type = (e as any)?.type;
+      const isPressEvent =
+        type === 'pointerdown' || type === 'mousedown' || type === 'touchstart';
+
+      if (e && 'stopPropagation' in e) {
+        if (opts.stop || isPressEvent) {
+          (e as any).stopPropagation();
+        }
+      }
+
+      if (isPressEvent && e && 'preventDefault' in e && (e as any).cancelable) {
+        const target = (e as any).target as HTMLElement;
+        const tag = target?.tagName;
+        const isInteractive =
+          tag === 'SELECT' ||
+          tag === 'INPUT' ||
+          tag === 'TEXTAREA' ||
+          tag === 'OPTION' ||
+          tag === 'BUTTON' ||
+          target.closest('button, a, [role="button"]');
+
+        if (!isInteractive) {
+          (e as any).preventDefault();
+        }
+      }
+
+      const p = playerRef.current;
+      if (p) {
+        p.userActive?.(true);
+        p.reportUserActivity?.({});
+      }
+
+      setControlsVisible(true);
+      setIsUiInteracting(true);
+      if (uiInteractTimeoutRef.current)
+        window.clearTimeout(uiInteractTimeoutRef.current);
+
+      uiInteractTimeoutRef.current = window.setTimeout(() => {
+        if (mountedRef.current) setIsUiInteracting(false);
+      }, 1000); // 1s Buffer
+    },
+    [],
+  );
+
+  const togglePlay = useCallback(() => {
+    const p = playerRef.current;
+    if (!p) return;
+    if (p.paused()) {
+      p.play()?.catch(() => {
+        if (mountedRef.current) setControlsVisible(true);
+      });
+    } else {
+      p.pause();
+    }
   }, []);
 
   const getTechVideoEl = useCallback((): WebKitHTMLVideoElement | null => {
-    const p = playerRef.current as unknown as {
-      tech?: (safe: boolean) => VideoJsTech;
-    };
-    const tech = p.tech?.(true);
-    const el = tech?.el?.();
-    return el instanceof HTMLVideoElement
-      ? (el as WebKitHTMLVideoElement)
-      : null;
+    const p = playerRef.current;
+    if (!p) return null;
+    const techEl = p.tech?.(true)?.el?.();
+    if (techEl instanceof HTMLVideoElement)
+      return techEl as WebKitHTMLVideoElement;
+    return p.el()?.querySelector('video') as WebKitHTMLVideoElement | null;
   }, []);
+
+  const waitForVideo = useCallback(
+    async (ms = 500) => {
+      const now = () =>
+        typeof performance !== 'undefined' && performance.now
+          ? performance.now()
+          : Date.now();
+      const start = now();
+      while (now() - start < ms) {
+        const v = getTechVideoEl();
+        if (v) return v;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      return null;
+    },
+    [getTechVideoEl],
+  );
 
   const bumpTechEpoch = useCallback(() => {
     if (mountedRef.current) setTechEpoch((prev) => prev + 1);
   }, []);
+
+  const toggleRotatedFullscreen = useCallback(() => {
+    if (!isRotatedFullscreen) {
+      containerRef.current?.classList.add('videojs-rotated-fullscreen');
+      setIsRotatedFullscreen(true);
+    } else {
+      containerRef.current?.classList.remove('videojs-rotated-fullscreen');
+      setIsRotatedFullscreen(false);
+    }
+    setTimeout(() => {
+      if (mountedRef.current) playerRef.current?.trigger('resize');
+    }, 50);
+  }, [isRotatedFullscreen]);
+
+  const toggleFullscreen = useCallback(async () => {
+    if (typeof document === 'undefined') return;
+    const container = containerRef.current;
+    const video =
+      getTechVideoEl() ||
+      (container?.querySelector('video') as WebKitHTMLVideoElement | null);
+    if (!container) return;
+
+    try {
+      const isFS =
+        document.fullscreenElement ||
+        (document as any).webkitFullscreenElement ||
+        (video as any).webkitDisplayingFullscreen;
+      if (!isFS) {
+        if (container.requestFullscreen) await container.requestFullscreen();
+        else if ((container as any).webkitRequestFullscreen)
+          (container as any).webkitRequestFullscreen();
+        else if (video?.webkitEnterFullscreen) video.webkitEnterFullscreen();
+      } else {
+        if (document.exitFullscreen) await document.exitFullscreen();
+        else if ((document as any).webkitExitFullscreen)
+          (document as any).webkitExitFullscreen();
+        else if (video?.webkitExitFullscreen) video.webkitExitFullscreen();
+      }
+    } catch (e) {
+      if (mountedRef.current) callbacksRef.current.onError?.(e);
+    }
+
+    setTimeout(() => {
+      if (mountedRef.current) playerRef.current?.trigger('resize');
+    }, 50);
+  }, [getTechVideoEl]);
+
+  const togglePiP = useCallback(async () => {
+    const v = getTechVideoEl();
+    if (!v) return;
+    try {
+      if (document.pictureInPictureElement) {
+        await document.exitPictureInPicture();
+      } else if (
+        document.pictureInPictureEnabled &&
+        (v as any).requestPictureInPicture
+      ) {
+        await (v as any).requestPictureInPicture();
+      } else if ((v as any).webkitSetPresentationMode) {
+        const mode = (v as any).webkitPresentationMode;
+        (v as any).webkitSetPresentationMode(
+          mode === 'picture-in-picture' ? 'inline' : 'picture-in-picture',
+        );
+      }
+    } catch (e) {
+      if (mountedRef.current) callbacksRef.current.onError?.(e);
+    }
+  }, [getTechVideoEl]);
 
   const attachIosFullscreen = useCallback(
     (videoEl: WebKitHTMLVideoElement | null) => {
@@ -972,6 +1246,10 @@ export default function VideoJsPlayer({
     if (prev.video && prev.video !== videoEl && prev.onEnter && prev.onLeave) {
       prev.video.removeEventListener('enterpictureinpicture', prev.onEnter);
       prev.video.removeEventListener('leavepictureinpicture', prev.onLeave);
+      prev.video.removeEventListener(
+        'webkitpresentationmodechanged' as any,
+        (prev as any).iosListener,
+      );
     }
     if (!videoEl) {
       pipRef.current = { video: null, onEnter: null, onLeave: null };
@@ -984,25 +1262,66 @@ export default function VideoJsPlayer({
     const onLeave = () => {
       if (mountedRef.current) setIsPiPActive(false);
     };
+    const iosListener = () => {
+      const mode = (videoEl as any).webkitPresentationMode;
+      if (mountedRef.current) setIsPiPActive(mode === 'picture-in-picture');
+    };
+
     if (mountedRef.current)
       setIsPiPActive(document.pictureInPictureElement === videoEl);
     videoEl.addEventListener('enterpictureinpicture', onEnter);
     videoEl.addEventListener('leavepictureinpicture', onLeave);
-    pipRef.current = { video: videoEl, onEnter, onLeave };
+    videoEl.addEventListener(
+      'webkitpresentationmodechanged' as any,
+      iosListener,
+    );
+
+    pipRef.current = { video: videoEl, onEnter, onLeave, iosListener } as any;
   }, []);
+
+  const disableCasHard = useCallback(() => {
+    setCasEnabled(false);
+    casEnabledRef.current = false;
+    try {
+      localStorage.setItem('lunatv_cas_enabled', 'false');
+    } catch {
+      /* */
+    }
+    const v = getTechVideoEl();
+    if (v) {
+      v.style.opacity = '1';
+      v.removeAttribute('data-cas-active');
+      try {
+        delete (v as any).dataset?.casOwner;
+      } catch {
+        /* empty */
+      }
+      v.removeAttribute('crossorigin');
+      const parent = v.parentElement;
+      if (parent)
+        parent
+          .querySelectorAll('canvas[data-cas-canvas="1"]')
+          .forEach((c) => c.remove());
+    }
+    bumpTechEpoch();
+  }, [bumpTechEpoch, getTechVideoEl]);
 
   const toggleCas = useCallback(() => {
     setCasEnabled((p) => {
       const n = !p;
+      casEnabledRef.current = n;
       try {
         localStorage.setItem('lunatv_cas_enabled', n.toString());
       } catch {
         /* */
       }
-      // Enterprise Polish: Update Live State
       const video = getTechVideoEl();
       if (video) {
-        video.crossOrigin = n ? 'anonymous' : null;
+        if (n) {
+          video.crossOrigin = 'anonymous';
+        } else {
+          video.removeAttribute('crossorigin');
+        }
         bumpTechEpoch();
       }
       return n;
@@ -1011,71 +1330,150 @@ export default function VideoJsPlayer({
 
   const changeSpeed = useCallback(
     (rate: number) => {
-      setPlaybackRate(rate);
+      const safe = Number.isFinite(rate) ? rate : 1;
+      setPlaybackRate(safe);
+      playbackRateRef.current = safe;
       try {
-        localStorage.setItem(`lunatv_speed_${seriesId}`, rate.toString());
+        localStorage.setItem(`lunatv_speed_${seriesId}`, String(safe));
       } catch {
         /* */
       }
+      playerRef.current?.playbackRate?.(safe);
     },
     [seriesId],
   );
 
-  const togglePiP = useCallback(() => {
-    if (typeof document === 'undefined') return;
-    if (document.pictureInPictureElement) {
-      document.exitPictureInPicture().catch(() => {});
-    } else if (document.pictureInPictureEnabled) {
-      const video = getTechVideoEl();
-      if (video)
-        (video as unknown as { requestPictureInPicture?: () => Promise<void> })
-          .requestPictureInPicture?.()
-          .catch(() => {});
-    }
-  }, [getTechVideoEl]);
+  useEffect(() => {
+    const p = playerRef.current;
+    if (!p || typeof p.inactivityTimeout !== 'function') return;
 
-  // ---------------------------------------------------------------------------
-  // Production-Grade HLS Initialization
-  // ---------------------------------------------------------------------------
+    if (isUiInteracting) {
+      p.inactivityTimeout(0); // Disable
+      p.userActive?.(true);
+    } else {
+      const original = inactivityTimeoutRef.current ?? 2000;
+      p.inactivityTimeout(original);
+      p.reportUserActivity?.({});
+    }
+  }, [isUiInteracting]);
+
+  const onTapStart = useCallback((e: ReactPointerEvent) => {
+    tapGateRef.current.down = true;
+    tapGateRef.current.moved = false;
+    tapGateRef.current.startX = e.clientX;
+    tapGateRef.current.startY = e.clientY;
+  }, []);
+
+  const onTapMove = useCallback((e: ReactPointerEvent) => {
+    if (!tapGateRef.current.down) return;
+    const dx = Math.abs(e.clientX - tapGateRef.current.startX);
+    const dy = Math.abs(e.clientY - tapGateRef.current.startY);
+    if (dx > 10 || dy > 10) tapGateRef.current.moved = true;
+  }, []);
+
+  const onTapEnd = useCallback(() => {
+    tapGateRef.current.down = false;
+  }, []);
+
+  const onTapToggleControls = useCallback(() => {
+    if (tapGateRef.current.moved) return;
+    if (isScrubbing) return;
+
+    const now = Date.now();
+    if (now - lastToggleTimeRef.current < 200) return;
+    lastToggleTimeRef.current = now;
+
+    if (settingsOpen) {
+      setSettingsOpen(false);
+      const p = playerRef.current;
+      p?.userActive?.(true);
+      p?.reportUserActivity?.({});
+      return;
+    }
+
+    const player = playerRef.current;
+    if (!player) return;
+    if (player.userActive?.()) {
+      player.userActive?.(false);
+    } else {
+      player.userActive?.(true);
+    }
+  }, [isScrubbing, settingsOpen]);
+
+  // FIX: Native HLS Priority + Retry Logic
   const initHls = useCallback(
-    (videoEl: HTMLVideoElement, sourceUrl: string) => {
-      if (!videoEl || !sourceUrl) return;
+    async (videoEl: HTMLVideoElement, sourceUrl: string) => {
+      if (!sourceUrl) return;
+
+      // PROXY FIX:
+      // 1. allowCORS=false -> Forces Go to rewrite segments (fixes CAS/Tainted Canvas)
+      // 2. moontv-source -> Passes seriesId so Go uses correct User-Agent/Referer
+      let proxyUrl = sourceUrl;
+      // Prevent double-proxying if sourceUrl is already processed
+      if (!sourceUrl.includes('/api/proxy/')) {
+        proxyUrl = `/api/proxy/m3u8?url=${encodeURIComponent(
+          sourceUrl,
+        )}&allowCORS=false&moontv-source=${encodeURIComponent(
+          seriesId || 'global',
+        )}`;
+      }
+
+      // 1. Prefer Native HLS (Safari/iOS)
+      if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
+        if (hlsCleanupRef.current) {
+          hlsCleanupRef.current();
+          hlsCleanupRef.current = null;
+        } else if (hlsRef.current) {
+          try {
+            hlsRef.current.destroy();
+          } catch {
+            /* empty */
+          }
+          hlsRef.current = null;
+        }
+        videoEl.src = proxyUrl;
+        return;
+      }
+
+      // 2. Fallback to Hls.js
+      let targetEl = videoEl;
+      if (!targetEl || !targetEl.isConnected) {
+        const fresh = getTechVideoEl();
+        if (fresh) targetEl = fresh;
+      }
+      if (!targetEl) {
+        if (mountedRef.current)
+          callbacksRef.current.onError?.({
+            type: 'init_error',
+            message: 'Video element not found for HLS',
+          });
+        return;
+      }
 
       networkErrorCountRef.current = 0;
-
-      // 1. Strict Cleanup via Ref
       if (hlsCleanupRef.current) {
         hlsCleanupRef.current();
         hlsCleanupRef.current = null;
       } else if (hlsRef.current) {
-        // Fallback
         try {
           hlsRef.current.destroy();
         } catch {
-          /* ignore */
+          /* empty */
         }
         hlsRef.current = null;
       }
 
-      // 2. Native HLS fallback (Safari/iOS)
       if (!Hls.isSupported()) {
-        if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
-          videoEl.src = sourceUrl;
-          videoEl.load();
-        } else {
-          if (mountedRef.current) {
-            callbacksRef.current.onError?.({ type: 'hls_not_supported' });
-          }
-        }
+        if (mountedRef.current)
+          callbacksRef.current.onError?.({ type: 'hls_not_supported' });
         return;
       }
 
-      // 3. HLS.JS Path (Single Flush)
       try {
-        videoEl.removeAttribute('src');
-        videoEl.load();
+        targetEl.removeAttribute('src');
+        targetEl.load();
       } catch {
-        /* ignore */
+        /* empty */
       }
 
       const hlsConfig: Partial<typeof Hls.DefaultConfig> = {
@@ -1093,180 +1491,276 @@ export default function VideoJsPlayer({
             }
           : {}),
       };
-
       const hls = new Hls(hlsConfig as typeof Hls.DefaultConfig);
       hlsRef.current = hls;
 
       const onMediaAttached = () => {
-        if (hlsRef.current !== hls) return;
-        hls.loadSource(sourceUrl);
+        if (hlsRef.current === hls) hls.loadSource(proxyUrl);
       };
-
       const onFragLoaded = () => {
-        if (hlsRef.current !== hls) return;
-        networkErrorCountRef.current = 0;
+        if (hlsRef.current === hls) networkErrorCountRef.current = 0;
       };
-
       const onManifestParsed = () => {
-        if (hlsRef.current !== hls) return;
-        if (!mountedRef.current) return;
-        if (!configRef.current.autoPlay) return;
-
-        const player = playerRef.current;
-        if (!player) return;
-        if (!player.paused()) return;
-
-        const p = player.play();
-        if (p !== undefined) p.catch(() => {});
+        if (hlsRef.current !== hls || !mountedRef.current) return;
+        if (configRef.current.autoPlay && playerRef.current?.paused())
+          playerRef.current.play()?.catch(() => {
+            if (mountedRef.current) setControlsVisible(true);
+          });
       };
 
-      // FIX: Null refs inside cleanup to prevent double-destroy
       const performCleanupAndDestroy = (err?: any) => {
         if (hlsCleanupRef.current) hlsCleanupRef.current = null;
         if (hlsRef.current === hls) hlsRef.current = null;
-
         try {
           hls.off(Hls.Events.MEDIA_ATTACHED, onMediaAttached);
         } catch {
-          /* ignore */
+          /* empty */
         }
         try {
           hls.off(Hls.Events.FRAG_LOADED, onFragLoaded);
         } catch {
-          /* ignore */
+          /* empty */
         }
         try {
           hls.off(Hls.Events.MANIFEST_PARSED, onManifestParsed);
         } catch {
-          /* ignore */
+          /* empty */
         }
         try {
           hls.off(Hls.Events.ERROR, onErrorHandler);
         } catch {
-          /* ignore */
+          /* empty */
         }
-
         try {
           hls.stopLoad();
-        } catch {
-          /* ignore */
-        }
-        try {
           hls.detachMedia();
-        } catch {
-          /* ignore */
-        }
-        try {
           hls.destroy();
         } catch {
-          /* ignore */
+          /* empty */
         }
-
         if (err && mountedRef.current) callbacksRef.current.onError?.(err);
       };
 
       const onErrorHandler = (_evt: unknown, data: any) => {
         if (hlsRef.current !== hls) return;
-        const isNet = data?.type === Hls.ErrorTypes.NETWORK_ERROR;
         if (data?.fatal) {
-          if (isNet) {
+          if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
             networkErrorCountRef.current += 1;
-            if (networkErrorCountRef.current >= 3) {
+            if (networkErrorCountRef.current >= 3)
               performCleanupAndDestroy({
-                type: Hls.ErrorTypes.NETWORK_ERROR,
-                details: 'persistent_network_error',
+                type: 'network_error',
                 fatal: true,
-                reason: 'threshold_exceeded',
                 original: data,
               });
-            } else {
+            else {
               try {
                 hls.startLoad();
               } catch {
                 performCleanupAndDestroy(data);
               }
             }
-            return;
-          }
-          if (data?.type === Hls.ErrorTypes.MEDIA_ERROR) {
+          } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
             try {
               hls.recoverMediaError();
             } catch {
               performCleanupAndDestroy(data);
             }
-            return;
+          } else {
+            performCleanupAndDestroy(data);
           }
-          performCleanupAndDestroy(data);
         }
       };
 
-      // Assign Cleanup Ref
       hlsCleanupRef.current = () => performCleanupAndDestroy();
-
       hls.on(Hls.Events.MEDIA_ATTACHED, onMediaAttached);
       hls.on(Hls.Events.FRAG_LOADED, onFragLoaded);
       hls.on(Hls.Events.MANIFEST_PARSED, onManifestParsed);
       hls.on(Hls.Events.ERROR, onErrorHandler);
-
-      hls.attachMedia(videoEl);
+      hls.attachMedia(targetEl);
     },
-    [customHlsLoader, debug, isLive],
+    // FIX: Added seriesId to dependencies so source updates on channel switch
+    [customHlsLoader, debug, isLive, getTechVideoEl, seriesId],
   );
 
-  const toggleFullscreen = useCallback(() => {
-    if (typeof document === 'undefined') return;
-    const container = containerRef.current;
-    const video = (getTechVideoEl() ||
-      container?.querySelector('video')) as WebKitHTMLVideoElement | null;
-    if (!container) return;
-    if (!isFullscreen) {
-      if (container.requestFullscreen)
-        container.requestFullscreen().catch(() => {});
-      else if (
-        (container as unknown as { webkitRequestFullscreen?: () => void })
-          .webkitRequestFullscreen
-      )
-        (
-          container as unknown as { webkitRequestFullscreen: () => void }
-        ).webkitRequestFullscreen();
-      else if (video?.webkitEnterFullscreen) video.webkitEnterFullscreen();
+  // FIX: Complete Source Loading Pipeline (HLS + Native)
+  useEffect(() => {
+    if (!playerReady || !playerRef.current || !mountedRef.current) return;
+    const player = playerRef.current;
+    const epoch = ++switchEpochRef.current;
+
+    const d = player.duration() ?? 0;
+    const t = player.currentTime() ?? 0;
+    const wasPlaying = !player.paused();
+    const isFiniteDuration = Number.isFinite(d) && d > 0;
+    if (!isLive && isFiniteDuration && t > 0 && t < d - 2) {
+      switchSnapshotRef.current = { time: t, wasPlaying };
     } else {
-      if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
-      else if (
-        (document as unknown as { webkitExitFullscreen?: () => void })
-          .webkitExitFullscreen
-      )
-        (
-          document as unknown as { webkitExitFullscreen: () => void }
-        ).webkitExitFullscreen();
-      else if (video?.webkitExitFullscreen) video.webkitExitFullscreen();
+      switchSnapshotRef.current = null;
     }
-    setTimeout(() => {
-      if (mountedRef.current) playerRef.current?.trigger('resize');
-    }, 50);
-  }, [isFullscreen, getTechVideoEl]);
 
-  const toggleRotatedFullscreen = useCallback(() => {
-    if (!isRotatedFullscreen) {
-      containerRef.current?.classList.add('videojs-rotated-fullscreen');
-      setIsRotatedFullscreen(true);
+    let restoreArmed = true;
+    let attachedVideoEl: HTMLVideoElement | null = null;
+    const restore = () => {
+      if (!mountedRef.current || !restoreArmed) return;
+      if (switchEpochRef.current !== epoch) return;
+      const snap = switchSnapshotRef.current;
+      if (!snap) return;
+      const seekable = player.seekable?.();
+      let target = snap.time;
+      if (seekable && seekable.length > 0) {
+        const start = seekable.start(0);
+        const end = seekable.end(seekable.length - 1);
+        target = Math.min(Math.max(target, start), Math.max(start, end - 0.1));
+      } else if (
+        Number.isFinite(player.duration()) &&
+        (player.duration() ?? 0) > 0
+      ) {
+        const dur = player.duration() ?? 0;
+        target = Math.min(Math.max(target, 0), Math.max(0, dur - 0.1));
+      }
+      switchSnapshotRef.current = null;
+      player.currentTime(target);
+      if (snap.wasPlaying)
+        player.play()?.catch(() => {
+          if (mountedRef.current) setControlsVisible(true);
+        });
+    };
+
+    hasSkippedIntroRef.current = false;
+    hasTriggeredOutroRef.current = false;
+    player.pause();
+    player.playbackRate(playbackRateRef.current);
+    player.poster(poster || '');
+
+    const v = getTechVideoEl();
+    const videoEl = v instanceof HTMLVideoElement ? v : null;
+    if (videoEl) {
+      if (casEnabledRef.current) {
+        videoEl.crossOrigin = 'anonymous';
+      } else {
+        videoEl.removeAttribute('crossorigin');
+      }
+      attachIosFullscreen(videoEl as WebKitHTMLVideoElement);
+      attachPiPListeners(videoEl);
+      bumpTechEpoch();
+      videoEl.addEventListener('loadedmetadata', restore, { once: true });
+      attachedVideoEl = videoEl;
     } else {
-      containerRef.current?.classList.remove('videojs-rotated-fullscreen');
-      setIsRotatedFullscreen(false);
+      player.one('loadedmetadata', restore);
     }
-    setTimeout(() => {
-      if (mountedRef.current) playerRef.current?.trigger('resize');
-    }, 50);
-  }, [isRotatedFullscreen]);
 
-  const togglePlay = useCallback(() => {
-    if (isPaused) playerRef.current?.play();
-    else playerRef.current?.pause();
-  }, [isPaused]);
+    const isHlsMime =
+      type === 'application/x-mpegURL' ||
+      type === 'application/vnd.apple.mpegurl';
+    const isHlsUrl =
+      finalUrl?.includes('.m3u8') ||
+      finalUrl?.includes('/proxy/m3u8') ||
+      finalUrl?.includes('m3u8?');
+    const isFlvUrl =
+      finalUrl?.includes('.flv') ||
+      finalUrl?.includes('/proxy/flv') ||
+      finalUrl?.includes('flv?');
 
-  // ---------------------------------------------------------------------------
-  // Lifecycle 1: Player Creation (Run Once)
-  // ---------------------------------------------------------------------------
+    const loadSource = (src: string, mime?: string) =>
+      player.src({ src, type: mime });
+
+    // FIX: Async Epoch-Guarded HLS Loading
+    if (isHlsMime || (!type && isHlsUrl)) {
+      (async () => {
+        const myEpoch = epoch;
+        // Native HLS check first
+        const v = getTechVideoEl() || (await waitForVideo(500));
+        if (!mountedRef.current || switchEpochRef.current !== myEpoch) return;
+
+        if (v) {
+          // Let initHls handle native vs hls.js split
+          initHls(v, finalUrl);
+          if (configRef.current.autoPlay && v.readyState >= 2) {
+            player.play()?.catch(() => {
+              if (mountedRef.current) setControlsVisible(true);
+            });
+          }
+        } else {
+          if (mountedRef.current)
+            callbacksRef.current.onError?.({
+              type: 'init_error',
+              message: 'Video element not found for HLS',
+            });
+        }
+      })();
+    } else {
+      if (hlsCleanupRef.current) {
+        hlsCleanupRef.current();
+        hlsCleanupRef.current = null;
+      } else if (hlsRef.current) {
+        try {
+          hlsRef.current.destroy();
+        } catch {
+          /* empty */
+        }
+        hlsRef.current = null;
+      }
+
+      // --- START FIX: Safe Proxy Routing ---
+      let srcToLoad = finalUrl;
+
+      // Check protocol case-insensitively
+      if (/^https?:\/\//i.test(finalUrl)) {
+        const encodedUrl = encodeURIComponent(finalUrl);
+        const sourceParam = encodeURIComponent(seriesId || 'global');
+
+        if (isFlvUrl) {
+          // FLV needs infinite timeout -> use /flv endpoint
+          srcToLoad = `/api/proxy/flv?url=${encodedUrl}&moontv-source=${sourceParam}`;
+        } else {
+          // MP4/General needs finite timeout + Range support -> use /key endpoint (30s)
+          srcToLoad = `/api/proxy/key?url=${encodedUrl}&moontv-source=${sourceParam}`;
+        }
+      }
+
+      if (isFlvUrl) loadSource(srcToLoad, 'video/x-flv');
+      else loadSource(srcToLoad, type || 'video/mp4');
+      // --- END FIX ---
+
+      const tryAutoPlay = () => {
+        if (!mountedRef.current || !configRef.current.autoPlay) return;
+        player.play()?.catch(() => {
+          if (mountedRef.current) setControlsVisible(true);
+        });
+      };
+
+      if (firstLoadRef.current) {
+        firstLoadRef.current = false;
+        tryAutoPlay();
+      } else {
+        if (mountedRef.current) unifiedSeek.cancel();
+        player.one('canplay', tryAutoPlay);
+      }
+    }
+
+    return () => {
+      restoreArmed = false;
+      if (attachedVideoEl)
+        attachedVideoEl.removeEventListener('loadedmetadata', restore);
+      player.off?.('loadedmetadata', restore);
+    };
+  }, [
+    finalUrl,
+    type,
+    poster,
+    playerReady,
+    initHls,
+    attachIosFullscreen,
+    attachPiPListeners,
+    bumpTechEpoch,
+    isLive,
+    unifiedSeek,
+    getTechVideoEl,
+    waitForVideo,
+    seriesId,
+  ]);
+
+  // FIX: Player Initialization & Event Binding (The Engine)
   useEffect(() => {
     if (!videoWrapperRef.current) return;
     const wrapper = videoWrapperRef.current;
@@ -1279,7 +1773,6 @@ export default function VideoJsPlayer({
       width: '100%',
       height: '100%',
     });
-    // NOTE: Removed forced crossOrigin here. Let CAS / Source Logic decide.
     wrapper.appendChild(videoElement);
 
     const player = videojs(videoElement, {
@@ -1291,24 +1784,33 @@ export default function VideoJsPlayer({
       poster,
       playsinline: true,
       userActions: { click: false, doubleClick: false },
-      html5: {
-        vhs: { overrideNative: false },
-      },
+      html5: { vhs: { overrideNative: false } },
       ...videoJsOptions,
-    });
+    }) as unknown as VideoJsPlayerInstance;
 
     playerRef.current = player;
 
+    const handleUserActive = () => {
+      if (mountedRef.current) setControlsVisible(true);
+    };
+    const handleUserInactive = () => {
+      if (mountedRef.current) {
+        setControlsVisible(false);
+        setSettingsOpen(false);
+      }
+    };
+
     player.ready(() => {
       if (mountedRef.current) setPlayerReady(true);
-      if (mountedRef.current) callbacksRef.current.onReady?.(player);
-
-      const tech = (player as any).tech?.(true);
-      const v = tech?.el?.();
+      if (mountedRef.current)
+        callbacksRef.current.onReady?.(player as unknown as Player);
+      const v = player.tech?.(true)?.el?.();
       if (v instanceof HTMLVideoElement) {
-        // FIX: Conditional Property
-        v.crossOrigin = casEnabledRef.current ? 'anonymous' : null;
-
+        if (casEnabledRef.current) {
+          v.crossOrigin = 'anonymous';
+        } else {
+          v.removeAttribute('crossorigin');
+        }
         attachIosFullscreen(v as WebKitHTMLVideoElement);
         attachPiPListeners(v);
         bumpTechEpoch();
@@ -1316,11 +1818,13 @@ export default function VideoJsPlayer({
     });
 
     const handleLoadStart = () => {
-      const tech = (player as any).tech?.(true);
-      const v = tech?.el?.();
+      const v = player.tech?.(true)?.el?.();
       if (v instanceof HTMLVideoElement) {
-        v.crossOrigin = casEnabledRef.current ? 'anonymous' : null;
-
+        if (casEnabledRef.current) {
+          v.crossOrigin = 'anonymous';
+        } else {
+          v.removeAttribute('crossorigin');
+        }
         attachIosFullscreen(v as WebKitHTMLVideoElement);
         attachPiPListeners(v);
         bumpTechEpoch();
@@ -1328,21 +1832,19 @@ export default function VideoJsPlayer({
     };
 
     player.on('loadstart', handleLoadStart);
-    player.on('useractive', () => {
-      if (mountedRef.current) setControlsVisible(true);
-    });
-    player.on('userinactive', () => {
-      if (mountedRef.current) setControlsVisible(false);
-    });
+    player.on('useractive', handleUserActive);
+    player.on('userinactive', handleUserInactive);
     player.on('play', () => {
-      if (!mountedRef.current) return;
-      setIsPaused(false);
-      callbacksRef.current.onPlay?.();
+      if (mountedRef.current) {
+        setIsPaused(false);
+        callbacksRef.current.onPlay?.();
+      }
     });
     player.on('pause', () => {
-      if (!mountedRef.current) return;
-      setIsPaused(true);
-      callbacksRef.current.onPause?.();
+      if (mountedRef.current) {
+        setIsPaused(true);
+        callbacksRef.current.onPause?.();
+      }
     });
     player.on('ended', () => {
       if (mountedRef.current && !hasTriggeredOutroRef.current)
@@ -1354,12 +1856,34 @@ export default function VideoJsPlayer({
     player.on('durationchange', () => {
       if (mountedRef.current) setDuration(player.duration() || 0);
     });
+
+    // FIX: Guarded timeupdate to stop scrubbing jumps via Refs
     player.on('timeupdate', () => {
       if (!mountedRef.current) return;
       const t = player.currentTime() || 0;
-      const d = player.duration() || 0;
-      setCurrentTime(t);
+
+      // FIX: Prefer native duration for HLS if Video.js reports 0/Inf
+      let d = player.duration() || 0;
+      if (d === 0 || d === Infinity) {
+        const nativeEl = player.tech?.(true)?.el?.();
+        if (
+          nativeEl instanceof HTMLVideoElement &&
+          Number.isFinite(nativeEl.duration)
+        ) {
+          d = nativeEl.duration;
+        }
+      }
+
+      const scrubbing =
+        isScrubbingRef.current ||
+        seekingTimeRef.current !== null ||
+        unifiedSeekRef.current.isActive();
+      if (!scrubbing) setCurrentTime(t);
+
       callbacksRef.current.onTimeUpdate?.(t, d);
+
+      if (scrubbing) return;
+
       const { enableSkip, skipIntroTime, skipOutroTime } = configRef.current;
       if (enableSkip) {
         if (
@@ -1385,10 +1909,10 @@ export default function VideoJsPlayer({
 
     return () => {
       player.off('loadstart', handleLoadStart);
+      player.off('useractive', handleUserActive);
+      player.off('userinactive', handleUserInactive);
       attachIosFullscreen(null);
       attachPiPListeners(null);
-
-      // Strict Cleanup on Unmount (using ref)
       if (hlsCleanupRef.current) {
         hlsCleanupRef.current();
         hlsCleanupRef.current = null;
@@ -1396,221 +1920,14 @@ export default function VideoJsPlayer({
         try {
           hlsRef.current.destroy();
         } catch {
-          /* ignore */
+          /* empty */
         }
         hlsRef.current = null;
       }
-
       player.dispose();
       playerRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Run once on mount
-
-  // ---------------------------------------------------------------------------
-  // Lifecycle 2: Source Change (Re-init HLS & State)
-  // ---------------------------------------------------------------------------
-  useEffect(() => {
-    if (!playerReady || !playerRef.current || !mountedRef.current) return;
-
-    const player = playerRef.current;
-    const epoch = ++switchEpochRef.current;
-
-    // Snapshot state
-    const d = player.duration() ?? 0;
-    const t = player.currentTime() ?? 0;
-    const wasPlaying = !player.paused();
-    const isFiniteDuration = Number.isFinite(d) && d > 0;
-
-    if (!isLive && isFiniteDuration && t > 0 && t < d - 2) {
-      switchSnapshotRef.current = { time: t, wasPlaying };
-    } else {
-      switchSnapshotRef.current = null;
-    }
-
-    let restoreArmed = true;
-    let attachedVideoEl: HTMLVideoElement | null = null;
-    let restore: () => void = () => {};
-
-    hasSkippedIntroRef.current = false;
-    hasTriggeredOutroRef.current = false;
-
-    player.pause();
-    player.playbackRate(playbackRateRef.current);
-    player.poster(poster || '');
-
-    // Get tech element
-    const tech = (player as any).tech?.(true);
-    const v = tech?.el?.();
-    const videoEl = v instanceof HTMLVideoElement ? v : null;
-
-    if (videoEl) {
-      // FIX: Conditional CORS update for source change
-      videoEl.crossOrigin = casEnabledRef.current ? 'anonymous' : null;
-
-      attachIosFullscreen(videoEl as WebKitHTMLVideoElement);
-      attachPiPListeners(videoEl);
-      bumpTechEpoch();
-    }
-
-    restore = () => {
-      if (!mountedRef.current || !restoreArmed) return;
-      if (switchEpochRef.current !== epoch) return;
-
-      const snap = switchSnapshotRef.current;
-      if (!snap) return;
-
-      const seekable = player.seekable?.();
-      let target = snap.time;
-
-      if (seekable && seekable.length > 0) {
-        const start = seekable.start(0);
-        const end = seekable.end(seekable.length - 1);
-        target = Math.min(Math.max(target, start), Math.max(start, end - 0.1));
-      } else if (
-        Number.isFinite(player.duration()) &&
-        (player.duration() ?? 0) > 0
-      ) {
-        const dur = player.duration() ?? 0;
-        target = Math.min(Math.max(target, 0), Math.max(0, dur - 0.1));
-      }
-
-      switchSnapshotRef.current = null;
-      player.currentTime(target);
-
-      if (snap.wasPlaying) {
-        player.play()?.catch(() => {});
-      }
-    };
-
-    if (videoEl) {
-      attachedVideoEl = videoEl;
-      videoEl.addEventListener('loadedmetadata', restore, { once: true });
-    } else {
-      player.one('loadedmetadata', restore);
-    }
-
-    // Determine Source Type
-    const isHlsMime =
-      type === 'application/x-mpegURL' ||
-      type === 'application/vnd.apple.mpegurl';
-    const isHlsUrl =
-      finalUrl?.includes('.m3u8') ||
-      finalUrl?.includes('/proxy/m3u8') ||
-      finalUrl?.includes('m3u8?');
-    const isFlvUrl =
-      finalUrl?.includes('.flv') ||
-      finalUrl?.includes('/proxy/flv') ||
-      finalUrl?.includes('flv?');
-
-    const loadSource = (src: string, mime?: string) =>
-      player.src({ src, type: mime });
-
-    // --- Strict Routing ---
-
-    // 1. HLS Path (Manual Init)
-    if (isHlsMime || (!type && isHlsUrl)) {
-      if (videoEl) {
-        initHls(videoEl, finalUrl);
-        // Attempt 1: Immediate Autoplay (Debounced)
-        if (configRef.current.autoPlay) {
-          if (videoEl.readyState >= 2) {
-            player.play()?.catch(() => {
-              if (mountedRef.current) setControlsVisible(true);
-            });
-          }
-        }
-      } else {
-        if (mountedRef.current) {
-          callbacksRef.current.onError?.({
-            type: 'render_error',
-            message: 'HTMLVideoElement missing for HLS playback',
-          });
-        }
-      }
-      // STOP
-    }
-    // 2. Legacy/Native Path
-    else {
-      // Transition Cleanup using strict ref
-      if (hlsCleanupRef.current) {
-        hlsCleanupRef.current();
-        hlsCleanupRef.current = null;
-      } else if (hlsRef.current) {
-        try {
-          hlsRef.current.destroy();
-        } catch {
-          /* ignore */
-        }
-        hlsRef.current = null;
-      }
-
-      if (isFlvUrl) loadSource(finalUrl, 'video/x-flv');
-      else loadSource(finalUrl, type || 'video/mp4');
-
-      const tryAutoPlay = () => {
-        if (!mountedRef.current || !configRef.current.autoPlay) return;
-        player.play()?.catch(() => {
-          if (mountedRef.current) setControlsVisible(true);
-        });
-      };
-
-      if (firstLoadRef.current) {
-        firstLoadRef.current = false;
-        tryAutoPlay();
-      } else {
-        player.one('canplay', tryAutoPlay);
-      }
-    }
-
-    return () => {
-      restoreArmed = false;
-      if (attachedVideoEl) {
-        attachedVideoEl.removeEventListener('loadedmetadata', restore);
-      }
-      player.off?.('loadedmetadata', restore);
-    };
-  }, [
-    finalUrl,
-    type,
-    poster,
-    playerReady,
-    initHls,
-    attachIosFullscreen,
-    attachPiPListeners,
-    bumpTechEpoch,
-    isLive,
-  ]);
-
-  useEffect(() => {
-    const handleFullscreenChange = () => {
-      if (typeof document === 'undefined') return;
-      const isFS = !!(
-        document.fullscreenElement ||
-        (document as unknown as { webkitFullscreenElement?: Element })
-          .webkitFullscreenElement
-      );
-      if (mountedRef.current) setIsFullscreen(isFS);
-    };
-    if (typeof document !== 'undefined') {
-      document.addEventListener('fullscreenchange', handleFullscreenChange);
-      document.addEventListener(
-        'webkitfullscreenchange',
-        handleFullscreenChange,
-      );
-    }
-    return () => {
-      if (typeof document !== 'undefined') {
-        document.removeEventListener(
-          'fullscreenchange',
-          handleFullscreenChange,
-        );
-        document.removeEventListener(
-          'webkitfullscreenchange',
-          handleFullscreenChange,
-        );
-      }
-    };
   }, []);
 
   useCasShader(
@@ -1620,13 +1937,45 @@ export default function VideoJsPlayer({
     isPiPActive,
     debug,
     techEpoch,
+    disableCasHard,
   );
+
+  // FIX: Fullscreen Sync Effect
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const onFsChange = () => {
+      if (!mountedRef.current) return;
+      setIsFullscreen(
+        !!document.fullscreenElement ||
+          !!(document as any).webkitFullscreenElement,
+      );
+    };
+    document.addEventListener('fullscreenchange', onFsChange);
+    document.addEventListener('webkitfullscreenchange', onFsChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', onFsChange);
+      document.removeEventListener('webkitfullscreenchange', onFsChange);
+    };
+  }, []);
+
+  // FIX: PiP Support Check with iOS Fallback
+  useEffect(() => {
+    if (typeof document !== 'undefined' && mountedRef.current) {
+      const v = getTechVideoEl();
+      const supported =
+        (!!document.pictureInPictureEnabled &&
+          !!v &&
+          typeof (v as any).requestPictureInPicture === 'function') ||
+        (!!v && typeof (v as any).webkitSetPresentationMode === 'function');
+      setPipSupported(supported);
+    }
+  }, [playerReady, techEpoch, getTechVideoEl]);
 
   const formatTime = (s: number) => {
     if (!Number.isFinite(s)) return '0:00';
-    const h = Math.floor(s / 3600),
-      m = Math.floor((s % 3600) / 60),
-      sec = Math.floor(s % 60);
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = Math.floor(s % 60);
     return h > 0
       ? `${h}:${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`
       : `${m}:${sec.toString().padStart(2, '0')}`;
@@ -1643,8 +1992,7 @@ export default function VideoJsPlayer({
         onPointerDown={onTapStart}
         onPointerMove={(e) => {
           onTapMove(e);
-          if (playerRef.current)
-            (playerRef.current as any).reportUserActivity();
+          if (playerRef.current) playerRef.current.reportUserActivity?.({});
         }}
         onPointerUp={(e) => {
           if (e.pointerType === 'mouse' && e.button !== 0) return;
@@ -1653,31 +2001,29 @@ export default function VideoJsPlayer({
         }}
         onPointerCancel={onTapEnd}
         onPointerLeave={onTapEnd}
-        onTouchStart={onTapStart}
-        onTouchMove={(e) => {
-          onTapMove(e);
-          if (playerRef.current)
-            (playerRef.current as any).reportUserActivity();
+        style={{
+          touchAction: isRotatedFullscreen ? 'none' : 'pan-y',
+          userSelect: 'none',
         }}
-        onTouchEnd={() => {
-          onTapEnd();
-          onTapToggleControls();
-        }}
-        onTouchCancel={onTapEnd}
       />
       <div
         className={`player-controls ${controlsVisible ? 'visible' : ''}`}
         aria-hidden={!controlsVisible}
       >
-        <div className='top-bar'>
+        <div
+          className='top-bar'
+          onPointerMove={(e) => markUiInteraction(e)}
+          onPointerDown={(e) => markUiInteraction(e)}
+        >
           <button
             type='button'
             className='ctrl-btn'
             onClick={(e) => {
-              e.stopPropagation();
-              setSettingsOpen(!settingsOpen);
+              markUiInteraction(e, { stop: true });
+              setSettingsOpen((s) => !s);
             }}
             title='Settings'
+            aria-label='Settings'
           >
             {Icons.settings}
           </button>
@@ -1689,6 +2035,7 @@ export default function VideoJsPlayer({
             toggleRotatedFullscreen();
           }}
           title='Page Fullscreen'
+          aria-label='Page Fullscreen'
         >
           {Icons.rotate}
         </button>
@@ -1705,14 +2052,19 @@ export default function VideoJsPlayer({
             {isPaused ? Icons.bigPlay : Icons.bigPause}
           </button>
         </div>
-        <div className='bottom-bar'>
+        <div
+          className='bottom-bar'
+          onPointerMove={(e) => markUiInteraction(e)}
+          onPointerDown={(e) => markUiInteraction(e)}
+        >
           <button
             type='button'
             className='ctrl-btn'
             onClick={(e) => {
-              e.stopPropagation();
+              markUiInteraction(e);
               togglePlay();
             }}
+            aria-label={isPaused ? 'Play' : 'Pause'}
           >
             {isPaused ? Icons.play : Icons.pause}
           </button>
@@ -1721,10 +2073,11 @@ export default function VideoJsPlayer({
               type='button'
               className='ctrl-btn'
               onClick={(e) => {
-                e.stopPropagation();
+                markUiInteraction(e);
                 onNextEpisode?.();
               }}
               title='Next'
+              aria-label='Next Episode'
             >
               {Icons.next}
             </button>
@@ -1735,13 +2088,33 @@ export default function VideoJsPlayer({
           <div
             ref={progressBarRef}
             className='progress-bar'
-            onClick={stopProp}
-            onPointerDown={(e) => {
-              stopProp(e);
-              handleScrubStart(e);
+            role='slider'
+            aria-label='Seek slider'
+            aria-valuemin={0}
+            aria-valuemax={duration}
+            aria-valuenow={seekingTime ?? currentTime}
+            tabIndex={0}
+            onKeyDown={(e) => {
+              markUiInteraction(e);
+              let newTime = -1;
+              if (e.key === 'ArrowRight')
+                newTime = Math.min((seekingTime ?? currentTime) + 5, duration);
+              else if (e.key === 'ArrowLeft')
+                newTime = Math.max((seekingTime ?? currentTime) - 5, 0);
+              else if (e.key === ' ' || e.key === 'Enter') {
+                e.preventDefault();
+                togglePlay();
+                return;
+              }
+              if (newTime !== -1 && playerRef.current) {
+                e.preventDefault();
+                playerRef.current.currentTime(newTime);
+                setCurrentTime(newTime);
+              }
             }}
-            onTouchStart={(e) => {
-              stopProp(e);
+            onClick={(e) => markUiInteraction(e)}
+            onPointerDown={(e) => {
+              markUiInteraction(e);
               handleScrubStart(e);
             }}
           >
@@ -1767,10 +2140,11 @@ export default function VideoJsPlayer({
               type='button'
               className={`ctrl-btn ${isPiPActive ? 'pip-active' : ''}`}
               onClick={(e) => {
-                e.stopPropagation();
+                markUiInteraction(e);
                 togglePiP();
               }}
               title='Picture-in-Picture'
+              aria-label='Picture-in-Picture'
             >
               {Icons.pip}
             </button>
@@ -1780,11 +2154,12 @@ export default function VideoJsPlayer({
               type='button'
               className='ctrl-btn'
               onClick={(e) => {
-                e.stopPropagation();
+                markUiInteraction(e);
                 const video = getTechVideoEl();
                 video?.webkitShowPlaybackTargetPicker?.();
               }}
               title='AirPlay'
+              aria-label='AirPlay'
             >
               {Icons.airplay}
             </button>
@@ -1793,44 +2168,76 @@ export default function VideoJsPlayer({
             type='button'
             className='ctrl-btn'
             onClick={(e) => {
-              e.stopPropagation();
+              markUiInteraction(e);
               toggleFullscreen();
             }}
             title='Fullscreen'
+            aria-label={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
           >
             {isFullscreen ? Icons.exitFullscreen : Icons.fullscreen}
           </button>
         </div>
-      </div>
-      {settingsOpen && (
-        <div
-          className='settings-popup'
-          onClick={stopProp}
-          onMouseDown={stopProp}
-          onTouchStart={stopProp}
-        >
-          <div className='settings-header'>Settings</div>
-          <div className='settings-item' onClick={toggleCas}>
-            <span>Enhance HD</span>
-            <div className={`toggle ${casEnabled ? 'on' : ''}`}>
-              <div className='toggle-knob' />
+
+        {settingsOpen && (
+          <div
+            className='settings-popup'
+            // FIX: Native picker support (keep awake on focus, release on blur)
+            onFocusCapture={() => {
+              if (uiInteractTimeoutRef.current)
+                clearTimeout(uiInteractTimeoutRef.current);
+              setIsUiInteracting(true);
+              const p = playerRef.current;
+              if (p) {
+                p.userActive?.(true);
+                p.inactivityTimeout?.(0);
+              }
+            }}
+            onBlurCapture={() => {
+              markUiInteraction();
+            }}
+            onPointerDown={(e) => markUiInteraction(e, { stop: true })}
+            onPointerMove={(e) => markUiInteraction(e, { stop: true })}
+            onPointerUp={(e) => markUiInteraction(e, { stop: true })}
+            onWheel={(e) => markUiInteraction(e, { stop: true })}
+            onKeyDown={(e) => markUiInteraction(e, { stop: true })}
+            onScrollCapture={(e) => markUiInteraction(e, { stop: true })}
+          >
+            <div className='settings-header'>Settings</div>
+            <button
+              type='button'
+              className='settings-item'
+              onClick={(e) => {
+                markUiInteraction(e, { stop: true });
+                toggleCas();
+              }}
+            >
+              <span>Enhance HD</span>
+              <div className={`toggle ${casEnabled ? 'on' : ''}`}>
+                <div className='toggle-knob' />
+              </div>
+            </button>
+            <div className='settings-item'>
+              <span>Speed</span>
+              <select
+                value={playbackRate}
+                onPointerDown={(e) => markUiInteraction(e, { stop: true })}
+                onChange={(e) => {
+                  changeSpeed(parseFloat(e.target.value));
+                  const p = playerRef.current;
+                  p?.userActive?.(true);
+                  p?.reportUserActivity?.({});
+                }}
+              >
+                {[0.5, 0.75, 1, 1.25, 1.5, 2].map((r) => (
+                  <option key={r} value={r}>
+                    {r}x
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
-          <div className='settings-item'>
-            <span>Speed</span>
-            <select
-              value={playbackRate}
-              onChange={(e) => changeSpeed(parseFloat(e.target.value))}
-            >
-              {[0.5, 0.75, 1, 1.25, 1.5, 2].map((r) => (
-                <option key={r} value={r}>
-                  {r}x
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-      )}
+        )}
+      </div>
       {seekingTime !== null && (
         <div className='seek-overlay'>
           <div className='seek-time'>
@@ -1844,51 +2251,62 @@ export default function VideoJsPlayer({
           </div>
         </div>
       )}
-      <style>{CSS}</style>
     </div>
   );
 }
 
 const CSS = `
-.player-container{position:relative;width:100%;height:100%;background:#000;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
+.player-container{position:relative;width:100%;height:100%;background:#000;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;user-select:none}
 .video-wrapper{position:absolute;inset:0}
 .player-container .video-js{position:absolute;inset:0;width:100%;height:100%}
 .player-container .vjs-control-bar,.player-container .vjs-big-play-button,.player-container .vjs-touch-overlay,.player-container .vjs-mobile-ui-play-toggle,.player-container .vjs-loading-spinner,.player-container .vjs-modal-dialog{display:none!important}
 .icon{width:24px;height:24px;display:block}
 .tap-layer{position:absolute;inset:0;z-index:9;pointer-events:auto;background:transparent}
+
+/* Controls Container */
 .player-controls{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:space-between;opacity:0;transition:opacity .3s;pointer-events:none;z-index:10}
 .player-controls.visible{opacity:1}
 .player-controls::before{content:'';position:absolute;inset:0;pointer-events:none;background:linear-gradient(to bottom,rgba(0,0,0,.6) 0%,transparent 25%,transparent 75%,rgba(0,0,0,.8) 100%)}
-.top-bar,.bottom-bar,.settings-popup{position:relative;pointer-events:none;z-index:11}
+
+.top-bar,.bottom-bar{position:relative;pointer-events:none;z-index:11}
 .top-bar,.bottom-bar{display:flex;align-items:center;gap:8px;padding:12px 16px}
 .top-bar{justify-content:flex-end}
 .bottom-bar{padding-bottom:max(12px,env(safe-area-inset-bottom))}
+
 .ctrl-btn{width:44px;height:44px;display:flex;align-items:center;justify-content:center;background:transparent;border:none;color:#fff;cursor:pointer;padding:0;border-radius:8px;transition:background .2s;flex-shrink:0}
 .ctrl-btn:hover{background:rgba(255,255,255,.1)}
 .ctrl-btn:active{background:rgba(255,255,255,.2);transform:scale(.95)}
 .ctrl-btn.pip-active{color:#4CAF50}
 .speed-btn{font-size:13px;font-weight:600;min-width:44px}
+
 .center-area{flex:1;display:flex;align-items:center;justify-content:center;gap:20px;pointer-events:none;z-index:11}
 .big-play-btn{width:80px;height:80px;border-radius:50%;background:rgba(0,0,0,0.6);border:2px solid rgba(255,255,255,0.8);color:white;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px);cursor:pointer;pointer-events:auto;transition:all 0.2s}
 .big-play-btn:hover{transform:scale(1.1);background:rgba(0,0,0,0.8)}
 .big-play-btn:active{transform:scale(0.95)}
+
 .rotate-fullscreen-btn{position:absolute;left:16px;top:50%;transform:translateY(-50%);width:44px;height:44px;border-radius:50%;background:rgba(0,0,0,.5);border:1px solid rgba(255,255,255,.3);color:#fff;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px);transition:transform .2s,background .2s;cursor:pointer;z-index:12;pointer-events:none}
 .player-controls.visible .rotate-fullscreen-btn { pointer-events: auto; }
 .rotate-fullscreen-btn:hover{background:rgba(0,0,0,.7)}
 .rotate-fullscreen-btn:active{transform:translateY(-50%) scale(.95)}
+
 .time-display{font-size:13px;color:#fff;font-variant-numeric:tabular-nums;min-width:45px;text-align:center;flex-shrink:0}
 .progress-bar{flex:1;height:44px;display:flex;align-items:center;cursor:pointer;padding:0 4px;min-width:60px;touch-action:none}
 .progress-track{position:relative;width:100%;height:4px;background:rgba(255,255,255,.3);border-radius:2px}
 .progress-fill{height:100%;background:#4CAF50;border-radius:2px}
 .progress-thumb{position:absolute;top:50%;width:14px;height:14px;background:#fff;border-radius:50%;transform:translate(-50%,-50%);box-shadow:0 2px 4px rgba(0,0,0,.3)}
-.settings-popup{position:absolute;top:60px;right:16px;background:rgba(28,28,30,.95);backdrop-filter:blur(20px);border-radius:12px;padding:8px 0;min-width:200px;border:1px solid rgba(255,255,255,.1);max-height:70vh;overflow-y:auto;-webkit-overflow-scrolling:touch;scrollbar-width:thin}
+
+/* Settings Popup */
+.settings-popup{position:absolute;top:60px;right:16px;background:rgba(28,28,30,.95);backdrop-filter:blur(20px);border-radius:12px;padding:8px 0;min-width:200px;border:1px solid rgba(255,255,255,.1);max-height:70vh;overflow-y:auto;-webkit-overflow-scrolling:touch;scrollbar-width:thin; z-index: 12; pointer-events: auto;}
+
 .settings-header{padding:12px 16px;font-size:15px;font-weight:600;color:#fff;border-bottom:1px solid rgba(255,255,255,.1)}
-.settings-item{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;color:#fff;cursor:pointer;font-size:14px}
+.settings-item{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;color:#fff;cursor:pointer;font-size:14px;width:100%;border:none;background:transparent;text-align:left}
 .settings-item:hover{background:rgba(255,255,255,.05)}
 .settings-item select{background:transparent;border:1px solid rgba(255,255,255,.2);color:#fff;padding:4px 8px;border-radius:6px;font-size:13px}
 .toggle{width:44px;height:26px;background:#555;border-radius:13px;position:relative;transition:background .2s;flex-shrink:0}
 .toggle.on{background:#4CAF50}
 .toggle-knob{position:absolute;top:3px;left:3px;width:20px;height:20px;background:#fff;border-radius:50%;transition:left .2s}
+.toggle.on .toggle-knob { left: 21px; }
+
 .seek-overlay{position:absolute;inset:0;background:rgba(0,0,0,.7);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:50;pointer-events:none}
 .seek-time{font-size:32px;font-weight:600;color:#fff;margin-bottom:16px}
 .seek-bar{width:70%;height:6px;background:rgba(255,255,255,.3);border-radius:3px;overflow:hidden}
@@ -1896,6 +2314,8 @@ const CSS = `
 .videojs-rotated-fullscreen{position:fixed!important;width:100vh!important;height:100vw!important;top:50%!important;left:50%!important;transform:translate(-50%,-50%) rotate(90deg)!important;z-index:99999!important;background:#000!important}
 @supports(width:100dvh){.videojs-rotated-fullscreen{width:100dvh!important;height:100dvw!important}}
 @media(max-width:480px){.ctrl-btn{width:40px;height:40px}.time-display{font-size:12px;min-width:38px}.speed-btn{font-size:12px;min-width:40px}}
-.player-controls.visible .top-bar,.player-controls.visible .bottom-bar,.player-controls.visible .settings-popup,.player-controls.visible .big-play-btn{pointer-events:auto}
+
+/* FIX: Explicitly bless the popup so it works when controls are visible */
+.player-controls.visible .top-bar,.player-controls.visible .bottom-bar,.player-controls.visible .big-play-btn, .player-controls.visible .settings-popup {pointer-events:auto}
 .player-controls:not(.visible) *{pointer-events:none!important}
 `;
