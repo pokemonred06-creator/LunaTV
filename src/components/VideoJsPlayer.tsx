@@ -1432,6 +1432,21 @@ export default function VideoJsPlayer({
           hlsRef.current = null;
         }
         videoEl.src = proxyUrl;
+
+        // FIX: Arm autoplay for Native HLS (Safari/WebKit)
+        // Native players aren't ready immediately; wait for events.
+        if (configRef.current.autoPlay) {
+          const tryPlay = () => {
+            if (!mountedRef.current) return;
+            playerRef.current?.play?.()?.catch(() => {
+              if (mountedRef.current) setControlsVisible(true);
+            });
+          };
+
+          // Listen for both to cover different stream behaviors
+          videoEl.addEventListener('loadedmetadata', tryPlay, { once: true });
+          videoEl.addEventListener('canplay', tryPlay, { once: true });
+        }
         return;
       }
 
@@ -1733,7 +1748,7 @@ export default function VideoJsPlayer({
         firstLoadRef.current = false;
         tryAutoPlay();
       } else {
-        if (mountedRef.current) unifiedSeek.cancel();
+        if (mountedRef.current) unifiedSeekRef.current.cancel();
         player.one('canplay', tryAutoPlay);
       }
     }
@@ -1754,7 +1769,6 @@ export default function VideoJsPlayer({
     attachPiPListeners,
     bumpTechEpoch,
     isLive,
-    unifiedSeek,
     getTechVideoEl,
     waitForVideo,
     seriesId,
@@ -1872,6 +1886,12 @@ export default function VideoJsPlayer({
         ) {
           d = nativeEl.duration;
         }
+      }
+
+      // FIX: Push valid duration to state so gestures can calculate seek position.
+      // This fixes the "dead drag" issue on HLS streams.
+      if (Number.isFinite(d) && d > 0) {
+        setDuration((prev) => (prev !== d ? d : prev));
       }
 
       const scrubbing =
