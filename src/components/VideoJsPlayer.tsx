@@ -495,12 +495,36 @@ const usePlayerGestures = (
         const span = isRotated
           ? container.clientHeight || 1
           : container.clientWidth || 1;
-        if (duration > 0) {
-          const delta = isRotated ? dy : dx;
-          const raw = g.startVideoTime + delta * (duration / span) * 0.8;
-          const clamped = Math.max(0, Math.min(duration, raw));
-          unifiedSeek.preview(clamped);
+
+        // FIX: Multi-stage duration fallback for robust seeking on HLS
+        let activeDuration = duration;
+
+        // Stage 1: Check React State
+        if (!Number.isFinite(activeDuration) || activeDuration <= 0) {
+          const pDur = playerRef.current?.duration?.() ?? 0;
+
+          // Stage 2: Check Video.js Player
+          if (Number.isFinite(pDur) && pDur > 0) {
+            activeDuration = pDur;
+          } else {
+            // Stage 3: Check Native Element (Last Resort)
+            const v = playerRef.current?.tech?.(true)?.el?.();
+            const nDur = v instanceof HTMLVideoElement ? v.duration : 0;
+
+            if (Number.isFinite(nDur) && nDur > 0) {
+              activeDuration = nDur;
+            } else {
+              // Stage 4: Unknown duration -> Skip preview
+              // Keep dragging active so it works if duration arrives mid-drag.
+              return;
+            }
+          }
         }
+
+        const delta = isRotated ? dy : dx;
+        const raw = g.startVideoTime + delta * (activeDuration / span) * 0.8;
+        const clamped = Math.max(0, Math.min(activeDuration, raw));
+        unifiedSeek.preview(clamped);
       }
     };
 
@@ -889,6 +913,12 @@ export default function VideoJsPlayer({
     onEnter: (() => void) | null;
     onLeave: (() => void) | null;
   }>({ video: null, onEnter: null, onLeave: null });
+
+  // FIX: Stable ref for managing native HLS autoplay listeners across switches
+  const nativeAutoplayRef = useRef<{
+    video: HTMLVideoElement | null;
+    handler: (() => void) | null;
+  }>({ video: null, handler: null });
 
   const [isUiInteracting, setIsUiInteracting] = useState(false);
   const uiInteractTimeoutRef = useRef<number | null>(null);
@@ -1431,21 +1461,41 @@ export default function VideoJsPlayer({
           }
           hlsRef.current = null;
         }
-        videoEl.src = proxyUrl;
+        // FIX: Clean up previous listener to prevent race conditions
+        const prev = nativeAutoplayRef.current;
+        if (prev.video && prev.handler) {
+          prev.video.removeEventListener('loadedmetadata', prev.handler);
+          prev.video.removeEventListener('canplay', prev.handler);
+        }
 
-        // FIX: Arm autoplay for Native HLS (Safari/WebKit)
-        // Native players aren't ready immediately; wait for events.
+        videoEl.src = proxyUrl;
+        try {
+          videoEl.load();
+        } catch {
+          /* empty */
+        }
+
+        // FIX: Arm autoplay with switch-safe handler
         if (configRef.current.autoPlay) {
-          const tryPlay = () => {
+          // Capture current epoch to ignore stale events from previous sources
+          const myEpoch = switchEpochRef.current;
+
+          const handler = () => {
             if (!mountedRef.current) return;
+            // If user switched channel again before this fired, ignore it
+            if (switchEpochRef.current !== myEpoch) return;
+
             playerRef.current?.play?.()?.catch(() => {
               if (mountedRef.current) setControlsVisible(true);
             });
           };
 
-          // Listen for both to cover different stream behaviors
-          videoEl.addEventListener('loadedmetadata', tryPlay, { once: true });
-          videoEl.addEventListener('canplay', tryPlay, { once: true });
+          nativeAutoplayRef.current = { video: videoEl, handler };
+
+          videoEl.addEventListener('loadedmetadata', handler, { once: true });
+          videoEl.addEventListener('canplay', handler, { once: true });
+        } else {
+          nativeAutoplayRef.current = { video: videoEl, handler: null };
         }
         return;
       }
@@ -1878,18 +1928,15 @@ export default function VideoJsPlayer({
 
       // FIX: Prefer native duration for HLS if Video.js reports 0/Inf
       let d = player.duration() || 0;
-      if (d === 0 || d === Infinity) {
+      if (!Number.isFinite(d) || d <= 0) {
         const nativeEl = player.tech?.(true)?.el?.();
-        if (
-          nativeEl instanceof HTMLVideoElement &&
-          Number.isFinite(nativeEl.duration)
-        ) {
-          d = nativeEl.duration;
+        if (nativeEl instanceof HTMLVideoElement) {
+          const nd = nativeEl.duration;
+          if (Number.isFinite(nd) && nd > 0) d = nd;
         }
       }
 
-      // FIX: Push valid duration to state so gestures can calculate seek position.
-      // This fixes the "dead drag" issue on HLS streams.
+      // FIX: Push valid duration to state
       if (Number.isFinite(d) && d > 0) {
         setDuration((prev) => (prev !== d ? d : prev));
       }
@@ -1944,6 +1991,18 @@ export default function VideoJsPlayer({
         }
         hlsRef.current = null;
       }
+
+      // FIX: Cleanup native autoplay listeners on unmount/dispose
+      const prevNative = nativeAutoplayRef.current;
+      if (prevNative.video && prevNative.handler) {
+        prevNative.video.removeEventListener(
+          'loadedmetadata',
+          prevNative.handler,
+        );
+        prevNative.video.removeEventListener('canplay', prevNative.handler);
+      }
+      nativeAutoplayRef.current = { video: null, handler: null };
+
       player.dispose();
       playerRef.current = null;
     };
