@@ -993,11 +993,11 @@ export default function VideoJsPlayer({
         return;
       }
 
-      const current = p.currentTime();
+      const current = p.currentTime() ?? 0;
       const delta = Math.abs(current - lastTime);
 
       // If moved less than 0.1s in 2s (and not at end)
-      if (delta < 0.1 && p.remainingTime() > 2) {
+      if (delta < 0.1 && (p.remainingTime() ?? 0) > 2) {
         stallCount++;
         // If stalled for 6 seconds (3 intervals)
         if (stallCount >= 3) {
