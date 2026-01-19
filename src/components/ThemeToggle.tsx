@@ -4,6 +4,7 @@ import { Monitor, Moon, Sun } from 'lucide-react';
 import { usePathname } from 'next/navigation';
 import { useTheme } from 'next-themes';
 import React, { useEffect, useMemo, useState } from 'react';
+import ReactDOM from 'react-dom';
 
 // --- Types for View Transitions API ---
 interface ViewTransition {
@@ -153,16 +154,13 @@ export function ThemeToggle() {
         : nextTheme;
 
     // Start View Transition
-    const transition = doc.startViewTransition(async () => {
-      setTheme(nextTheme);
+    const transition = doc.startViewTransition(() => {
+      ReactDOM.flushSync(() => {
+        setTheme(nextTheme);
+      });
 
       // Immediate update for mobile status bars (prevents 1-frame lag)
       updateThemeColor(nextEffective);
-
-      // Use rAF for precise DOM update timing
-      await new Promise<void>((resolve) =>
-        requestAnimationFrame(() => resolve()),
-      );
     });
 
     await transition.ready;

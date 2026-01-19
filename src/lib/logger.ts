@@ -1,35 +1,30 @@
-// logger.ts (Client Side)
+type LogLevel = 'info' | 'warn' | 'error' | 'debug';
 
-const LOGGING_ENDPOINT = '/api/log';
-const LOG_SECRET = process.env.NEXT_PUBLIC_LOG_SECRET; // If using secret
+export const remoteLog = (level: LogLevel, message: string, data?: unknown) => {
+  // 1. Prepare Payload
+  const payload = JSON.stringify({
+    level,
+    message,
+    data,
+    url: typeof window !== 'undefined' ? window.location.href : 'server-side',
+    timestamp: new Date().toISOString(),
+  });
 
-export const remoteLog = async (
-  level: 'info' | 'error',
-  message: string,
-  data?: unknown,
-) => {
-  if (process.env.NODE_ENV === 'development') {
-    console[level](message, data); // Standard console in dev
-    return;
+  // 2. Select Transport
+  // Blob + sendBeacon is strictly better for "unload" events (closing tab)
+  if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
+    const blob = new Blob([payload], { type: 'application/json' });
+    const success = navigator.sendBeacon('/api/log', blob);
+    if (success) return;
   }
 
-  try {
-    // Fire and forget - don't await this in UI interactions
-    fetch(LOGGING_ENDPOINT, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(LOG_SECRET && { 'x-log-secret': LOG_SECRET }),
-      },
-      body: JSON.stringify({
-        level,
-        message,
-        data,
-        url: window.location.href,
-        timestamp: new Date().toISOString(),
-      }),
-    });
-  } catch (e) {
-    // Fail silently if logging fails
-  }
+  // 3. Fallback to Fetch (keepalive ensures it survives navigation)
+  fetch('/api/log', {
+    method: 'POST',
+    body: payload,
+    headers: { 'Content-Type': 'application/json' },
+    keepalive: true,
+  }).catch(() => {
+    /* Silent Fail */
+  });
 };
