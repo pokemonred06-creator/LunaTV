@@ -836,13 +836,6 @@ export default function VideoJsPlayer({
       playsinline: true,
       userActions: { click: false, doubleClick: false },
       html5: { vhs: { overrideNative: false } },
-      children: {
-        bigPlayButton: false,
-        textTrackSettings: false,
-        loadingSpinner: false,
-        errorDisplay: false,
-        controlBar: false,
-      },
       ...videoJsOptions,
     }) as unknown as VideoJsPlayerInstance;
 
@@ -1256,7 +1249,6 @@ export default function VideoJsPlayer({
           </div>
         )}
       </div>
-      <style dangerouslySetInnerHTML={{ __html: CSS }} />
     </div>
   );
 }
