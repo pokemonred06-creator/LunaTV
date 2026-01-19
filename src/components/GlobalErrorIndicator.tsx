@@ -1,5 +1,6 @@
 'use client';
 
+import { AlertCircle } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 interface ErrorInfo {
@@ -59,14 +60,15 @@ export function GlobalErrorIndicator() {
   }
 
   return (
-    <div className='fixed top-4 right-4 z-[2000]'>
+    <div className='fixed top-0 left-0 right-0 z-2000 flex justify-center p-4 pointer-events-none'>
       {/* 错误卡片 */}
       <div
         className={`bg-red-500 text-white px-4 py-3 rounded-lg shadow-lg flex items-center justify-between min-w-[300px] max-w-[400px] transition-all duration-300 ${
           isReplacing ? 'scale-105 bg-red-400' : 'scale-100 bg-red-500'
         } animate-fade-in`}
       >
-        <span className='text-sm font-medium flex-1 mr-3'>
+        <span className='text-sm font-medium flex-1 mr-3 flex items-center gap-2'>
+          <AlertCircle className='h-5 w-5 text-white shrink-0' />
           {currentError.message}
         </span>
         <button
@@ -99,7 +101,7 @@ export function triggerGlobalError(message: string) {
     window.dispatchEvent(
       new CustomEvent('globalError', {
         detail: { message },
-      })
+      }),
     );
   }
 }
