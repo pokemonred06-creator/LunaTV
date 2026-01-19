@@ -1,21 +1,18 @@
- 
-
 import type { Metadata, Viewport } from 'next';
-import { Inter } from 'next/font/google';
 
+// import { Inter } from 'next/font/google';
 import './globals.css';
 
 import { getConfig } from '@/lib/config';
 
 import { GlobalErrorIndicator } from '../components/GlobalErrorIndicator';
+import { LanguageProvider } from '../components/LanguageProvider';
+import { SeasonalEffectsProvider } from '../components/SeasonalEffectsProvider';
 import { SiteProvider } from '../components/SiteProvider';
 import { ThemeProvider } from '../components/ThemeProvider';
 
-const inter = Inter({ subsets: ['latin'] });
+// const inter = Inter({ subsets: ['latin'] });
 export const dynamic = 'force-dynamic';
-
-import { LanguageProvider } from '../components/LanguageProvider';
-import { SeasonalEffectsProvider } from '../components/SeasonalEffectsProvider';
 
 // 动态生成 metadata，支持配置更新后的标题变化
 export async function generateMetadata(): Promise<Metadata> {
@@ -63,9 +60,10 @@ export default async function RootLayout({
   if (storageType !== 'localstorage') {
     const config = await getConfig();
     siteName = config.SiteConfig.SiteName;
-    announcement = config.SiteConfig.Announcement || process.env.ANNOUNCEMENT || '';
+    announcement =
+      config.SiteConfig.Announcement || process.env.ANNOUNCEMENT || '';
     if (announcement.includes('本网站仅提供影视信息搜索服务')) {
-       announcement = process.env.ANNOUNCEMENT || '';
+      announcement = process.env.ANNOUNCEMENT || '';
     }
 
     doubanProxyType = config.SiteConfig.DoubanProxyType;
@@ -74,7 +72,7 @@ export default async function RootLayout({
     doubanImageProxy = config.SiteConfig.DoubanImageProxy;
     disableYellowFilter = config.SiteConfig.DisableYellowFilter;
     customCategories = config.CustomCategories.filter(
-      (category) => !category.disabled
+      (category) => !category.disabled,
     ).map((category) => ({
       name: category.name || '',
       type: category.type,
@@ -104,16 +102,14 @@ export default async function RootLayout({
         />
         <link rel='apple-touch-icon' href='/icons/icon-192x192.png' />
         {/* 将配置序列化后直接写入脚本，浏览器端可通过 window.RUNTIME_CONFIG 获取 */}
-        { }
+        {}
         <script
           dangerouslySetInnerHTML={{
             __html: `window.RUNTIME_CONFIG = ${JSON.stringify(runtimeConfig)};`,
           }}
         />
       </head>
-      <body
-        className={`${inter.className} min-h-screen bg-white text-gray-900 dark:bg-black dark:text-gray-200`}
-      >
+      <body className='min-h-screen bg-white text-gray-900 dark:bg-black dark:text-gray-200'>
         <ThemeProvider
           attribute='class'
           defaultTheme='system'

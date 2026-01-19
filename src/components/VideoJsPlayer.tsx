@@ -2,12 +2,7 @@
 'use client';
 
 import Hls from 'hls.js';
-import type {
-  MutableRefObject,
-  PointerEvent as ReactPointerEvent,
-  RefObject,
-  SyntheticEvent,
-} from 'react';
+import type { MutableRefObject } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import videojs from 'video.js';
 import Player from 'video.js/dist/types/player';
@@ -15,41 +10,7 @@ import 'videojs-flvjs';
 
 import 'video.js/dist/video-js.css';
 
-// --- Interfaces ---
-interface WebKitHTMLVideoElement extends HTMLVideoElement {
-  webkitEnterFullscreen?: () => void;
-  webkitExitFullscreen?: () => void;
-  webkitShowPlaybackTargetPicker?: () => void;
-  webkitRequestFullscreen?: () => void;
-  webkitSetPresentationMode?: (
-    mode: 'inline' | 'picture-in-picture' | 'fullscreen',
-  ) => void;
-  webkitPresentationMode?: 'inline' | 'picture-in-picture' | 'fullscreen';
-}
-
-interface VideoJsPlayerInstance extends Omit<Player, 'tech'> {
-  tech?: (safe?: boolean) => {
-    el?: () => WebKitHTMLVideoElement;
-    on?: (event: string, handler: () => void) => void;
-    off?: (event: string, handler: () => void) => void;
-  };
-  inactivityTimeout?: (value?: number) => number;
-}
-
-interface VideoJsOptions {
-  controls?: boolean;
-  autoplay?: boolean | string;
-  preload?: string;
-  fluid?: boolean;
-  fill?: boolean;
-  poster?: string;
-  playsinline?: boolean;
-  userActions?: { click?: boolean; doubleClick?: boolean };
-  html5?: { vhs?: { [key: string]: unknown } };
-  sources?: { src: string; type: string }[];
-  [key: string]: unknown;
-}
-
+// --- Types ---
 interface VideoJsPlayerProps {
   url: string;
   type?: string;
@@ -71,127 +32,66 @@ interface VideoJsPlayerProps {
   debug?: boolean;
   seriesId?: string;
   isLive?: boolean;
-  videoJsOptions?: VideoJsOptions;
+  videoJsOptions?: any;
   reloadTrigger?: number;
+}
+
+interface VideoJsPlayerInstance extends Player {
+  // Relaxed type to avoid conflicts with base Player interface
+  tech(safety?: boolean): any;
 }
 
 // --- Icons ---
 const Icons = {
-  play: (
-    <svg
-      viewBox='0 0 24 24'
-      fill='currentColor'
-      className='icon'
-      aria-hidden='true'
-    >
+  Play: () => (
+    <svg viewBox='0 0 24 24' fill='currentColor' className='w-8 h-8'>
       <path d='M8 5v14l11-7z' />
     </svg>
   ),
-  pause: (
-    <svg
-      viewBox='0 0 24 24'
-      fill='currentColor'
-      className='icon'
-      aria-hidden='true'
-    >
+  Pause: () => (
+    <svg viewBox='0 0 24 24' fill='currentColor' className='w-8 h-8'>
       <path d='M6 19h4V5H6v14zm8-14v14h4V5h-4z' />
     </svg>
   ),
-  next: (
-    <svg
-      viewBox='0 0 24 24'
-      fill='currentColor'
-      className='icon'
-      aria-hidden='true'
-    >
+  Next: () => (
+    <svg viewBox='0 0 24 24' fill='currentColor' className='w-8 h-8'>
       <path d='M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z' />
     </svg>
   ),
-  fullscreen: (
-    <svg
-      viewBox='0 0 24 24'
-      fill='currentColor'
-      className='icon'
-      aria-hidden='true'
-    >
-      <path d='M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z' />
-    </svg>
-  ),
-  exitFullscreen: (
-    <svg
-      viewBox='0 0 24 24'
-      fill='currentColor'
-      className='icon'
-      aria-hidden='true'
-    >
-      <path d='M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z' />
-    </svg>
-  ),
-  settings: (
-    <svg
-      viewBox='0 0 24 24'
-      fill='currentColor'
-      className='icon'
-      aria-hidden='true'
-    >
+  Settings: () => (
+    <svg viewBox='0 0 24 24' fill='currentColor' className='w-6 h-6'>
       <path d='M19.14 12.94c.04-.31.06-.63.06-.94 0-.31-.02-.63-.06-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z' />
     </svg>
   ),
-  airplay: (
-    <svg
-      viewBox='0 0 24 24'
-      fill='currentColor'
-      className='icon'
-      aria-hidden='true'
-    >
-      <path d='M6 22h12l-6-6-6 6zM21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h4v-2H3V5h18v12h-4v2h4c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z' />
+  Maximize: () => (
+    <svg viewBox='0 0 24 24' fill='currentColor' className='w-6 h-6'>
+      <path d='M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z' />
     </svg>
   ),
-  pip: (
-    <svg
-      viewBox='0 0 24 24'
-      fill='currentColor'
-      className='icon'
-      aria-hidden='true'
-    >
+  Minimize: () => (
+    <svg viewBox='0 0 24 24' fill='currentColor' className='w-6 h-6'>
+      <path d='M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z' />
+    </svg>
+  ),
+  Pip: () => (
+    <svg viewBox='0 0 24 24' fill='currentColor' className='w-6 h-6'>
       <path d='M19 11h-8v6h8v-6zm4 8V4.98C23 3.88 22.1 3 21 3H3c-1.1 0-2 .88-2 1.98V19c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2zm-2 .02H3V4.97h18v14.05z' />
     </svg>
   ),
-  rotate: (
-    <svg
-      viewBox='0 0 24 24'
-      fill='currentColor'
-      className='icon'
-      aria-hidden='true'
-    >
+  Airplay: () => (
+    <svg viewBox='0 0 24 24' fill='currentColor' className='w-6 h-6'>
+      <path d='M6 22h12l-6-6-6 6zM21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h4v-2H3V5h18v12h-4v2h4c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z' />
+    </svg>
+  ),
+  Rotate: () => (
+    <svg viewBox='0 0 24 24' fill='currentColor' className='w-6 h-6'>
       <path d='M7.11 8.53L5.7 7.11C4.8 8.27 4.24 9.61 4.07 11h2.02c.14-.87.49-1.72 1.02-2.47zM6.09 13H4.07c.17 1.39.72 2.73 1.62 3.89l1.41-1.42c-.52-.75-.87-1.59-1.01-2.47zm1.01 5.32c1.16.9 2.51 1.44 3.9 1.61V17.9c-.87-.15-1.71-.49-2.46-1.03L7.1 18.32zM13 4.07V1L8.45 5.55 13 10V6.09c2.84.48 5 2.94 5 5.91s-2.16 5.43-5 5.91v2.02c3.95-.49 7-3.85 7-7.93s-3.05-7.44-7-7.93z' />
-    </svg>
-  ),
-  bigPlay: (
-    <svg
-      viewBox='0 0 24 24'
-      fill='currentColor'
-      className='icon'
-      style={{ width: 48, height: 48 }}
-      aria-hidden='true'
-    >
-      <path d='M8 5v14l11-7z' />
-    </svg>
-  ),
-  bigPause: (
-    <svg
-      viewBox='0 0 24 24'
-      fill='currentColor'
-      className='icon'
-      style={{ width: 48, height: 48 }}
-      aria-hidden='true'
-    >
-      <path d='M6 19h4V5H6v14zm8-14v14h4V5h-4z' />
     </svg>
   ),
 };
 
 // --- Hooks ---
+
 const useUnifiedSeek = (
   playerRef: MutableRefObject<VideoJsPlayerInstance | null>,
   setCurrentTime: (t: number) => void,
@@ -213,9 +113,7 @@ const useUnifiedSeek = (
       seekRef.current.active = true;
       seekRef.current.showOverlay = !!opts?.showOverlay;
       seekRef.current.wasPlaying = player ? !player.paused() : false;
-      lastPreviewRef.current =
-        player?.currentTime?.() ?? lastPreviewRef.current ?? 0;
-
+      lastPreviewRef.current = player?.currentTime?.() ?? 0;
       if (seekRef.current.wasPlaying) {
         player?.pause();
         setIsPaused(true);
@@ -238,10 +136,7 @@ const useUnifiedSeek = (
 
         setCurrentTime(safe);
         if (seekRef.current.showOverlay) setSeekingTime(safe);
-
-        if (p && Number.isFinite(safe)) {
-          p.currentTime(safe);
-        }
+        if (p && Number.isFinite(safe)) p.currentTime(safe);
       });
     },
     [playerRef, setCurrentTime, setSeekingTime],
@@ -253,18 +148,10 @@ const useUnifiedSeek = (
     if (!seekRef.current.active) return;
     if (seekRef.current.showOverlay) setSeekingTime(null);
 
-    const d = player?.duration?.() ?? 0;
-    const hasFiniteDuration = Number.isFinite(d) && d > 0;
-    const target = hasFiniteDuration
-      ? Math.max(0, Math.min(d, lastPreviewRef.current))
-      : Math.max(0, lastPreviewRef.current);
-
-    if (player && Number.isFinite(target)) player.currentTime(target);
-
+    if (player && Number.isFinite(lastPreviewRef.current))
+      player.currentTime(lastPreviewRef.current);
     if (seekRef.current.wasPlaying) {
-      player?.play()?.catch(() => {
-        if (player) player.trigger('useractive');
-      });
+      player?.play()?.catch(() => player.trigger('useractive'));
       setIsPaused(false);
     }
     seekRef.current.active = false;
@@ -283,129 +170,24 @@ const useUnifiedSeek = (
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
   }, []);
-
   const isActive = useCallback(() => seekRef.current.active, []);
 
-  return useMemo(
-    () => ({ begin, preview, end, cancel, isActive }),
-    [begin, preview, end, cancel, isActive],
-  );
-};
-
-const useProgressBarScrub = (
-  progressBarRef: RefObject<HTMLDivElement | null>,
-  duration: number,
-  unifiedSeek: ReturnType<typeof useUnifiedSeek>,
-) => {
-  const [isScrubbing, setIsScrubbing] = useState(false);
-  const pointerIdRef = useRef<number | null>(null);
-
-  const getTimeFromX = useCallback(
-    (clientX: number) => {
-      const bar = progressBarRef.current;
-      if (!bar || duration <= 0 || !Number.isFinite(duration)) return 0;
-      const rect = bar.getBoundingClientRect();
-      return (
-        Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)) * duration
-      );
-    },
-    [duration, progressBarRef],
-  );
-
-  const handleScrubStart = useCallback(
-    (e: ReactPointerEvent<HTMLDivElement>) => {
-      if (e.pointerType === 'mouse' && e.button !== 0) return;
-      if ((e as unknown as { isPrimary?: boolean }).isPrimary === false) return;
-      if (e.cancelable) e.preventDefault();
-      e.stopPropagation();
-
-      pointerIdRef.current = e.pointerId;
-      try {
-        e.currentTarget.setPointerCapture(e.pointerId);
-      } catch {
-        /* ignore */
-      }
-
-      setIsScrubbing(true);
-      unifiedSeek.begin({ showOverlay: false });
-      unifiedSeek.preview(getTimeFromX(e.clientX));
-    },
-    [getTimeFromX, unifiedSeek],
-  );
-
-  useEffect(() => {
-    if (!isScrubbing) return;
-    if (typeof document === 'undefined') return;
-
-    const releaseCaptureSafe = () => {
-      const bar = progressBarRef.current;
-      const pid = pointerIdRef.current;
-      if (bar && pid != null) {
-        try {
-          bar.releasePointerCapture(pid);
-        } catch {
-          /* ignore */
-        }
-      }
-      pointerIdRef.current = null;
-    };
-
-    const handleGlobalMove = (e: PointerEvent) => {
-      const pid = pointerIdRef.current;
-      if (pid != null && e.pointerId !== pid) return;
-      if (e.cancelable) e.preventDefault();
-      unifiedSeek.preview(getTimeFromX(e.clientX));
-    };
-
-    const handleGlobalEnd = (e: PointerEvent) => {
-      const pid = pointerIdRef.current;
-      if (pid != null && e.pointerId !== pid) return;
-      if (e.cancelable) e.preventDefault();
-      releaseCaptureSafe();
-      setIsScrubbing(false);
-      const t = getTimeFromX(e.clientX);
-      unifiedSeek.preview(t);
-      unifiedSeek.end();
-    };
-
-    const handleLostCapture = (e: Event) => {
-      if (e instanceof PointerEvent) handleGlobalEnd(e);
-      else {
-        releaseCaptureSafe();
-        setIsScrubbing(false);
-        unifiedSeek.end();
-      }
-    };
-
-    document.addEventListener('pointermove', handleGlobalMove, {
-      passive: false,
-    });
-    document.addEventListener('pointerup', handleGlobalEnd, { passive: false });
-    document.addEventListener('pointercancel', handleGlobalEnd, {
-      passive: false,
-    });
-    const bar = progressBarRef.current;
-    if (bar) bar.addEventListener('lostpointercapture', handleLostCapture);
-
-    return () => {
-      releaseCaptureSafe();
-      document.removeEventListener('pointermove', handleGlobalMove);
-      document.removeEventListener('pointerup', handleGlobalEnd);
-      document.removeEventListener('pointercancel', handleGlobalEnd);
-      if (bar) bar.removeEventListener('lostpointercapture', handleLostCapture);
-    };
-  }, [isScrubbing, getTimeFromX, unifiedSeek, progressBarRef]);
-
-  return { handleScrubStart, isScrubbing };
+  return { begin, preview, end, cancel, isActive };
 };
 
 const usePlayerGestures = (
-  containerRef: RefObject<HTMLDivElement | null>,
+  containerEl: HTMLDivElement | null,
   playerRef: MutableRefObject<VideoJsPlayerInstance | null>,
   duration: number,
-  unifiedSeek: ReturnType<typeof useUnifiedSeek>,
-  controlsVisible: boolean,
+  unifiedSeekRef: MutableRefObject<ReturnType<typeof useUnifiedSeek>>,
+  controlsVisibleRef: MutableRefObject<boolean>,
+  isRotatedRef: MutableRefObject<boolean>,
 ) => {
+  const durationRef = useRef(duration);
+  useEffect(() => {
+    durationRef.current = duration;
+  }, [duration]);
+
   const gestureRef = useRef({
     startX: 0,
     startY: 0,
@@ -417,7 +199,7 @@ const usePlayerGestures = (
   });
 
   useEffect(() => {
-    const container = containerRef.current;
+    const container = containerEl;
     if (!container) return;
 
     const safeCapture = (pid: number) => {
@@ -440,38 +222,26 @@ const usePlayerGestures = (
     };
 
     const handleStart = (e: PointerEvent) => {
-      if (!e.isPrimary) return;
-      if (e.pointerType === 'mouse' && e.button !== 0) return;
-      const target = e.target as HTMLElement;
-      if (!container.contains(target)) return;
-      if (controlsVisible) {
-        if (
-          target.closest(
-            'button, .progress-bar, .progress-track, .progress-fill, .progress-thumb, .settings-popup, select, input',
-          )
-        )
-          return;
-      }
-
-      gestureRef.current.pointerId = e.pointerId;
-      gestureRef.current.startX = e.clientX;
-      gestureRef.current.startY = e.clientY;
-      gestureRef.current.active = true;
-      gestureRef.current.isSeeking = false;
-      gestureRef.current.captured = false;
-      gestureRef.current.startVideoTime = playerRef.current?.currentTime() || 0;
+      if (!e.isPrimary || (e.pointerType === 'mouse' && e.button !== 0)) return;
+      // Z-index ensures we only catch background taps
+      const g = gestureRef.current;
+      g.pointerId = e.pointerId;
+      g.startX = e.clientX;
+      g.startY = e.clientY;
+      g.active = true;
+      g.isSeeking = false;
+      g.captured = false;
+      g.startVideoTime = playerRef.current?.currentTime() || 0;
     };
 
     const handleMove = (e: PointerEvent) => {
       const g = gestureRef.current;
-      if (!g.active) return;
-      if (g.pointerId != null && e.pointerId !== g.pointerId) return;
+      if (!g.active || (g.pointerId != null && e.pointerId !== g.pointerId))
+        return;
 
       const dx = e.clientX - g.startX;
       const dy = e.clientY - g.startY;
-      const isRotated = container.classList.contains(
-        'videojs-rotated-fullscreen',
-      );
+      const isRotated = isRotatedRef.current;
 
       if (!g.isSeeking && (Math.abs(dx) > 10 || Math.abs(dy) > 10)) {
         const shouldSeek = isRotated
@@ -481,7 +251,7 @@ const usePlayerGestures = (
           g.isSeeking = true;
           safeCapture(e.pointerId);
           if (e.cancelable) e.preventDefault();
-          unifiedSeek.begin({ showOverlay: true });
+          unifiedSeekRef.current.begin({ showOverlay: true });
           g.startVideoTime =
             playerRef.current?.currentTime() || g.startVideoTime;
         } else {
@@ -490,65 +260,52 @@ const usePlayerGestures = (
           g.captured = false;
         }
       }
+
       if (g.isSeeking) {
         if (e.cancelable) e.preventDefault();
-        const span = isRotated
-          ? container.clientHeight || 1
-          : container.clientWidth || 1;
+        const dim = isRotated ? container.clientHeight : container.clientWidth;
+        const span = Math.max(1, dim);
 
-        // FIX: Multi-stage duration fallback for robust seeking on HLS
-        let activeDuration = duration;
-
-        // Stage 1: Check React State
+        let activeDuration = durationRef.current;
         if (!Number.isFinite(activeDuration) || activeDuration <= 0) {
           const pDur = playerRef.current?.duration?.() ?? 0;
-
-          // Stage 2: Check Video.js Player
-          if (Number.isFinite(pDur) && pDur > 0) {
-            activeDuration = pDur;
-          } else {
-            // Stage 3: Check Native Element (Last Resort)
+          if (Number.isFinite(pDur) && pDur > 0) activeDuration = pDur;
+          else {
             const v = playerRef.current?.tech?.(true)?.el?.();
             const nDur = v instanceof HTMLVideoElement ? v.duration : 0;
-
-            if (Number.isFinite(nDur) && nDur > 0) {
-              activeDuration = nDur;
-            } else {
-              // Stage 4: Unknown duration -> Skip preview
-              // Keep dragging active so it works if duration arrives mid-drag.
-              return;
-            }
+            if (Number.isFinite(nDur) && nDur > 0) activeDuration = nDur;
+            else return;
           }
         }
 
         const delta = isRotated ? dy : dx;
         const raw = g.startVideoTime + delta * (activeDuration / span) * 0.8;
         const clamped = Math.max(0, Math.min(activeDuration, raw));
-        unifiedSeek.preview(clamped);
+        unifiedSeekRef.current.preview(clamped);
       }
     };
 
     const handleEnd = (e: PointerEvent) => {
       const g = gestureRef.current;
       if (g.pointerId != null && e.pointerId !== g.pointerId) return;
-
       if (g.captured) safeRelease(e.pointerId);
 
       if (g.isSeeking) {
         if (e.cancelable) e.preventDefault();
         e.stopPropagation();
-        unifiedSeek.end();
+        unifiedSeekRef.current.end();
       }
+
       g.active = false;
       g.isSeeking = false;
       g.pointerId = null;
       g.captured = false;
     };
 
-    const handleLostGestureCapture = (e: Event) => {
+    const handleLost = (e: Event) => {
       if (e instanceof PointerEvent) handleEnd(e);
       else {
-        if (gestureRef.current.isSeeking) unifiedSeek.end();
+        if (gestureRef.current.isSeeking) unifiedSeekRef.current.end();
         gestureRef.current.active = false;
         gestureRef.current.isSeeking = false;
         gestureRef.current.pointerId = null;
@@ -556,26 +313,23 @@ const usePlayerGestures = (
       }
     };
 
-    container.addEventListener('pointerdown', handleStart);
-    container.addEventListener('pointermove', handleMove);
-    container.addEventListener('pointerup', handleEnd);
-    container.addEventListener('pointercancel', handleEnd);
-    container.addEventListener('lostpointercapture', handleLostGestureCapture);
+    const opts = { passive: false };
+    container.addEventListener('pointerdown', handleStart, opts);
+    container.addEventListener('pointermove', handleMove, opts);
+    container.addEventListener('pointerup', handleEnd, opts);
+    container.addEventListener('pointercancel', handleEnd, opts);
+    container.addEventListener('lostpointercapture', handleLost);
 
     return () => {
       container.removeEventListener('pointerdown', handleStart);
       container.removeEventListener('pointermove', handleMove);
       container.removeEventListener('pointerup', handleEnd);
       container.removeEventListener('pointercancel', handleEnd);
-      container.removeEventListener(
-        'lostpointercapture',
-        handleLostGestureCapture,
-      );
+      container.removeEventListener('lostpointercapture', handleLost);
     };
-  }, [containerRef, playerRef, duration, unifiedSeek, controlsVisible]);
+  }, [containerEl, playerRef, unifiedSeekRef, isRotatedRef]);
 };
 
-// --- CAS Shader Hook (Unchanged) ---
 const useCasShader = (
   playerReady: boolean,
   casEnabled: boolean,
@@ -585,83 +339,54 @@ const useCasShader = (
   techEpoch: number,
   disableCas: () => void,
 ) => {
-  const animationFrameRef = useRef<number | undefined>(undefined);
-  const ownerRef = useRef<string>(
-    typeof crypto !== 'undefined' && 'randomUUID' in crypto
-      ? crypto.randomUUID()
-      : `${Date.now()}_${Math.random()}`,
-  );
+  const ownerRef = useRef<string>(`${Date.now()}_${Math.random()}`);
   const techRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const failuresRef = useRef(0);
-
-  const hardStop = useCallback(() => {
-    if (animationFrameRef.current) {
-      cancelAnimationFrame(animationFrameRef.current);
-      animationFrameRef.current = undefined;
-    }
-    if (canvasRef.current) {
-      canvasRef.current.remove();
-      canvasRef.current = null;
-    }
-    if (
-      techRef.current &&
-      techRef.current.dataset.casOwner === ownerRef.current
-    ) {
-      techRef.current.style.opacity = '1';
-      techRef.current.removeAttribute('data-cas-active');
-      delete techRef.current.dataset.casOwner;
-      techRef.current = null;
-    }
-  }, []);
+  const rafRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
-    if (failuresRef.current > 3) return;
-
-    if (!playerReady || !casEnabled || isPiPActive) {
-      hardStop();
-      const tech = getTechVideoEl();
-      const zombie = tech?.parentElement?.querySelector(
-        `canvas[data-cas-canvas="1"][data-cas-owner="${ownerRef.current}"]`,
-      ) as HTMLCanvasElement | null;
-      if (zombie) zombie.remove();
-      if (tech && tech.dataset.casOwner === ownerRef.current) {
-        tech.style.opacity = '1';
-        tech.removeAttribute('data-cas-active');
-        delete tech.dataset.casOwner;
+    const cleanup = () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      if (canvasRef.current) {
+        canvasRef.current.remove();
+        canvasRef.current = null;
+      }
+      if (
+        techRef.current &&
+        techRef.current.dataset.casOwner === ownerRef.current
+      ) {
+        techRef.current.style.opacity = '1';
+        techRef.current.removeAttribute('data-cas-active');
+        delete techRef.current.dataset.casOwner;
         techRef.current = null;
       }
+    };
+
+    if (!playerReady || !casEnabled || isPiPActive || failuresRef.current > 3) {
+      cleanup();
       return;
     }
 
     const tech = getTechVideoEl();
-    if (tech) {
-      const active = tech.getAttribute('data-cas-active') === 'true';
-      const ownedByMe = tech.dataset.casOwner === ownerRef.current;
-      if (active && !ownedByMe) return;
-      if (active && ownedByMe) return;
-    }
     if (!tech || !tech.parentElement) return;
+    if (tech.dataset.casActive && tech.dataset.casOwner !== ownerRef.current)
+      return;
 
     const canvas = document.createElement('canvas');
     canvas.dataset.casCanvas = '1';
     canvas.dataset.casOwner = ownerRef.current;
     Object.assign(canvas.style, {
       position: 'absolute',
-      top: '0',
-      left: '0',
+      top: 0,
+      left: 0,
       width: '100%',
       height: '100%',
       pointerEvents: 'none',
-      zIndex: '0',
+      zIndex: 0,
       objectFit: 'contain',
     });
-
-    const existing = tech.parentElement.querySelector(
-      `canvas[data-cas-canvas="1"][data-cas-owner="${ownerRef.current}"]`,
-    );
-    if (existing) existing.remove();
     tech.parentElement.insertBefore(canvas, tech.nextSibling);
     canvasRef.current = canvas;
     techRef.current = tech;
@@ -672,119 +397,60 @@ const useCasShader = (
       antialias: false,
     });
     if (!gl) {
-      hardStop();
+      cleanup();
       return;
     }
 
-    let texture: WebGLTexture | null = null,
-      buffer: WebGLBuffer | null = null,
-      program: WebGLProgram | null = null,
-      vsS: WebGLShader | null = null,
-      fsS: WebGLShader | null = null;
-    const safeDeleteGL = () => {
-      if (texture) gl.deleteTexture(texture);
-      if (buffer) gl.deleteBuffer(buffer);
-      if (program) {
-        if (vsS) gl.detachShader(program, vsS);
-        if (fsS) gl.detachShader(program, fsS);
-        gl.deleteProgram(program);
-      }
-      if (vsS) gl.deleteShader(vsS);
-      if (fsS) gl.deleteShader(fsS);
-    };
-    const cleanupGL = () => {
-      safeDeleteGL();
-    };
-    const handleContextLost = (e: Event) => {
-      e.preventDefault();
-      canvas.removeEventListener('webglcontextlost', handleContextLost);
-      cleanupGL();
-      hardStop();
-    };
-    canvas.addEventListener('webglcontextlost', handleContextLost, {
-      passive: false,
-    });
-    const abortInit = () => {
-      canvas.removeEventListener('webglcontextlost', handleContextLost);
-      safeDeleteGL();
-      hardStop();
-    };
+    const vs = `attribute vec2 p;varying vec2 v;void main(){gl_Position=vec4(p,0,1);v=p*0.5+0.5;v.y=1.0-v.y;}`;
+    const fs = `precision mediump float;varying vec2 v;uniform sampler2D i;uniform vec2 r;uniform float s;void main(){vec2 t=1.0/r;vec3 e=texture2D(i,v).rgb;vec3 a=texture2D(i,v+vec2(0,-t.y)).rgb;vec3 c=texture2D(i,v+vec2(-t.x,0)).rgb;vec3 g=texture2D(i,v+vec2(t.x,0)).rgb;vec3 i_val=texture2D(i,v+vec2(0,t.y)).rgb;float w=-1.0/mix(8.0,5.0,clamp(s,0.0,1.0));vec3 rs=(a+c+g+i_val)*w+e;float d=1.0+4.0*w;vec3 f=rs/d;vec3 mn=min(min(min(a,c),g),i_val);vec3 mx=max(max(max(a,c),g),i_val);f=clamp(f,min(mn,e),max(mx,e));float l=dot(f,vec3(0.2126,0.7152,0.0722));gl_FragColor=vec4((mix(vec3(l),f,1.15)-0.5)*1.05+0.5,1.0);}`;
 
-    const vsSource = `attribute vec2 position; varying vec2 v_texCoord; void main() { gl_Position = vec4(position,0,1); v_texCoord = position*0.5+0.5; v_texCoord.y=1.0-v_texCoord.y; }`;
-    const fsSource = `precision mediump float; varying vec2 v_texCoord; uniform sampler2D u_image; uniform vec2 u_resolution; uniform float u_sharpness; void main() { vec2 tex = 1.0 / u_resolution; vec3 e = texture2D(u_image, v_texCoord).rgb; vec3 a = texture2D(u_image, v_texCoord + vec2(0.0, -tex.y)).rgb; vec3 c = texture2D(u_image, v_texCoord + vec2(-tex.x, 0.0)).rgb; vec3 g = texture2D(u_image, v_texCoord + vec2(tex.x, 0.0)).rgb; vec3 i = texture2D(u_image, v_texCoord + vec2(0.0, tex.y)).rgb; float w = -1.0 / mix(8.0, 5.0, clamp(u_sharpness, 0.0, 1.0)); vec3 res = (a + c + g + i) * w + e; float div = 1.0 + 4.0 * w; vec3 final = res / div; vec3 mn = min(min(min(a, c), g), i); vec3 mx = max(max(max(a, c), g), i); final = clamp(final, min(mn, e), max(mx, e)); float lum = dot(final, vec3(0.2126, 0.7152, 0.0722)); gl_FragColor = vec4((mix(vec3(lum), final, 1.15) - 0.5) * 1.05 + 0.5, 1.0); }`;
-
-    const createShader = (type: number, src: string) => {
-      const s = gl.createShader(type);
+    const createS = (t: number, src: string) => {
+      const s = gl.createShader(t);
       if (!s) return null;
       gl.shaderSource(s, src);
       gl.compileShader(s);
-      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
-        gl.deleteShader(s);
-        return null;
-      }
       return s;
     };
-    program = gl.createProgram();
-    vsS = createShader(gl.VERTEX_SHADER, vsSource);
-    fsS = createShader(gl.FRAGMENT_SHADER, fsSource);
-    if (!program || !vsS || !fsS) {
-      abortInit();
+    const p = gl.createProgram();
+    const vS = createS(gl.VERTEX_SHADER, vs);
+    const fS = createS(gl.FRAGMENT_SHADER, fs);
+    if (!p || !vS || !fS) {
+      cleanup();
       return;
     }
-    gl.attachShader(program, vsS);
-    gl.attachShader(program, fsS);
-    gl.linkProgram(program);
-    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-      abortInit();
-      return;
-    }
-    gl.useProgram(program);
-    buffer = gl.createBuffer();
-    if (!buffer) {
-      abortInit();
-      return;
-    }
-    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+    gl.attachShader(p, vS);
+    gl.attachShader(p, fS);
+    gl.linkProgram(p);
+    gl.useProgram(p);
+
+    const b = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, b);
     gl.bufferData(
       gl.ARRAY_BUFFER,
       new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]),
       gl.STATIC_DRAW,
     );
-    const posLoc = gl.getAttribLocation(program, 'position');
-    gl.enableVertexAttribArray(posLoc);
-    gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
-    texture = gl.createTexture();
-    if (!texture) {
-      abortInit();
-      return;
-    }
-    gl.bindTexture(gl.TEXTURE_2D, texture);
+    const pos = gl.getAttribLocation(p, 'p');
+    gl.enableVertexAttribArray(pos);
+    gl.vertexAttribPointer(pos, 2, gl.FLOAT, false, 0, 0);
+
+    const tx = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tx);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    const resLoc = gl.getUniformLocation(program, 'u_resolution');
-    const sharpLoc = gl.getUniformLocation(program, 'u_sharpness');
+
+    const uR = gl.getUniformLocation(p, 'r');
+    const uS = gl.getUniformLocation(p, 's');
 
     tech.setAttribute('data-cas-active', 'true');
     tech.dataset.casOwner = ownerRef.current;
-    let isFirstRender = true;
-    const render = () => {
+    let first = true;
+
+    const loop = () => {
       if (!tech.isConnected || !canvas.isConnected) {
-        cleanupGL();
-        hardStop();
-        return;
-      }
-      if (!tech.videoWidth) {
-        animationFrameRef.current = requestAnimationFrame(render);
-        return;
-      }
-      const glCtx = gl as WebGLRenderingContext & {
-        isContextLost?: () => boolean;
-      };
-      if (glCtx.isContextLost?.()) {
-        cleanupGL();
-        hardStop();
+        cleanup();
         return;
       }
       if (
@@ -804,37 +470,28 @@ const useCasShader = (
           gl.UNSIGNED_BYTE,
           tech,
         );
-        if (isFirstRender) {
+        if (first) {
           tech.style.opacity = '0';
-          isFirstRender = false;
+          first = false;
         }
-      } catch (e) {
-        failuresRef.current += 1;
-        if (debug) console.warn('CAS Shader stopped: Texture tainted/CORS', e);
-        cleanupGL();
-        hardStop();
+        if (uR) gl.uniform2f(uR, canvas.width, canvas.height);
+        if (uS) gl.uniform1f(uS, 0.6);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+        rafRef.current = requestAnimationFrame(loop);
+      } catch {
+        failuresRef.current++;
+        cleanup();
         if (failuresRef.current > 3) disableCas();
-        return;
       }
-      if (resLoc) gl.uniform2f(resLoc, canvas.width, canvas.height);
-      if (sharpLoc) gl.uniform1f(sharpLoc, 0.6);
-      gl.drawArrays(gl.TRIANGLES, 0, 6);
-      animationFrameRef.current = requestAnimationFrame(render);
     };
-    render();
-    return () => {
-      canvas.removeEventListener('webglcontextlost', handleContextLost);
-      cleanupGL();
-      hardStop();
-    };
+    loop();
+    return cleanup;
   }, [
     playerReady,
     casEnabled,
-    getTechVideoEl,
     isPiPActive,
-    debug,
-    hardStop,
     techEpoch,
+    getTechVideoEl,
     disableCas,
   ]);
 };
@@ -864,17 +521,49 @@ export default function VideoJsPlayer({
   videoJsOptions,
   reloadTrigger = 0,
 }: VideoJsPlayerProps) {
+  // --- Refs & State ---
   const containerRef = useRef<HTMLDivElement>(null);
   const videoWrapperRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<VideoJsPlayerInstance | null>(null);
   const hlsRef = useRef<Hls | null>(null);
-  const hlsCleanupRef = useRef<(() => void) | null>(null);
-  const networkErrorCountRef = useRef(0);
-  const hasSkippedIntroRef = useRef(false);
-  const hasTriggeredOutroRef = useRef(false);
-  const progressBarRef = useRef<HTMLDivElement>(null);
-  const mountedRef = useRef(true);
-  const inactivityTimeoutRef = useRef<number | null>(null);
+
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [seekingTime, setSeekingTime] = useState<number | null>(null);
+  const [isScrubbing, setIsScrubbing] = useState(false);
+  const [controlsVisible, setControlsVisible] = useState(true);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [isRotatedFullscreen, setIsRotatedFullscreen] = useState(false);
+  const [casEnabled, setCasEnabled] = useState(() => {
+    try {
+      return localStorage.getItem('lunatv_cas_enabled') !== 'false';
+    } catch {
+      return true;
+    }
+  });
+  const [playbackRate, setPlaybackRate] = useState(1);
+  const [pipSupported, setPipSupported] = useState(false);
+  const [hasAirPlay, setHasAirPlay] = useState(false);
+  const [isPiPActive, setIsPiPActive] = useState(false);
+  const [playerReady, setPlayerReady] = useState(false);
+  const [techEpoch, setTechEpoch] = useState(0);
+  const [isFullscreen, setIsFullscreen] = useState(false); // Added missing state
+
+  const [gestureEl, setGestureEl] = useState<HTMLDivElement | null>(null);
+  const setGestureNode = useCallback(
+    (node: HTMLDivElement | null) => setGestureEl(node),
+    [],
+  );
+
+  const pendingAutoplayRef = useRef(false);
+  const isSwitchingRef = useRef(false);
+  const switchGuardRef = useRef<number | null>(null);
+  const autoplayEpochRef = useRef(0);
+  const nativeAutoplayRef = useRef<{
+    video: HTMLVideoElement | null;
+    handler: (() => void) | null;
+  }>({ video: null, handler: null });
 
   const configRef = useRef({
     enableSkip,
@@ -890,170 +579,95 @@ export default function VideoJsPlayer({
     onPlay,
     onPause,
   });
-  const tapGateRef = useRef({
-    moved: false,
-    startX: 0,
-    startY: 0,
-    down: false,
-  });
-  const switchSnapshotRef = useRef<{
-    time: number;
-    wasPlaying: boolean;
-  } | null>(null);
-  const switchEpochRef = useRef(0);
-  const firstLoadRef = useRef(true);
-  const lastToggleTimeRef = useRef(0);
-  const iosFsRef = useRef<{
-    video: HTMLVideoElement | null;
-    onBegin: (() => void) | null;
-    onEnd: (() => void) | null;
-  }>({ video: null, onBegin: null, onEnd: null });
-  const pipRef = useRef<{
-    video: HTMLVideoElement | null;
-    onEnter: (() => void) | null;
-    onLeave: (() => void) | null;
-  }>({ video: null, onEnter: null, onLeave: null });
-
-  // FIX: Stable ref for managing native HLS autoplay listeners across switches
-  const nativeAutoplayRef = useRef<{
-    video: HTMLVideoElement | null;
-    handler: (() => void) | null;
-  }>({ video: null, handler: null });
-
-  const [isUiInteracting, setIsUiInteracting] = useState(false);
-  const uiInteractTimeoutRef = useRef<number | null>(null);
-
-  const [playbackRate, setPlaybackRate] = useState(() => {
-    if (typeof window === 'undefined') return 1;
-    try {
-      const s = localStorage.getItem(`lunatv_speed_${seriesId}`);
-      return s ? parseFloat(s) : 1;
-    } catch {
-      return 1;
-    }
-  });
+  const mountedRef = useRef(true);
+  const controlsVisibleRef = useRef(controlsVisible);
   const playbackRateRef = useRef(playbackRate);
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  const [controlsVisible, setControlsVisible] = useState(true);
-  const [playerReady, setPlayerReady] = useState(false);
-  const [isPaused, setIsPaused] = useState(true);
-  const [seekingTime, setSeekingTime] = useState<number | null>(null);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [casEnabled, setCasEnabled] = useState(() => {
-    if (typeof window === 'undefined') return true;
-    try {
-      const item = localStorage.getItem('lunatv_cas_enabled');
-      return item !== 'false';
-    } catch {
-      return true;
-    }
-  });
   const casEnabledRef = useRef(casEnabled);
-  const [isRotatedFullscreen, setIsRotatedFullscreen] = useState(false);
-  const [pipSupported, setPipSupported] = useState(false);
-  const [isPiPActive, setIsPiPActive] = useState(false);
-  const [techEpoch, setTechEpoch] = useState(0);
-  const hasAirPlay =
-    typeof window !== 'undefined' &&
-    'WebKitPlaybackTargetAvailabilityEvent' in window;
-  const settingsOpenRef = useRef(settingsOpen);
+  const isRotatedRef = useRef(isRotatedFullscreen);
 
-  const finalUrl = useMemo(() => {
-    if (!reloadTrigger || reloadTrigger <= 0) return url;
-    const separator = url.includes('?') ? '&' : '?';
-    return `${url}${separator}t=${reloadTrigger}-${Date.now()}`;
-  }, [url, reloadTrigger]);
+  // --- Helpers ---
+  const getTechVideoEl = useCallback((): HTMLVideoElement | null => {
+    const p = playerRef.current;
+    if (!p) return null;
+    const techEl = p.tech?.(true)?.el?.();
+    if (techEl instanceof HTMLVideoElement) return techEl;
+    return p.el()?.querySelector('video') as HTMLVideoElement | null;
+  }, []);
+
+  const formatTime = (s: number) => {
+    if (!Number.isFinite(s)) return '0:00';
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = Math.floor(s % 60);
+    return h > 0
+      ? `${h}:${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`
+      : `${m}:${sec.toString().padStart(2, '0')}`;
+  };
+
+  const clearNativeAutoplayListeners = useCallback(() => {
+    const prev = nativeAutoplayRef.current;
+    if (prev.video && prev.handler) {
+      prev.video.removeEventListener('loadedmetadata', prev.handler);
+      prev.video.removeEventListener('canplay', prev.handler);
+    }
+    nativeAutoplayRef.current = { video: null, handler: null };
+  }, []);
+
+  const tryPlayNow = useCallback(() => {
+    if (!mountedRef.current || !playerRef.current) return;
+    playerRef.current.play()?.catch(() => {
+      /* empty */
+    });
+  }, []);
+
+  const armAutoplay = useCallback(
+    (videoEl?: HTMLVideoElement | null) => {
+      if (!configRef.current.autoPlay && !pendingAutoplayRef.current) return;
+
+      const myEpoch = autoplayEpochRef.current;
+      tryPlayNow();
+
+      const v =
+        videoEl ||
+        getTechVideoEl() ||
+        (playerRef.current?.tech?.(true)?.el?.() instanceof HTMLVideoElement
+          ? (playerRef.current.tech(true).el() as HTMLVideoElement)
+          : null);
+
+      if (!v) return;
+      clearNativeAutoplayListeners();
+
+      const handler = () => {
+        if (!mountedRef.current) return;
+        if (autoplayEpochRef.current !== myEpoch) return;
+        if (configRef.current.autoPlay || pendingAutoplayRef.current)
+          tryPlayNow();
+      };
+
+      nativeAutoplayRef.current = { video: v, handler };
+      v.addEventListener('loadedmetadata', handler, { once: true });
+      v.addEventListener('canplay', handler, { once: true });
+    },
+    [getTechVideoEl, clearNativeAutoplayListeners, tryPlayNow],
+  );
 
   const unifiedSeek = useUnifiedSeek(
     playerRef,
     setCurrentTime,
-    setIsPaused,
+    (p) => setIsPlaying(!p),
     setSeekingTime,
   );
-  const { handleScrubStart, isScrubbing } = useProgressBarScrub(
-    progressBarRef,
-    duration,
-    unifiedSeek,
-  );
-  usePlayerGestures(
-    containerRef,
-    playerRef,
-    duration,
-    unifiedSeek,
-    controlsVisible,
-  );
-
-  const isScrubbingRef = useRef(false);
-  useEffect(() => {
-    isScrubbingRef.current = isScrubbing;
-  }, [isScrubbing]);
-  const seekingTimeRef = useRef<number | null>(null);
-  useEffect(() => {
-    seekingTimeRef.current = seekingTime;
-  }, [seekingTime]);
   const unifiedSeekRef = useRef(unifiedSeek);
+
   useEffect(() => {
     unifiedSeekRef.current = unifiedSeek;
   }, [unifiedSeek]);
   useEffect(() => {
-    settingsOpenRef.current = settingsOpen;
-  }, [settingsOpen]);
-
+    controlsVisibleRef.current = controlsVisible;
+  }, [controlsVisible]);
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        if (settingsOpenRef.current) {
-          e.stopPropagation();
-          setSettingsOpen(false);
-        } else {
-          const fsEl =
-            document.fullscreenElement ||
-            (document as any).webkitFullscreenElement;
-          if (fsEl) {
-            if (document.exitFullscreen)
-              document.exitFullscreen().catch(() => {});
-            else if ((document as any).webkitExitFullscreen)
-              (document as any).webkitExitFullscreen();
-          } else if (isRotatedFullscreen) {
-            containerRef.current?.classList.remove(
-              'videojs-rotated-fullscreen',
-            );
-            setIsRotatedFullscreen(false);
-          }
-        }
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    isRotatedRef.current = isRotatedFullscreen;
   }, [isRotatedFullscreen]);
-
-  useEffect(() => {
-    const id = 'lunatv-player-css-v1';
-    if (document.getElementById(id)) return;
-    const style = document.createElement('style');
-    style.id = id;
-    style.textContent = CSS;
-    document.head.appendChild(style);
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      if (uiInteractTimeoutRef.current) {
-        window.clearTimeout(uiInteractTimeoutRef.current);
-        uiInteractTimeoutRef.current = null;
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
-
   useEffect(() => {
     callbacksRef.current = {
       onReady,
@@ -1064,782 +678,155 @@ export default function VideoJsPlayer({
       onPause,
     };
   }, [onReady, onTimeUpdate, onEnded, onError, onPlay, onPause]);
-
   useEffect(() => {
     configRef.current = { enableSkip, skipIntroTime, skipOutroTime, autoPlay };
   }, [enableSkip, skipIntroTime, skipOutroTime, autoPlay]);
 
-  useEffect(() => {
-    casEnabledRef.current = casEnabled;
-  }, [casEnabled]);
-  useEffect(() => {
-    playbackRateRef.current = playbackRate;
-  }, [playbackRate]);
-
-  useEffect(() => {
-    if (!playerReady || !playerRef.current) return;
-    const p = playerRef.current;
-    if (inactivityTimeoutRef.current === null && p.inactivityTimeout) {
-      const v = p.inactivityTimeout();
-      inactivityTimeoutRef.current = typeof v === 'number' ? v : 2000;
-    }
-  }, [playerReady]);
-
-  // FIX: Mark Interaction Helper with Smart Whitelist (iOS/Android Safe)
-  const markUiInteraction = useCallback(
-    (e?: SyntheticEvent | Event, opts: { stop?: boolean } = {}) => {
-      const type = (e as any)?.type;
-      const isPressEvent =
-        type === 'pointerdown' || type === 'mousedown' || type === 'touchstart';
-
-      if (e && 'stopPropagation' in e) {
-        if (opts.stop || isPressEvent) {
-          (e as any).stopPropagation();
-        }
-      }
-
-      if (isPressEvent && e && 'preventDefault' in e && (e as any).cancelable) {
-        const target = (e as any).target as HTMLElement;
-        const tag = target?.tagName;
-        const isInteractive =
-          tag === 'SELECT' ||
-          tag === 'INPUT' ||
-          tag === 'TEXTAREA' ||
-          tag === 'OPTION' ||
-          tag === 'BUTTON' ||
-          target.closest('button, a, [role="button"]');
-
-        if (!isInteractive) {
-          (e as any).preventDefault();
-        }
-      }
-
-      const p = playerRef.current;
-      if (p) {
-        p.userActive?.(true);
-        p.reportUserActivity?.({});
-      }
-
-      setControlsVisible(true);
-      setIsUiInteracting(true);
-      if (uiInteractTimeoutRef.current)
-        window.clearTimeout(uiInteractTimeoutRef.current);
-
-      uiInteractTimeoutRef.current = window.setTimeout(() => {
-        if (mountedRef.current) setIsUiInteracting(false);
-      }, 1000); // 1s Buffer
-    },
-    [],
+  usePlayerGestures(
+    gestureEl,
+    playerRef,
+    duration,
+    unifiedSeekRef,
+    controlsVisibleRef,
+    isRotatedRef,
   );
-
-  const togglePlay = useCallback(() => {
-    const p = playerRef.current;
-    if (!p) return;
-    if (p.paused()) {
-      p.play()?.catch(() => {
-        if (mountedRef.current) setControlsVisible(true);
-      });
-    } else {
-      p.pause();
-    }
-  }, []);
-
-  const getTechVideoEl = useCallback((): WebKitHTMLVideoElement | null => {
-    const p = playerRef.current;
-    if (!p) return null;
-    const techEl = p.tech?.(true)?.el?.();
-    if (techEl instanceof HTMLVideoElement)
-      return techEl as WebKitHTMLVideoElement;
-    return p.el()?.querySelector('video') as WebKitHTMLVideoElement | null;
-  }, []);
-
-  const waitForVideo = useCallback(
-    async (ms = 500) => {
-      const now = () =>
-        typeof performance !== 'undefined' && performance.now
-          ? performance.now()
-          : Date.now();
-      const start = now();
-      while (now() - start < ms) {
-        const v = getTechVideoEl();
-        if (v) return v;
-        await new Promise((r) => setTimeout(r, 50));
-      }
-      return null;
-    },
-    [getTechVideoEl],
-  );
-
-  const bumpTechEpoch = useCallback(() => {
-    if (mountedRef.current) setTechEpoch((prev) => prev + 1);
-  }, []);
-
-  const toggleRotatedFullscreen = useCallback(() => {
-    if (!isRotatedFullscreen) {
-      containerRef.current?.classList.add('videojs-rotated-fullscreen');
-      setIsRotatedFullscreen(true);
-    } else {
-      containerRef.current?.classList.remove('videojs-rotated-fullscreen');
-      setIsRotatedFullscreen(false);
-    }
-    setTimeout(() => {
-      if (mountedRef.current) playerRef.current?.trigger('resize');
-    }, 50);
-  }, [isRotatedFullscreen]);
-
-  const toggleFullscreen = useCallback(async () => {
-    if (typeof document === 'undefined') return;
-    const container = containerRef.current;
-    const video =
-      getTechVideoEl() ||
-      (container?.querySelector('video') as WebKitHTMLVideoElement | null);
-    if (!container) return;
-
-    try {
-      const isFS =
-        document.fullscreenElement ||
-        (document as any).webkitFullscreenElement ||
-        (video as any).webkitDisplayingFullscreen;
-      if (!isFS) {
-        if (container.requestFullscreen) await container.requestFullscreen();
-        else if ((container as any).webkitRequestFullscreen)
-          (container as any).webkitRequestFullscreen();
-        else if (video?.webkitEnterFullscreen) video.webkitEnterFullscreen();
-      } else {
-        if (document.exitFullscreen) await document.exitFullscreen();
-        else if ((document as any).webkitExitFullscreen)
-          (document as any).webkitExitFullscreen();
-        else if (video?.webkitExitFullscreen) video.webkitExitFullscreen();
-      }
-    } catch (e) {
-      if (mountedRef.current) callbacksRef.current.onError?.(e);
-    }
-
-    setTimeout(() => {
-      if (mountedRef.current) playerRef.current?.trigger('resize');
-    }, 50);
-  }, [getTechVideoEl]);
-
-  const togglePiP = useCallback(async () => {
-    const v = getTechVideoEl();
-    if (!v) return;
-    try {
-      if (document.pictureInPictureElement) {
-        await document.exitPictureInPicture();
-      } else if (
-        document.pictureInPictureEnabled &&
-        (v as any).requestPictureInPicture
-      ) {
-        await (v as any).requestPictureInPicture();
-      } else if ((v as any).webkitSetPresentationMode) {
-        const mode = (v as any).webkitPresentationMode;
-        (v as any).webkitSetPresentationMode(
-          mode === 'picture-in-picture' ? 'inline' : 'picture-in-picture',
-        );
-      }
-    } catch (e) {
-      if (mountedRef.current) callbacksRef.current.onError?.(e);
-    }
-  }, [getTechVideoEl]);
-
-  const attachIosFullscreen = useCallback(
-    (videoEl: WebKitHTMLVideoElement | null) => {
-      const prev = iosFsRef.current;
-      if (prev.video && prev.video !== videoEl && prev.onBegin && prev.onEnd) {
-        prev.video.removeEventListener('webkitbeginfullscreen', prev.onBegin);
-        prev.video.removeEventListener('webkitendfullscreen', prev.onEnd);
-      }
-      if (!videoEl) {
-        iosFsRef.current = { video: null, onBegin: null, onEnd: null };
-        return;
-      }
-      if (prev.video === videoEl) return;
-      if (!videoEl.webkitEnterFullscreen) {
-        iosFsRef.current = { video: null, onBegin: null, onEnd: null };
-        return;
-      }
-      const onBegin = () => {
-        if (mountedRef.current) setIsFullscreen(true);
-      };
-      const onEnd = () => {
-        if (mountedRef.current) setIsFullscreen(false);
-      };
-      videoEl.addEventListener('webkitbeginfullscreen', onBegin);
-      videoEl.addEventListener('webkitendfullscreen', onEnd);
-      iosFsRef.current = { video: videoEl, onBegin, onEnd };
-    },
-    [],
-  );
-
-  const attachPiPListeners = useCallback((videoEl: HTMLVideoElement | null) => {
-    const prev = pipRef.current;
-    if (prev.video && prev.video !== videoEl && prev.onEnter && prev.onLeave) {
-      prev.video.removeEventListener('enterpictureinpicture', prev.onEnter);
-      prev.video.removeEventListener('leavepictureinpicture', prev.onLeave);
-      prev.video.removeEventListener(
-        'webkitpresentationmodechanged' as any,
-        (prev as any).iosListener,
-      );
-    }
-    if (!videoEl) {
-      pipRef.current = { video: null, onEnter: null, onLeave: null };
-      return;
-    }
-    if (prev.video === videoEl) return;
-    const onEnter = () => {
-      if (mountedRef.current) setIsPiPActive(true);
-    };
-    const onLeave = () => {
-      if (mountedRef.current) setIsPiPActive(false);
-    };
-    const iosListener = () => {
-      const mode = (videoEl as any).webkitPresentationMode;
-      if (mountedRef.current) setIsPiPActive(mode === 'picture-in-picture');
-    };
-
-    if (mountedRef.current)
-      setIsPiPActive(document.pictureInPictureElement === videoEl);
-    videoEl.addEventListener('enterpictureinpicture', onEnter);
-    videoEl.addEventListener('leavepictureinpicture', onLeave);
-    videoEl.addEventListener(
-      'webkitpresentationmodechanged' as any,
-      iosListener,
-    );
-
-    pipRef.current = { video: videoEl, onEnter, onLeave, iosListener } as any;
-  }, []);
-
-  const disableCasHard = useCallback(() => {
-    setCasEnabled(false);
-    casEnabledRef.current = false;
-    try {
-      localStorage.setItem('lunatv_cas_enabled', 'false');
-    } catch {
-      /* */
-    }
-    const v = getTechVideoEl();
-    if (v) {
-      v.style.opacity = '1';
-      v.removeAttribute('data-cas-active');
+  useCasShader(
+    playerReady,
+    casEnabled,
+    getTechVideoEl,
+    isPiPActive,
+    debug,
+    techEpoch,
+    () => {
+      setCasEnabled(false);
       try {
-        delete (v as any).dataset?.casOwner;
+        localStorage.setItem('lunatv_cas_enabled', 'false');
       } catch {
         /* empty */
       }
-      v.removeAttribute('crossorigin');
-      const parent = v.parentElement;
-      if (parent)
-        parent
-          .querySelectorAll('canvas[data-cas-canvas="1"]')
-          .forEach((c) => c.remove());
-    }
-    bumpTechEpoch();
-  }, [bumpTechEpoch, getTechVideoEl]);
-
-  const toggleCas = useCallback(() => {
-    setCasEnabled((p) => {
-      const n = !p;
-      casEnabledRef.current = n;
-      try {
-        localStorage.setItem('lunatv_cas_enabled', n.toString());
-      } catch {
-        /* */
-      }
-      const video = getTechVideoEl();
-      if (video) {
-        if (n) {
-          video.crossOrigin = 'anonymous';
-        } else {
-          video.removeAttribute('crossorigin');
-        }
-        bumpTechEpoch();
-      }
-      return n;
-    });
-  }, [getTechVideoEl, bumpTechEpoch]);
-
-  const changeSpeed = useCallback(
-    (rate: number) => {
-      const safe = Number.isFinite(rate) ? rate : 1;
-      setPlaybackRate(safe);
-      playbackRateRef.current = safe;
-      try {
-        localStorage.setItem(`lunatv_speed_${seriesId}`, String(safe));
-      } catch {
-        /* */
-      }
-      playerRef.current?.playbackRate?.(safe);
     },
-    [seriesId],
   );
 
-  useEffect(() => {
-    const p = playerRef.current;
-    if (!p || typeof p.inactivityTimeout !== 'function') return;
+  const finalUrl = useMemo(() => {
+    if (!reloadTrigger || reloadTrigger <= 0) return url;
+    return `${url}${url.includes('?') ? '&' : '?'}t=${reloadTrigger}-${Date.now()}`;
+  }, [url, reloadTrigger]);
 
-    if (isUiInteracting) {
-      p.inactivityTimeout(0); // Disable
-      p.userActive?.(true);
-    } else {
-      const original = inactivityTimeoutRef.current ?? 2000;
-      p.inactivityTimeout(original);
-      p.reportUserActivity?.({});
-    }
-  }, [isUiInteracting]);
-
-  const onTapStart = useCallback((e: ReactPointerEvent) => {
-    tapGateRef.current.down = true;
-    tapGateRef.current.moved = false;
-    tapGateRef.current.startX = e.clientX;
-    tapGateRef.current.startY = e.clientY;
-  }, []);
-
-  const onTapMove = useCallback((e: ReactPointerEvent) => {
-    if (!tapGateRef.current.down) return;
-    const dx = Math.abs(e.clientX - tapGateRef.current.startX);
-    const dy = Math.abs(e.clientY - tapGateRef.current.startY);
-    if (dx > 10 || dy > 10) tapGateRef.current.moved = true;
-  }, []);
-
-  const onTapEnd = useCallback(() => {
-    tapGateRef.current.down = false;
-  }, []);
-
-  const onTapToggleControls = useCallback(() => {
-    if (tapGateRef.current.moved) return;
-    if (isScrubbing) return;
-
-    const now = Date.now();
-    if (now - lastToggleTimeRef.current < 200) return;
-    lastToggleTimeRef.current = now;
-
-    if (settingsOpen) {
-      setSettingsOpen(false);
-      const p = playerRef.current;
-      p?.userActive?.(true);
-      p?.reportUserActivity?.({});
-      return;
-    }
-
-    const player = playerRef.current;
-    if (!player) return;
-    if (player.userActive?.()) {
-      player.userActive?.(false);
-    } else {
-      player.userActive?.(true);
-    }
-  }, [isScrubbing, settingsOpen]);
-
-  // FIX: Native HLS Priority + Retry Logic
   const initHls = useCallback(
-    async (videoEl: HTMLVideoElement, sourceUrl: string) => {
+    (videoEl: HTMLVideoElement, sourceUrl: string) => {
       if (!sourceUrl) return;
-
-      // PROXY FIX:
-      // 1. allowCORS=false -> Forces Go to rewrite segments (fixes CAS/Tainted Canvas)
-      // 2. moontv-source -> Passes seriesId so Go uses correct User-Agent/Referer
       let proxyUrl = sourceUrl;
-      // Prevent double-proxying if sourceUrl is already processed
       if (!sourceUrl.includes('/api/proxy/')) {
-        proxyUrl = `/api/proxy/m3u8?url=${encodeURIComponent(
-          sourceUrl,
-        )}&allowCORS=false&moontv-source=${encodeURIComponent(
-          seriesId || 'global',
-        )}`;
+        proxyUrl = `/api/proxy/m3u8?url=${encodeURIComponent(sourceUrl)}&allowCORS=false&moontv-source=${encodeURIComponent(seriesId || 'global')}`;
       }
 
-      // 1. Prefer Native HLS (Safari/iOS)
       if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
-        if (hlsCleanupRef.current) {
-          hlsCleanupRef.current();
-          hlsCleanupRef.current = null;
-        } else if (hlsRef.current) {
-          try {
-            hlsRef.current.destroy();
-          } catch {
-            /* empty */
-          }
-          hlsRef.current = null;
-        }
-        // FIX: Clean up previous listener to prevent race conditions
-        const prev = nativeAutoplayRef.current;
-        if (prev.video && prev.handler) {
-          prev.video.removeEventListener('loadedmetadata', prev.handler);
-          prev.video.removeEventListener('canplay', prev.handler);
-        }
-
+        clearNativeAutoplayListeners();
         videoEl.src = proxyUrl;
         try {
           videoEl.load();
         } catch {
           /* empty */
         }
-
-        // FIX: Arm autoplay with switch-safe handler
-        if (configRef.current.autoPlay) {
-          // Capture current epoch to ignore stale events from previous sources
-          const myEpoch = switchEpochRef.current;
-
-          const handler = () => {
-            if (!mountedRef.current) return;
-            // If user switched channel again before this fired, ignore it
-            if (switchEpochRef.current !== myEpoch) return;
-
-            playerRef.current?.play?.()?.catch(() => {
-              if (mountedRef.current) setControlsVisible(true);
-            });
-          };
-
-          nativeAutoplayRef.current = { video: videoEl, handler };
-
-          videoEl.addEventListener('loadedmetadata', handler, { once: true });
-          videoEl.addEventListener('canplay', handler, { once: true });
-        } else {
-          nativeAutoplayRef.current = { video: videoEl, handler: null };
-        }
+        armAutoplay(videoEl);
         return;
       }
 
-      // 2. Fallback to Hls.js
-      let targetEl = videoEl;
-      if (!targetEl || !targetEl.isConnected) {
-        const fresh = getTechVideoEl();
-        if (fresh) targetEl = fresh;
+      if (Hls.isSupported()) {
+        if (hlsRef.current) hlsRef.current.destroy();
+        const hls = new Hls({
+          enableWorker: true,
+          lowLatencyMode: isLive,
+          loader: customHlsLoader || Hls.DefaultConfig.loader,
+        });
+        hlsRef.current = hls;
+        hls.loadSource(proxyUrl);
+        hls.attachMedia(videoEl);
+        // Ensure no native controls interfere
+        videoEl.controls = false;
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          if (configRef.current.autoPlay) tryPlayNow();
+        });
       }
-      if (!targetEl) {
-        if (mountedRef.current)
-          callbacksRef.current.onError?.({
-            type: 'init_error',
-            message: 'Video element not found for HLS',
-          });
-        return;
-      }
-
-      networkErrorCountRef.current = 0;
-      if (hlsCleanupRef.current) {
-        hlsCleanupRef.current();
-        hlsCleanupRef.current = null;
-      } else if (hlsRef.current) {
-        try {
-          hlsRef.current.destroy();
-        } catch {
-          /* empty */
-        }
-        hlsRef.current = null;
-      }
-
-      if (!Hls.isSupported()) {
-        if (mountedRef.current)
-          callbacksRef.current.onError?.({ type: 'hls_not_supported' });
-        return;
-      }
-
-      try {
-        targetEl.removeAttribute('src');
-        targetEl.load();
-      } catch {
-        /* empty */
-      }
-
-      const hlsConfig: Partial<typeof Hls.DefaultConfig> = {
-        debug,
-        enableWorker: true,
-        lowLatencyMode: isLive,
-        loader: customHlsLoader || Hls.DefaultConfig.loader,
-        ...(isLive
-          ? {
-              liveSyncDurationCount: 3,
-              liveMaxLatencyDurationCount: 10,
-              liveBackBufferLength: 30,
-              maxBufferLength: 30,
-              maxMaxBufferLength: 60,
-            }
-          : {}),
-      };
-      const hls = new Hls(hlsConfig as typeof Hls.DefaultConfig);
-      hlsRef.current = hls;
-
-      const onMediaAttached = () => {
-        if (hlsRef.current === hls) hls.loadSource(proxyUrl);
-      };
-      const onFragLoaded = () => {
-        if (hlsRef.current === hls) networkErrorCountRef.current = 0;
-      };
-      const onManifestParsed = () => {
-        if (hlsRef.current !== hls || !mountedRef.current) return;
-        if (configRef.current.autoPlay && playerRef.current?.paused())
-          playerRef.current.play()?.catch(() => {
-            if (mountedRef.current) setControlsVisible(true);
-          });
-      };
-
-      const performCleanupAndDestroy = (err?: any) => {
-        if (hlsCleanupRef.current) hlsCleanupRef.current = null;
-        if (hlsRef.current === hls) hlsRef.current = null;
-        try {
-          hls.off(Hls.Events.MEDIA_ATTACHED, onMediaAttached);
-        } catch {
-          /* empty */
-        }
-        try {
-          hls.off(Hls.Events.FRAG_LOADED, onFragLoaded);
-        } catch {
-          /* empty */
-        }
-        try {
-          hls.off(Hls.Events.MANIFEST_PARSED, onManifestParsed);
-        } catch {
-          /* empty */
-        }
-        try {
-          hls.off(Hls.Events.ERROR, onErrorHandler);
-        } catch {
-          /* empty */
-        }
-        try {
-          hls.stopLoad();
-          hls.detachMedia();
-          hls.destroy();
-        } catch {
-          /* empty */
-        }
-        if (err && mountedRef.current) callbacksRef.current.onError?.(err);
-      };
-
-      const onErrorHandler = (_evt: unknown, data: any) => {
-        if (hlsRef.current !== hls) return;
-        if (data?.fatal) {
-          if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-            networkErrorCountRef.current += 1;
-            if (networkErrorCountRef.current >= 3)
-              performCleanupAndDestroy({
-                type: 'network_error',
-                fatal: true,
-                original: data,
-              });
-            else {
-              try {
-                hls.startLoad();
-              } catch {
-                performCleanupAndDestroy(data);
-              }
-            }
-          } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-            try {
-              hls.recoverMediaError();
-            } catch {
-              performCleanupAndDestroy(data);
-            }
-          } else {
-            performCleanupAndDestroy(data);
-          }
-        }
-      };
-
-      hlsCleanupRef.current = () => performCleanupAndDestroy();
-      hls.on(Hls.Events.MEDIA_ATTACHED, onMediaAttached);
-      hls.on(Hls.Events.FRAG_LOADED, onFragLoaded);
-      hls.on(Hls.Events.MANIFEST_PARSED, onManifestParsed);
-      hls.on(Hls.Events.ERROR, onErrorHandler);
-      hls.attachMedia(targetEl);
     },
-    // FIX: Added seriesId to dependencies so source updates on channel switch
-    [customHlsLoader, debug, isLive, getTechVideoEl, seriesId],
+    [
+      seriesId,
+      customHlsLoader,
+      isLive,
+      armAutoplay,
+      clearNativeAutoplayListeners,
+      tryPlayNow,
+    ],
   );
 
-  // FIX: Complete Source Loading Pipeline (HLS + Native)
   useEffect(() => {
-    if (!playerReady || !playerRef.current || !mountedRef.current) return;
-    const player = playerRef.current;
-    const epoch = ++switchEpochRef.current;
+    if (!playerReady || !playerRef.current) return;
 
-    const d = player.duration() ?? 0;
-    const t = player.currentTime() ?? 0;
-    const wasPlaying = !player.paused();
-    const isFiniteDuration = Number.isFinite(d) && d > 0;
-    if (!isLive && isFiniteDuration && t > 0 && t < d - 2) {
-      switchSnapshotRef.current = { time: t, wasPlaying };
-    } else {
-      switchSnapshotRef.current = null;
-    }
+    isSwitchingRef.current = true;
+    autoplayEpochRef.current += 1;
+    if (switchGuardRef.current) clearTimeout(switchGuardRef.current);
+    switchGuardRef.current = window.setTimeout(() => {
+      if (mountedRef.current) isSwitchingRef.current = false;
+    }, 3000);
 
-    let restoreArmed = true;
-    let attachedVideoEl: HTMLVideoElement | null = null;
-    const restore = () => {
-      if (!mountedRef.current || !restoreArmed) return;
-      if (switchEpochRef.current !== epoch) return;
-      const snap = switchSnapshotRef.current;
-      if (!snap) return;
-      const seekable = player.seekable?.();
-      let target = snap.time;
-      if (seekable && seekable.length > 0) {
-        const start = seekable.start(0);
-        const end = seekable.end(seekable.length - 1);
-        target = Math.min(Math.max(target, start), Math.max(start, end - 0.1));
-      } else if (
-        Number.isFinite(player.duration()) &&
-        (player.duration() ?? 0) > 0
-      ) {
-        const dur = player.duration() ?? 0;
-        target = Math.min(Math.max(target, 0), Math.max(0, dur - 0.1));
-      }
-      switchSnapshotRef.current = null;
-      player.currentTime(target);
-      if (snap.wasPlaying)
-        player.play()?.catch(() => {
-          if (mountedRef.current) setControlsVisible(true);
-        });
-    };
+    clearNativeAutoplayListeners();
 
-    hasSkippedIntroRef.current = false;
-    hasTriggeredOutroRef.current = false;
-    player.pause();
-    player.playbackRate(playbackRateRef.current);
-    player.poster(poster || '');
+    const isHls =
+      type === 'application/x-mpegURL' || finalUrl.includes('.m3u8');
+    const isFlv = finalUrl.includes('.flv');
 
-    const v = getTechVideoEl();
-    const videoEl = v instanceof HTMLVideoElement ? v : null;
-    if (videoEl) {
-      if (casEnabledRef.current) {
-        videoEl.crossOrigin = 'anonymous';
-      } else {
-        videoEl.removeAttribute('crossorigin');
-      }
-      attachIosFullscreen(videoEl as WebKitHTMLVideoElement);
-      attachPiPListeners(videoEl);
-      bumpTechEpoch();
-      videoEl.addEventListener('loadedmetadata', restore, { once: true });
-      attachedVideoEl = videoEl;
-    } else {
-      player.one('loadedmetadata', restore);
-    }
-
-    const isHlsMime =
-      type === 'application/x-mpegURL' ||
-      type === 'application/vnd.apple.mpegurl';
-    const isHlsUrl =
-      finalUrl?.includes('.m3u8') ||
-      finalUrl?.includes('/proxy/m3u8') ||
-      finalUrl?.includes('m3u8?');
-    const isFlvUrl =
-      finalUrl?.includes('.flv') ||
-      finalUrl?.includes('/proxy/flv') ||
-      finalUrl?.includes('flv?');
-
-    const loadSource = (src: string, mime?: string) =>
-      player.src({ src, type: mime });
-
-    // FIX: Async Epoch-Guarded HLS Loading
-    if (isHlsMime || (!type && isHlsUrl)) {
+    if (isHls) {
       (async () => {
-        const myEpoch = epoch;
-        // Native HLS check first
-        const v = getTechVideoEl() || (await waitForVideo(500));
-        if (!mountedRef.current || switchEpochRef.current !== myEpoch) return;
-
-        if (v) {
-          // Let initHls handle native vs hls.js split
-          initHls(v, finalUrl);
-          if (configRef.current.autoPlay && v.readyState >= 2) {
-            player.play()?.catch(() => {
-              if (mountedRef.current) setControlsVisible(true);
-            });
-          }
-        } else {
-          if (mountedRef.current)
-            callbacksRef.current.onError?.({
-              type: 'init_error',
-              message: 'Video element not found for HLS',
-            });
+        let v = getTechVideoEl();
+        for (let i = 0; i < 10 && !v; i++) {
+          await new Promise((r) => setTimeout(r, 50));
+          v = getTechVideoEl();
         }
+        if (v) initHls(v, finalUrl);
       })();
     } else {
-      if (hlsCleanupRef.current) {
-        hlsCleanupRef.current();
-        hlsCleanupRef.current = null;
-      } else if (hlsRef.current) {
-        try {
-          hlsRef.current.destroy();
-        } catch {
-          /* empty */
-        }
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
         hlsRef.current = null;
       }
-
-      // --- START FIX: Safe Proxy Routing ---
-      let srcToLoad = finalUrl;
-
-      // Check protocol case-insensitively
+      let src = finalUrl;
       if (/^https?:\/\//i.test(finalUrl)) {
-        const encodedUrl = encodeURIComponent(finalUrl);
-        const sourceParam = encodeURIComponent(seriesId || 'global');
-
-        if (isFlvUrl) {
-          // FLV needs infinite timeout -> use /flv endpoint
-          srcToLoad = `/api/proxy/flv?url=${encodedUrl}&moontv-source=${sourceParam}`;
-        } else {
-          // MP4/General needs finite timeout + Range support -> use /key endpoint (30s)
-          srcToLoad = `/api/proxy/key?url=${encodedUrl}&moontv-source=${sourceParam}`;
-        }
+        const enc = encodeURIComponent(finalUrl);
+        const srcParam = encodeURIComponent(seriesId || 'global');
+        src = isFlv
+          ? `/api/proxy/flv?url=${enc}&moontv-source=${srcParam}`
+          : `/api/proxy/key?url=${enc}&moontv-source=${srcParam}`;
       }
-
-      if (isFlvUrl) loadSource(srcToLoad, 'video/x-flv');
-      else loadSource(srcToLoad, type || 'video/mp4');
-      // --- END FIX ---
-
-      const tryAutoPlay = () => {
-        if (!mountedRef.current || !configRef.current.autoPlay) return;
-        player.play()?.catch(() => {
-          if (mountedRef.current) setControlsVisible(true);
-        });
-      };
-
-      if (firstLoadRef.current) {
-        firstLoadRef.current = false;
-        tryAutoPlay();
-      } else {
-        if (mountedRef.current) unifiedSeekRef.current.cancel();
-        player.one('canplay', tryAutoPlay);
-      }
+      playerRef.current.src({
+        src,
+        type: isFlv ? 'video/x-flv' : type || 'video/mp4',
+      });
+      playerRef.current.controls(false);
+      armAutoplay();
     }
-
-    return () => {
-      restoreArmed = false;
-      if (attachedVideoEl)
-        attachedVideoEl.removeEventListener('loadedmetadata', restore);
-      player.off?.('loadedmetadata', restore);
-    };
   }, [
     finalUrl,
     type,
-    poster,
     playerReady,
     initHls,
-    attachIosFullscreen,
-    attachPiPListeners,
-    bumpTechEpoch,
-    isLive,
     getTechVideoEl,
-    waitForVideo,
+    armAutoplay,
+    clearNativeAutoplayListeners,
     seriesId,
   ]);
 
-  // FIX: Player Initialization & Event Binding (The Engine)
   useEffect(() => {
     if (!videoWrapperRef.current) return;
-    const wrapper = videoWrapperRef.current;
-    wrapper.innerHTML = '';
-    const videoElement = document.createElement('video-js');
-    Object.assign(videoElement.style, {
-      position: 'absolute',
-      top: '0',
-      left: '0',
+    videoWrapperRef.current.innerHTML = '';
+    const vid = document.createElement('video-js');
+    Object.assign(vid.style, {
       width: '100%',
       height: '100%',
+      position: 'absolute',
     });
-    wrapper.appendChild(videoElement);
+    videoWrapperRef.current.appendChild(vid);
 
-    const player = videojs(videoElement, {
+    const player = videojs(vid, {
       controls: false,
       autoplay: false,
       preload: 'auto',
@@ -1854,547 +841,455 @@ export default function VideoJsPlayer({
 
     playerRef.current = player;
 
-    const handleUserActive = () => {
-      if (mountedRef.current) setControlsVisible(true);
+    const clearSwitching = () => {
+      isSwitchingRef.current = false;
+      if (switchGuardRef.current) {
+        clearTimeout(switchGuardRef.current);
+        switchGuardRef.current = null;
+      }
     };
-    const handleUserInactive = () => {
+    player.on('loadedmetadata', clearSwitching);
+    player.on('canplay', clearSwitching);
+    player.on('error', clearSwitching);
+
+    player.on('playing', () => {
       if (mountedRef.current) {
-        setControlsVisible(false);
-        setSettingsOpen(false);
-      }
-    };
-
-    player.ready(() => {
-      if (mountedRef.current) setPlayerReady(true);
-      if (mountedRef.current)
-        callbacksRef.current.onReady?.(player as unknown as Player);
-      const v = player.tech?.(true)?.el?.();
-      if (v instanceof HTMLVideoElement) {
-        if (casEnabledRef.current) {
-          v.crossOrigin = 'anonymous';
-        } else {
-          v.removeAttribute('crossorigin');
-        }
-        attachIosFullscreen(v as WebKitHTMLVideoElement);
-        attachPiPListeners(v);
-        bumpTechEpoch();
-      }
-    });
-
-    const handleLoadStart = () => {
-      const v = player.tech?.(true)?.el?.();
-      if (v instanceof HTMLVideoElement) {
-        if (casEnabledRef.current) {
-          v.crossOrigin = 'anonymous';
-        } else {
-          v.removeAttribute('crossorigin');
-        }
-        attachIosFullscreen(v as WebKitHTMLVideoElement);
-        attachPiPListeners(v);
-        bumpTechEpoch();
-      }
-    };
-
-    player.on('loadstart', handleLoadStart);
-    player.on('useractive', handleUserActive);
-    player.on('userinactive', handleUserInactive);
-    player.on('play', () => {
-      if (mountedRef.current) {
-        setIsPaused(false);
+        setIsPlaying(true);
+        if (pendingAutoplayRef.current) pendingAutoplayRef.current = false;
+        clearSwitching();
         callbacksRef.current.onPlay?.();
       }
     });
     player.on('pause', () => {
       if (mountedRef.current) {
-        setIsPaused(true);
+        setIsPlaying(false);
+        if (!isSwitchingRef.current) pendingAutoplayRef.current = false;
         callbacksRef.current.onPause?.();
       }
     });
-    player.on('ended', () => {
-      if (mountedRef.current && !hasTriggeredOutroRef.current)
-        callbacksRef.current.onEnded?.();
-    });
-    player.on('error', () => {
-      if (mountedRef.current) callbacksRef.current.onError?.(player.error());
-    });
-    player.on('durationchange', () => {
-      if (mountedRef.current) setDuration(player.duration() || 0);
-    });
-
-    // FIX: Guarded timeupdate to stop scrubbing jumps via Refs
     player.on('timeupdate', () => {
       if (!mountedRef.current) return;
       const t = player.currentTime() || 0;
-
-      // FIX: Prefer native duration for HLS if Video.js reports 0/Inf
       let d = player.duration() || 0;
       if (!Number.isFinite(d) || d <= 0) {
-        const nativeEl = player.tech?.(true)?.el?.();
-        if (nativeEl instanceof HTMLVideoElement) {
-          const nd = nativeEl.duration;
-          if (Number.isFinite(nd) && nd > 0) d = nd;
-        }
+        const native = player.tech?.(true)?.el?.();
+        if (native && Number.isFinite(native.duration) && native.duration > 0)
+          d = native.duration;
       }
-
-      // FIX: Push valid duration to state
-      if (Number.isFinite(d) && d > 0) {
+      if (Number.isFinite(d) && d > 0)
         setDuration((prev) => (prev !== d ? d : prev));
-      }
 
-      const scrubbing =
-        isScrubbingRef.current ||
-        seekingTimeRef.current !== null ||
-        unifiedSeekRef.current.isActive();
-      if (!scrubbing) setCurrentTime(t);
-
-      callbacksRef.current.onTimeUpdate?.(t, d);
-
-      if (scrubbing) return;
+      const isSeeking =
+        isScrubbing || seekingTime !== null || unifiedSeek.isActive();
+      if (!isSeeking) setCurrentTime(t);
 
       const { enableSkip, skipIntroTime, skipOutroTime } = configRef.current;
-      if (enableSkip) {
-        if (
-          skipIntroTime > 0 &&
-          t < skipIntroTime &&
-          !hasSkippedIntroRef.current
-        ) {
-          player.currentTime(skipIntroTime);
-          hasSkippedIntroRef.current = true;
-        }
-        if (
-          skipOutroTime > 0 &&
-          d > 0 &&
-          d - t <= skipOutroTime &&
-          !hasTriggeredOutroRef.current
-        ) {
-          hasTriggeredOutroRef.current = true;
-          player.pause();
-          callbacksRef.current.onEnded?.();
+      if (enableSkip && skipIntroTime > 0 && t < skipIntroTime)
+        player.currentTime(skipIntroTime);
+      callbacksRef.current.onTimeUpdate?.(t, d);
+    });
+    player.on('ended', () => {
+      if (mountedRef.current) callbacksRef.current.onEnded?.();
+    });
+    player.on('enterpictureinpicture', () => setIsPiPActive(true));
+    player.on('leavepictureinpicture', () => setIsPiPActive(false));
+    player.ready(() => {
+      if (mountedRef.current) {
+        setPlayerReady(true);
+        callbacksRef.current.onReady?.(player);
+        const v = player.tech?.(true)?.el?.();
+        if (v) {
+          setPipSupported(
+            (document.pictureInPictureEnabled && !!v.requestPictureInPicture) ||
+              !!(v as any).webkitSetPresentationMode,
+          );
+          setHasAirPlay(
+            !!(window as any).WebKitPlaybackTargetAvailabilityEvent,
+          );
+          if (casEnabledRef.current) v.crossOrigin = 'anonymous';
         }
       }
     });
 
-    return () => {
-      player.off('loadstart', handleLoadStart);
-      player.off('useractive', handleUserActive);
-      player.off('userinactive', handleUserInactive);
-      attachIosFullscreen(null);
-      attachPiPListeners(null);
-      if (hlsCleanupRef.current) {
-        hlsCleanupRef.current();
-        hlsCleanupRef.current = null;
-      } else if (hlsRef.current) {
-        try {
-          hlsRef.current.destroy();
-        } catch {
-          /* empty */
-        }
-        hlsRef.current = null;
-      }
-
-      // FIX: Cleanup native autoplay listeners on unmount/dispose
-      const prevNative = nativeAutoplayRef.current;
-      if (prevNative.video && prevNative.handler) {
-        prevNative.video.removeEventListener(
-          'loadedmetadata',
-          prevNative.handler,
-        );
-        prevNative.video.removeEventListener('canplay', prevNative.handler);
-      }
-      nativeAutoplayRef.current = { video: null, handler: null };
-
-      player.dispose();
-      playerRef.current = null;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useCasShader(
-    playerReady,
-    casEnabled,
-    getTechVideoEl,
-    isPiPActive,
-    debug,
-    techEpoch,
-    disableCasHard,
-  );
-
-  // FIX: Fullscreen Sync Effect
-  useEffect(() => {
-    if (typeof document === 'undefined') return;
-    const onFsChange = () => {
-      if (!mountedRef.current) return;
+    const handleFullscreenChange = () =>
       setIsFullscreen(
         !!document.fullscreenElement ||
           !!(document as any).webkitFullscreenElement,
       );
-    };
-    document.addEventListener('fullscreenchange', onFsChange);
-    document.addEventListener('webkitfullscreenchange', onFsChange);
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+
     return () => {
-      document.removeEventListener('fullscreenchange', onFsChange);
-      document.removeEventListener('webkitfullscreenchange', onFsChange);
+      clearNativeAutoplayListeners();
+      player.dispose();
+      playerRef.current = null;
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener(
+        'webkitfullscreenchange',
+        handleFullscreenChange,
+      );
     };
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // FIX: PiP Support Check with iOS Fallback
-  useEffect(() => {
-    if (typeof document !== 'undefined' && mountedRef.current) {
-      const v = getTechVideoEl();
-      const supported =
-        (!!document.pictureInPictureEnabled &&
-          !!v &&
-          typeof (v as any).requestPictureInPicture === 'function') ||
-        (!!v && typeof (v as any).webkitSetPresentationMode === 'function');
-      setPipSupported(supported);
-    }
-  }, [playerReady, techEpoch, getTechVideoEl]);
-
-  const formatTime = (s: number) => {
-    if (!Number.isFinite(s)) return '0:00';
-    const h = Math.floor(s / 3600);
-    const m = Math.floor((s % 3600) / 60);
-    const sec = Math.floor(s % 60);
-    return h > 0
-      ? `${h}:${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`
-      : `${m}:${sec.toString().padStart(2, '0')}`;
+  const togglePlay = () => {
+    if (playerRef.current?.paused())
+      playerRef.current.play()?.catch(() => {
+        /* empty */
+      });
+    else playerRef.current?.pause();
   };
 
+  // FIX: Fullscreen Logic (Native Mobile Support)
+  // FIX: Fullscreen Logic (Robust Native Support)
+  const toggleFullscreen = async () => {
+    const container = containerRef.current;
+    const video = getTechVideoEl();
+    const p = playerRef.current;
+
+    // 1. Try Video.js API first (handles most desktop/android cases)
+    if (p && p.requestFullscreen) {
+      try {
+        if (p.isFullscreen()) await p.exitFullscreen();
+        else await p.requestFullscreen();
+        return;
+      } catch {
+        /* fallback */
+      }
+    }
+
+    // 2. IOS/Native Fallback
+    if (video && (video as any).webkitEnterFullscreen) {
+      if ((video as any).webkitDisplayingFullscreen)
+        (video as any).webkitExitFullscreen?.();
+      else (video as any).webkitEnterFullscreen();
+      return;
+    }
+
+    // 3. Manual Container Fallback
+    if (
+      document.fullscreenEnabled ||
+      (document as any).webkitFullscreenEnabled
+    ) {
+      if (
+        !document.fullscreenElement &&
+        !(document as any).webkitFullscreenElement
+      ) {
+        if (container?.requestFullscreen) await container.requestFullscreen();
+        else if ((container as any).webkitRequestFullscreen)
+          (container as any).webkitRequestFullscreen();
+      } else {
+        if (document.exitFullscreen) await document.exitFullscreen();
+        else if ((document as any).webkitExitFullscreen)
+          (document as any).webkitExitFullscreen();
+      }
+    }
+  };
+
+  const toggleRotatedFullscreen = () => {
+    if (!isRotatedFullscreen) {
+      containerRef.current?.classList.add('videojs-rotated-fullscreen');
+      setIsRotatedFullscreen(true);
+    } else {
+      containerRef.current?.classList.remove('videojs-rotated-fullscreen');
+      setIsRotatedFullscreen(false);
+    }
+    setTimeout(() => {
+      if (mountedRef.current) playerRef.current?.trigger('resize');
+    }, 50);
+  };
+
+  const handleInteraction = () => {
+    if (uiInteractTimeoutRef.current)
+      clearTimeout(uiInteractTimeoutRef.current);
+    uiInteractTimeoutRef.current = window.setTimeout(() => {
+      if (mountedRef.current && isPlaying && !settingsOpen)
+        setControlsVisible(false);
+    }, 3000);
+  };
+  const uiInteractTimeoutRef = useRef<number | null>(null);
+
   const displayTime = seekingTime ?? currentTime;
-  const progress = duration > 0 ? (displayTime / duration) * 100 : 0;
+  const progressPercent = duration > 0 ? (displayTime / duration) * 100 : 0;
+
+  useEffect(() => {
+    const id = 'lunatv-player-css-v6';
+    if (!document.getElementById(id)) {
+      const style = document.createElement('style');
+      style.id = id;
+      style.textContent = CSS;
+      document.head.appendChild(style);
+    }
+  }, []);
 
   return (
-    <div className={`player-container ${className}`} ref={containerRef}>
+    <div
+      className={`player-container ${className} group`}
+      ref={containerRef}
+      onPointerMove={handleInteraction}
+      onPointerDown={handleInteraction}
+    >
       <div ref={videoWrapperRef} className='video-wrapper' />
+
       <div
+        ref={setGestureNode}
         className='tap-layer'
-        onPointerDown={onTapStart}
-        onPointerMove={(e) => {
-          onTapMove(e);
-          if (playerRef.current) playerRef.current.reportUserActivity?.({});
-        }}
-        onPointerUp={(e) => {
-          if (e.pointerType === 'mouse' && e.button !== 0) return;
-          onTapEnd();
-          onTapToggleControls();
-        }}
-        onPointerCancel={onTapEnd}
-        onPointerLeave={onTapEnd}
-        style={{
-          touchAction: isRotatedFullscreen ? 'none' : 'pan-y',
-          userSelect: 'none',
+        onClick={() => {
+          if (settingsOpen) {
+            setSettingsOpen(false);
+            return;
+          }
+          const newState = !controlsVisible;
+          setControlsVisible(newState);
+          if (newState) handleInteraction();
+          else if (uiInteractTimeoutRef.current)
+            clearTimeout(uiInteractTimeoutRef.current);
         }}
       />
-      <div
-        className={`player-controls ${controlsVisible ? 'visible' : ''}`}
-        aria-hidden={!controlsVisible}
-      >
-        <div
-          className='top-bar'
-          onPointerMove={(e) => markUiInteraction(e)}
-          onPointerDown={(e) => markUiInteraction(e)}
-        >
-          <button
-            type='button'
-            className='ctrl-btn'
-            onClick={(e) => {
-              markUiInteraction(e, { stop: true });
-              setSettingsOpen((s) => !s);
-            }}
-            title='Settings'
-            aria-label='Settings'
-          >
-            {Icons.settings}
-          </button>
-        </div>
-        <button
-          className='rotate-fullscreen-btn'
-          onClick={(e) => {
-            e.stopPropagation();
-            toggleRotatedFullscreen();
-          }}
-          title='Page Fullscreen'
-          aria-label='Page Fullscreen'
-        >
-          {Icons.rotate}
-        </button>
-        <div className='center-area'>
-          <button
-            type='button'
-            className='big-play-btn'
-            onClick={(e) => {
-              e.stopPropagation();
-              togglePlay();
-            }}
-            aria-label={isPaused ? 'Play' : 'Pause'}
-          >
-            {isPaused ? Icons.bigPlay : Icons.bigPause}
-          </button>
-        </div>
-        <div
-          className='bottom-bar'
-          onPointerMove={(e) => markUiInteraction(e)}
-          onPointerDown={(e) => markUiInteraction(e)}
-        >
-          <button
-            type='button'
-            className='ctrl-btn'
-            onClick={(e) => {
-              markUiInteraction(e);
-              togglePlay();
-            }}
-            aria-label={isPaused ? 'Play' : 'Pause'}
-          >
-            {isPaused ? Icons.play : Icons.pause}
-          </button>
-          {hasNextEpisode && (
-            <button
-              type='button'
-              className='ctrl-btn'
-              onClick={(e) => {
-                markUiInteraction(e);
-                onNextEpisode?.();
-              }}
-              title='Next'
-              aria-label='Next Episode'
-            >
-              {Icons.next}
-            </button>
-          )}
-          <div className='time-display'>
-            {formatTime(seekingTime ?? currentTime)}
+
+      {seekingTime !== null && (
+        <div className='seek-overlay-container'>
+          <div className='seek-info-pill'>
+            <span className='seek-time-large'>{formatTime(seekingTime)}</span>
+            <span className='text-white/60 text-sm font-medium'>
+              / {formatTime(duration)}
+            </span>
           </div>
+        </div>
+      )}
+
+      <div className={`player-controls ${controlsVisible ? 'visible' : ''}`}>
+        <div className='player-header'>
+          <div className='header-left'></div>
+          <button
+            className='control-button'
+            onClick={() => setSettingsOpen(!settingsOpen)}
+          >
+            {Icons.Settings()}
+          </button>
+        </div>
+
+        <div className='absolute inset-0 flex items-center justify-center pointer-events-none'>
+          {!isPlaying && controlsVisible && (
+            <div
+              className='w-16 h-16 bg-black/40 rounded-full flex items-center justify-center backdrop-blur-sm pointer-events-auto cursor-pointer hover:scale-110 transition-transform'
+              onClick={togglePlay}
+            >
+              <div className='scale-150 text-white'>{Icons.Play()}</div>
+            </div>
+          )}
+        </div>
+
+        <div className='player-bottom'>
           <div
-            ref={progressBarRef}
             className='progress-bar'
-            role='slider'
-            aria-label='Seek slider'
-            aria-valuemin={0}
-            aria-valuemax={duration}
-            aria-valuenow={seekingTime ?? currentTime}
-            tabIndex={0}
-            onKeyDown={(e) => {
-              markUiInteraction(e);
-              let newTime = -1;
-              if (e.key === 'ArrowRight')
-                newTime = Math.min((seekingTime ?? currentTime) + 5, duration);
-              else if (e.key === 'ArrowLeft')
-                newTime = Math.max((seekingTime ?? currentTime) - 5, 0);
-              else if (e.key === ' ' || e.key === 'Enter') {
-                e.preventDefault();
-                togglePlay();
-                return;
-              }
-              if (newTime !== -1 && playerRef.current) {
-                e.preventDefault();
-                playerRef.current.currentTime(newTime);
-                setCurrentTime(newTime);
-              }
-            }}
-            onClick={(e) => markUiInteraction(e)}
             onPointerDown={(e) => {
-              markUiInteraction(e);
-              handleScrubStart(e);
+              const rect = e.currentTarget.getBoundingClientRect();
+              const p = Math.max(
+                0,
+                Math.min(1, (e.clientX - rect.left) / rect.width),
+              );
+              unifiedSeek.begin({ showOverlay: true });
+              unifiedSeek.preview(p * duration);
+              e.stopPropagation();
+              const onMove = (mv: PointerEvent) => {
+                const r = rect;
+                const pm = Math.max(
+                  0,
+                  Math.min(1, (mv.clientX - r.left) / r.width),
+                );
+                unifiedSeek.preview(pm * duration);
+              };
+              const onUp = () => {
+                unifiedSeek.end();
+                document.removeEventListener('pointermove', onMove);
+                document.removeEventListener('pointerup', onUp);
+              };
+              document.addEventListener('pointermove', onMove);
+              document.addEventListener('pointerup', onUp);
             }}
           >
             <div className='progress-track'>
               <div
                 className='progress-fill'
-                style={{ width: `${progress}%` }}
-              />
-              <div
-                className='progress-thumb'
-                style={{
-                  left: `${progress}%`,
-                  transform: isScrubbing
-                    ? 'translate(-50%, -50%) scale(1.5)'
-                    : 'translate(-50%, -50%)',
-                }}
+                style={{ width: `${progressPercent}%` }}
               />
             </div>
+            <div
+              className='progress-thumb'
+              style={{ left: `${progressPercent}%` }}
+            />
           </div>
-          <div className='time-display'>{formatTime(duration)}</div>
-          {pipSupported && (
-            <button
-              type='button'
-              className={`ctrl-btn ${isPiPActive ? 'pip-active' : ''}`}
-              onClick={(e) => {
-                markUiInteraction(e);
-                togglePiP();
-              }}
-              title='Picture-in-Picture'
-              aria-label='Picture-in-Picture'
-            >
-              {Icons.pip}
-            </button>
-          )}
-          {hasAirPlay && (
-            <button
-              type='button'
-              className='ctrl-btn'
-              onClick={(e) => {
-                markUiInteraction(e);
-                const video = getTechVideoEl();
-                video?.webkitShowPlaybackTargetPicker?.();
-              }}
-              title='AirPlay'
-              aria-label='AirPlay'
-            >
-              {Icons.airplay}
-            </button>
-          )}
-          <button
-            type='button'
-            className='ctrl-btn'
-            onClick={(e) => {
-              markUiInteraction(e);
-              toggleFullscreen();
-            }}
-            title='Fullscreen'
-            aria-label={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
-          >
-            {isFullscreen ? Icons.exitFullscreen : Icons.fullscreen}
-          </button>
+
+          <div className='controls-row'>
+            <div className='flex items-center gap-4'>
+              <button className='control-button' onClick={togglePlay}>
+                {isPlaying ? Icons.Pause() : Icons.Play()}
+              </button>
+              {hasNextEpisode && (
+                <button
+                  className='control-button'
+                  onClick={() => {
+                    pendingAutoplayRef.current = true;
+                    tryPlayNow();
+                    onNextEpisode?.();
+                  }}
+                >
+                  {Icons.Next()}
+                </button>
+              )}
+              <div className='time-text'>
+                {formatTime(seekingTime ?? currentTime)} /{' '}
+                {formatTime(duration)}
+              </div>
+            </div>
+
+            <div className='flex items-center gap-2'>
+              <button
+                className='control-button'
+                onClick={toggleRotatedFullscreen}
+                title='Page Fullscreen'
+              >
+                {Icons.Rotate()}
+              </button>
+              {pipSupported && (
+                <button
+                  className='control-button'
+                  onClick={() => {
+                    const v = getTechVideoEl();
+                    if (document.pictureInPictureElement)
+                      document.exitPictureInPicture();
+                    else if (v?.requestPictureInPicture)
+                      v.requestPictureInPicture();
+                    else if ((v as any).webkitSetPresentationMode)
+                      (v as any).webkitSetPresentationMode(
+                        'picture-in-picture',
+                      );
+                  }}
+                >
+                  {Icons.Pip()}
+                </button>
+              )}
+
+              {hasAirPlay && (
+                <button
+                  className='control-button'
+                  onClick={() =>
+                    (
+                      getTechVideoEl() as any
+                    )?.webkitShowPlaybackTargetPicker?.()
+                  }
+                >
+                  {Icons.Airplay()}
+                </button>
+              )}
+
+              <button className='control-button' onClick={toggleFullscreen}>
+                {isFullscreen ? Icons.Minimize() : Icons.Maximize()}
+              </button>
+            </div>
+          </div>
         </div>
 
         {settingsOpen && (
           <div
-            className='settings-popup'
-            // FIX: Native picker support (keep awake on focus, release on blur)
-            onFocusCapture={() => {
-              if (uiInteractTimeoutRef.current)
-                clearTimeout(uiInteractTimeoutRef.current);
-              setIsUiInteracting(true);
-              const p = playerRef.current;
-              if (p) {
-                p.userActive?.(true);
-                p.inactivityTimeout?.(0);
-              }
-            }}
-            onBlurCapture={() => {
-              markUiInteraction();
-            }}
-            onPointerDown={(e) => markUiInteraction(e, { stop: true })}
-            onPointerMove={(e) => markUiInteraction(e, { stop: true })}
-            onPointerUp={(e) => markUiInteraction(e, { stop: true })}
-            onWheel={(e) => markUiInteraction(e, { stop: true })}
-            onKeyDown={(e) => markUiInteraction(e, { stop: true })}
-            onScrollCapture={(e) => markUiInteraction(e, { stop: true })}
+            className='settings-overlay'
+            onClick={() => setSettingsOpen(false)}
           >
-            <div className='settings-header'>Settings</div>
-            <button
-              type='button'
-              className='settings-item'
-              onClick={(e) => {
-                markUiInteraction(e, { stop: true });
-                toggleCas();
-              }}
+            <div
+              className='settings-popup'
+              onClick={(e) => e.stopPropagation()}
             >
-              <span>Enhance HD</span>
-              <div className={`toggle ${casEnabled ? 'on' : ''}`}>
-                <div className='toggle-knob' />
+              <div className='settings-header'>
+                <span className='settings-title'>Settings</span>
               </div>
-            </button>
-            <div className='settings-item'>
-              <span>Speed</span>
-              <select
-                value={playbackRate}
-                onPointerDown={(e) => markUiInteraction(e, { stop: true })}
-                onChange={(e) => {
-                  changeSpeed(parseFloat(e.target.value));
-                  const p = playerRef.current;
-                  p?.userActive?.(true);
-                  p?.reportUserActivity?.({});
-                }}
-              >
-                {[0.5, 0.75, 1, 1.25, 1.5, 2].map((r) => (
-                  <option key={r} value={r}>
-                    {r}x
-                  </option>
-                ))}
-              </select>
+              <div className='settings-content'>
+                <div className='setting-item'>
+                  <span>Speed</span>
+                  <select
+                    className='setting-select'
+                    value={playbackRate}
+                    onChange={(e) => {
+                      const r = parseFloat(e.target.value);
+                      setPlaybackRate(r);
+                      playerRef.current?.playbackRate(r);
+                      localStorage.setItem(
+                        `lunatv_speed_${seriesId}`,
+                        String(r),
+                      );
+                    }}
+                  >
+                    {[0.5, 0.75, 1, 1.25, 1.5, 2].map((r) => (
+                      <option key={r} value={r}>
+                        {r}x
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div
+                  className='setting-item'
+                  onClick={() => {
+                    const n = !casEnabled;
+                    setCasEnabled(n);
+                    casEnabledRef.current = n;
+                    setTechEpoch((prev) => prev + 1);
+                    localStorage.setItem('lunatv_cas_enabled', String(n));
+                    const v = getTechVideoEl();
+                    if (v) v.crossOrigin = n ? 'anonymous' : null;
+                  }}
+                >
+                  <span>Enhance HD</span>
+                  <div
+                    className={`toggle-switch ${casEnabled ? 'active' : ''}`}
+                  >
+                    <div className='toggle-knob' />
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         )}
       </div>
-      {seekingTime !== null && (
-        <div className='seek-overlay'>
-          <div className='seek-time'>
-            {formatTime(seekingTime)} / {formatTime(duration)}
-          </div>
-          <div className='seek-bar'>
-            <div
-              className='seek-fill'
-              style={{ width: `${(seekingTime / (duration || 1)) * 100}%` }}
-            />
-          </div>
-        </div>
-      )}
     </div>
   );
 }
 
 const CSS = `
-.player-container{position:relative;width:100%;height:100%;background:#000;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;user-select:none}
-.video-wrapper{position:absolute;inset:0}
-.player-container .video-js{position:absolute;inset:0;width:100%;height:100%}
-.player-container .vjs-control-bar,.player-container .vjs-big-play-button,.player-container .vjs-touch-overlay,.player-container .vjs-mobile-ui-play-toggle,.player-container .vjs-loading-spinner,.player-container .vjs-modal-dialog{display:none!important}
-.icon{width:24px;height:24px;display:block}
-.tap-layer{position:absolute;inset:0;z-index:9;pointer-events:auto;background:transparent}
-
-/* Controls Container */
-.player-controls{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:space-between;opacity:0;transition:opacity .3s;pointer-events:none;z-index:10}
-.player-controls.visible{opacity:1}
-.player-controls::before{content:'';position:absolute;inset:0;pointer-events:none;background:linear-gradient(to bottom,rgba(0,0,0,.6) 0%,transparent 25%,transparent 75%,rgba(0,0,0,.8) 100%)}
-
-.top-bar,.bottom-bar{position:relative;pointer-events:none;z-index:11}
-.top-bar,.bottom-bar{display:flex;align-items:center;gap:8px;padding:12px 16px}
-.top-bar{justify-content:flex-end}
-.bottom-bar{padding-bottom:max(12px,env(safe-area-inset-bottom))}
-
-.ctrl-btn{width:44px;height:44px;display:flex;align-items:center;justify-content:center;background:transparent;border:none;color:#fff;cursor:pointer;padding:0;border-radius:8px;transition:background .2s;flex-shrink:0}
-.ctrl-btn:hover{background:rgba(255,255,255,.1)}
-.ctrl-btn:active{background:rgba(255,255,255,.2);transform:scale(.95)}
-.ctrl-btn.pip-active{color:#4CAF50}
-.speed-btn{font-size:13px;font-weight:600;min-width:44px}
-
-.center-area{flex:1;display:flex;align-items:center;justify-content:center;gap:20px;pointer-events:none;z-index:11}
-.big-play-btn{width:80px;height:80px;border-radius:50%;background:rgba(0,0,0,0.6);border:2px solid rgba(255,255,255,0.8);color:white;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px);cursor:pointer;pointer-events:auto;transition:all 0.2s}
-.big-play-btn:hover{transform:scale(1.1);background:rgba(0,0,0,0.8)}
-.big-play-btn:active{transform:scale(0.95)}
-
-.rotate-fullscreen-btn{position:absolute;left:16px;top:50%;transform:translateY(-50%);width:44px;height:44px;border-radius:50%;background:rgba(0,0,0,.5);border:1px solid rgba(255,255,255,.3);color:#fff;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px);transition:transform .2s,background .2s;cursor:pointer;z-index:12;pointer-events:none}
-.player-controls.visible .rotate-fullscreen-btn { pointer-events: auto; }
-.rotate-fullscreen-btn:hover{background:rgba(0,0,0,.7)}
-.rotate-fullscreen-btn:active{transform:translateY(-50%) scale(.95)}
-
-.time-display{font-size:13px;color:#fff;font-variant-numeric:tabular-nums;min-width:45px;text-align:center;flex-shrink:0}
-.progress-bar{flex:1;height:44px;display:flex;align-items:center;cursor:pointer;padding:0 4px;min-width:60px;touch-action:none}
-.progress-track{position:relative;width:100%;height:4px;background:rgba(255,255,255,.3);border-radius:2px}
-.progress-fill{height:100%;background:#4CAF50;border-radius:2px}
-.progress-thumb{position:absolute;top:50%;width:14px;height:14px;background:#fff;border-radius:50%;transform:translate(-50%,-50%);box-shadow:0 2px 4px rgba(0,0,0,.3)}
-
-/* Settings Popup */
-.settings-popup{position:absolute;top:60px;right:16px;background:rgba(28,28,30,.95);backdrop-filter:blur(20px);border-radius:12px;padding:8px 0;min-width:200px;border:1px solid rgba(255,255,255,.1);max-height:70vh;overflow-y:auto;-webkit-overflow-scrolling:touch;scrollbar-width:thin; z-index: 12; pointer-events: auto;}
-
-.settings-header{padding:12px 16px;font-size:15px;font-weight:600;color:#fff;border-bottom:1px solid rgba(255,255,255,.1)}
-.settings-item{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;color:#fff;cursor:pointer;font-size:14px;width:100%;border:none;background:transparent;text-align:left}
-.settings-item:hover{background:rgba(255,255,255,.05)}
-.settings-item select{background:transparent;border:1px solid rgba(255,255,255,.2);color:#fff;padding:4px 8px;border-radius:6px;font-size:13px}
-.toggle{width:44px;height:26px;background:#555;border-radius:13px;position:relative;transition:background .2s;flex-shrink:0}
-.toggle.on{background:#4CAF50}
-.toggle-knob{position:absolute;top:3px;left:3px;width:20px;height:20px;background:#fff;border-radius:50%;transition:left .2s}
-.toggle.on .toggle-knob { left: 21px; }
-
-.seek-overlay{position:absolute;inset:0;background:rgba(0,0,0,.7);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:50;pointer-events:none}
-.seek-time{font-size:32px;font-weight:600;color:#fff;margin-bottom:16px}
-.seek-bar{width:70%;height:6px;background:rgba(255,255,255,.3);border-radius:3px;overflow:hidden}
-.seek-fill{height:100%;background:#4CAF50;border-radius:2px}
-.videojs-rotated-fullscreen{position:fixed!important;width:100vh!important;height:100vw!important;top:50%!important;left:50%!important;transform:translate(-50%,-50%) rotate(90deg)!important;z-index:99999!important;background:#000!important}
-@supports(width:100dvh){.videojs-rotated-fullscreen{width:100dvh!important;height:100dvw!important}}
-@media(max-width:480px){.ctrl-btn{width:40px;height:40px}.time-display{font-size:12px;min-width:38px}.speed-btn{font-size:12px;min-width:40px}}
-
-/* FIX: Explicitly bless the popup so it works when controls are visible */
-.player-controls.visible .top-bar,.player-controls.visible .bottom-bar,.player-controls.visible .big-play-btn, .player-controls.visible .settings-popup {pointer-events:auto}
-.player-controls:not(.visible) *{pointer-events:none!important}
+.player-container { position: relative; width: 100%; height: 100%; background: #000; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; user-select: none; }
+.video-wrapper { position: absolute; inset: 0; z-index: 1; }
+.video-wrapper .vjs-loading-spinner, .video-wrapper .vjs-big-play-button, .video-wrapper .vjs-error-display, .video-wrapper .vjs-modal-dialog, .video-wrapper .vjs-poster, .video-wrapper .vjs-text-track-display, .video-wrapper .vjs-hidden, .video-wrapper .vjs-control-bar, .video-wrapper .vjs-dock-text, .video-wrapper .vjs-dock-shelf { display: none !important; pointer-events: none !important; }
+.video-wrapper .vjs-tech { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; }
+.video-wrapper .vjs-tech { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; }
+.tap-layer { position: absolute; inset: 0; z-index: 5; pointer-events: auto; background: transparent; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; cursor: pointer; }
+.player-controls { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: space-between; opacity: 0; transition: opacity 0.3s ease; pointer-events: none; z-index: 10; }
+.player-controls.visible { opacity: 1; }
+.player-controls.visible .player-header, .player-controls.visible .player-bottom, .player-controls.visible .settings-popup, .player-controls.visible .settings-overlay, .player-controls.visible .absolute.inset-0.flex > div { pointer-events: auto; }
+.player-header { padding: 20px; background: linear-gradient(to bottom, rgba(0,0,0,0.8) 0%, transparent 100%); display: flex; justify-content: flex-end; align-items: center; }
+.player-bottom { padding: 0 20px 24px; background: linear-gradient(to top, rgba(0,0,0,0.9) 0%, transparent 100%); display: flex; flex-direction: column; gap: 12px; }
+.control-button { width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; color: rgba(255,255,255,0.9); background: transparent; border: none; cursor: pointer; border-radius: 50%; transition: all 0.2s; }
+.control-button:hover { background: rgba(255,255,255,0.1); color: #fff; }
+.control-button:active { transform: scale(0.95); }
+.progress-bar { height: 24px; display: flex; align-items: center; cursor: pointer; position: relative; touch-action: none; width: 100%; group; }
+.progress-track { width: 100%; height: 4px; background: rgba(255, 255, 255, 0.3); border-radius: 2px; position: relative; overflow: hidden; transition: height 0.2s; }
+.progress-bar:hover .progress-track { height: 6px; }
+.progress-fill { height: 100%; background: #3b82f6; border-radius: 2px; }
+.progress-thumb { position: absolute; top: 50%; width: 12px; height: 12px; background: white; border-radius: 50%; transform: translate(-50%, -50%) scale(0); box-shadow: 0 2px 4px rgba(0,0,0,0.5); pointer-events: none; transition: transform 0.2s; }
+.progress-bar:hover .progress-thumb { transform: translate(-50%, -50%) scale(1); }
+.time-text { color: rgba(255, 255, 255, 0.8); font-size: 13px; font-weight: 500; font-variant-numeric: tabular-nums; letter-spacing: 0.5px; }
+.controls-row { display: flex; justify-content: space-between; align-items: center; }
+.seek-overlay-container { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 30; pointer-events: none; animation: fadeIn 0.2s; }
+.seek-info-pill { background: rgba(0, 0, 0, 0.8); backdrop-filter: blur(8px); padding: 12px 24px; border-radius: 99px; display: flex; align-items: center; gap: 8px; border: 1px solid rgba(255,255,255,0.1); }
+.seek-time-large { color: #fff; font-size: 20px; font-weight: 700; }
+.settings-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.5); z-index: 50; animation: fadeIn 0.2s; }
+.settings-popup { position: absolute; right: 20px; bottom: 80px; width: 260px; background: rgba(28, 28, 28, 0.95); backdrop-filter: blur(20px); border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 4px 24px rgba(0,0,0,0.5); animation: slideUp 0.2s; }
+.settings-header { padding: 14px 16px; border-bottom: 1px solid rgba(255,255,255,0.1); font-weight: 600; font-size: 14px; color: #fff; }
+.setting-item { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; color: rgba(255,255,255,0.9); font-size: 14px; cursor: pointer; }
+.setting-item:hover { background: rgba(255,255,255,0.05); }
+.setting-select { background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.2); color: white; padding: 4px 8px; border-radius: 6px; font-size: 12px; outline: none; }
+.toggle-switch { width: 40px; height: 22px; background: rgba(255,255,255,0.2); border-radius: 11px; position: relative; transition: 0.2s; }
+.toggle-switch.active { background: #3b82f6; }
+.toggle-knob { width: 18px; height: 18px; background: white; border-radius: 50%; position: absolute; top: 2px; left: 2px; transition: 0.2s; }
+.toggle-switch.active .toggle-knob { transform: translateX(18px); }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes slideUp { from { transform: translateY(10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+.videojs-rotated-fullscreen { position: fixed !important; width: 100vh !important; height: 100vw !important; top: 50% !important; left: 50% !important; transform: translate(-50%, -50%) rotate(90deg) !important; z-index: 99999 !important; background: #000 !important; }
 `;
