@@ -18,7 +18,7 @@ const STORAGE_TYPE =
 // 生成签名
 async function generateSignature(
   data: string,
-  secret: string
+  secret: string,
 ): Promise<string> {
   const encoder = new TextEncoder();
   const keyData = encoder.encode(secret);
@@ -30,7 +30,7 @@ async function generateSignature(
     keyData,
     { name: 'HMAC', hash: 'SHA-256' },
     false,
-    ['sign']
+    ['sign'],
   );
 
   // 生成签名
@@ -46,23 +46,23 @@ async function generateSignature(
 async function generateAuthCookie(
   username?: string,
   password?: string,
-  role?: 'owner' | 'admin' | 'user'
+  role?: 'owner' | 'admin' | 'user',
 ): Promise<string> {
   const authData: any = { role: role || 'user' };
-  
+
   // NEVER store plaintext password in cookie, even for localstorage mode.
   // We will sign the cookie using the admin password as the secret key.
-  
+
   // Use a default username for localstorage mode if none provided
   const effectiveUsername = username || 'admin';
   authData.username = effectiveUsername;
-  
+
   if (process.env.PASSWORD) {
     // Sign the username + timestamp using the password as secret
     const timestamp = Date.now();
     const dataToSign = `${effectiveUsername}:${timestamp}`;
     const signature = await generateSignature(dataToSign, process.env.PASSWORD);
-    
+
     authData.signature = signature;
     authData.timestamp = timestamp;
   }
@@ -73,13 +73,13 @@ async function generateAuthCookie(
 export async function POST(req: NextRequest) {
   try {
     console.log('[Login] Request received. Storage Type:', STORAGE_TYPE);
-    
+
     // Check Env Vars Presence
     console.log('[Login] Env Check:', {
       hasPassword: !!process.env.PASSWORD,
       passwordLen: process.env.PASSWORD?.length,
       username: process.env.USERNAME || '(default: admin)',
-      next_public_storage_type: process.env.NEXT_PUBLIC_STORAGE_TYPE
+      next_public_storage_type: process.env.NEXT_PUBLIC_STORAGE_TYPE,
     });
 
     // 本地 / localStorage 模式——仅校验固定密码
@@ -94,8 +94,8 @@ export async function POST(req: NextRequest) {
         response.cookies.set('auth', '', {
           path: '/',
           expires: new Date(0),
-          sameSite: 'lax', 
-          httpOnly: false, 
+          sameSite: 'lax',
+          httpOnly: false,
           secure: process.env.NODE_ENV === 'production',
         });
         return response;
@@ -103,7 +103,7 @@ export async function POST(req: NextRequest) {
 
       const body = await req.json();
       const { password, username } = body;
-      
+
       console.log('[Login] Body:', { username, passwordProvided: !!password });
 
       if (typeof password !== 'string' || !password) {
@@ -113,10 +113,15 @@ export async function POST(req: NextRequest) {
 
       // Check password first
       if (password !== envPassword) {
-        console.log('[Login] Password mismatch. Provided len:', password.length, 'Expected len:', envPassword.length);
+        console.log(
+          '[Login] Password mismatch. Provided len:',
+          password.length,
+          'Expected len:',
+          envPassword.length,
+        );
         return NextResponse.json(
           { ok: false, error: '密码错误' },
-          { status: 401 }
+          { status: 401 },
         );
       }
 
@@ -124,10 +129,15 @@ export async function POST(req: NextRequest) {
       if (username) {
         const envUsername = (process.env.USERNAME || 'admin').toLowerCase();
         if (username.toLowerCase() !== envUsername) {
-          console.log('[Login] Username mismatch:', username, 'Expected:', envUsername);
+          console.log(
+            '[Login] Username mismatch:',
+            username,
+            'Expected:',
+            envUsername,
+          );
           return NextResponse.json(
             { ok: false, error: '用户名或密码错误' },
-            { status: 401 }
+            { status: 401 },
           );
         }
       }
@@ -135,11 +145,7 @@ export async function POST(req: NextRequest) {
       console.log('[Login] LocalStorage Success');
       // 验证成功，设置认证cookie
       const response = NextResponse.json({ ok: true });
-      const cookieValue = await generateAuthCookie(
-        'admin',
-        password,
-        'owner'
-      ); 
+      const cookieValue = await generateAuthCookie('admin', password, 'owner');
       const expires = new Date();
       expires.setDate(expires.getDate() + 7); // 7天过期
 
@@ -148,8 +154,28 @@ export async function POST(req: NextRequest) {
         expires,
         sameSite: 'lax',
         httpOnly: false, // PWA compabitility
-        secure: process.env.NODE_ENV === 'production' && process.env.DISABLE_SECURE_COOKIES !== 'true',
+        secure:
+          process.env.NODE_ENV === 'production' &&
+          process.env.DISABLE_SECURE_COOKIES !== 'true',
       });
+
+      // Set public UI cookie
+      response.cookies.set(
+        'auth-user',
+        encodeURIComponent(
+          JSON.stringify({
+            username: 'admin',
+            role: 'owner',
+          }),
+        ),
+        {
+          path: '/',
+          expires,
+          sameSite: 'lax',
+          httpOnly: false,
+          secure: process.env.NODE_ENV === 'production',
+        },
+      );
 
       return response;
     }
@@ -157,7 +183,10 @@ export async function POST(req: NextRequest) {
     // 数据库 / redis 模式——校验用户名并尝试连接数据库
     console.log('[Login] Mode: DB/Redis');
     const { username, password } = await req.json();
-    console.log('[Login] Request Data:', { username, passwordProvided: !!password });
+    console.log('[Login] Request Data:', {
+      username,
+      passwordProvided: !!password,
+    });
 
     if (!username || typeof username !== 'string') {
       return NextResponse.json({ error: '用户名不能为空' }, { status: 400 });
@@ -170,41 +199,64 @@ export async function POST(req: NextRequest) {
     const envUsername = (process.env.USERNAME || 'admin').toLowerCase();
     const envPassword = process.env.PASSWORD;
 
-    console.log('[Login] Check Env Match:', { lowerUsername, envUsername, passwordMatch: password === envPassword });
+    console.log('[Login] Check Env Match:', {
+      lowerUsername,
+      envUsername,
+      passwordMatch: password === envPassword,
+    });
 
     // 可能是站长，直接读环境变量
-    if (
-      lowerUsername === envUsername &&
-      password === envPassword
-    ) {
+    if (lowerUsername === envUsername && password === envPassword) {
       console.log('[Login] Owner Success (Environment Variable Match)');
       // 验证成功，设置认证cookie
       const response = NextResponse.json({ ok: true });
       const cookieValue = await generateAuthCookie(
-        lowerUsername, 
+        lowerUsername,
         password,
-        'owner'
-      ); 
+        'owner',
+      );
       const expires = new Date();
       expires.setDate(expires.getDate() + 7); // 7天过期
 
       response.cookies.set('auth', cookieValue, {
         path: '/',
         expires,
-        sameSite: 'lax', 
-        httpOnly: false, 
-        secure: process.env.NODE_ENV === 'production' && process.env.DISABLE_SECURE_COOKIES !== 'true',
+        sameSite: 'lax',
+        httpOnly: false,
+        secure:
+          process.env.NODE_ENV === 'production' &&
+          process.env.DISABLE_SECURE_COOKIES !== 'true',
       });
+
+      // Set public UI cookie
+      response.cookies.set(
+        'auth-user',
+        encodeURIComponent(
+          JSON.stringify({
+            username: lowerUsername,
+            role: 'owner',
+          }),
+        ),
+        {
+          path: '/',
+          expires,
+          sameSite: 'lax',
+          httpOnly: false,
+          secure: process.env.NODE_ENV === 'production',
+        },
+      );
 
       return response;
     } else if (lowerUsername === envUsername) {
-       console.log('[Login] Owner Username matched but Password mismatch');
-       return NextResponse.json({ error: '用户名或密码错误' }, { status: 401 });
+      console.log('[Login] Owner Username matched but Password mismatch');
+      return NextResponse.json({ error: '用户名或密码错误' }, { status: 401 });
     }
 
     console.log('[Login] Checking DB for user:', lowerUsername);
     const config = await getConfig();
-    const user = config.UserConfig.Users.find((u) => u.username.toLowerCase() === lowerUsername);
+    const user = config.UserConfig.Users.find(
+      (u) => u.username.toLowerCase() === lowerUsername,
+    );
     if (user && user.banned) {
       return NextResponse.json({ error: '用户被封禁' }, { status: 401 });
     }
@@ -213,16 +265,16 @@ export async function POST(req: NextRequest) {
     try {
       const pass = await db.verifyUser(lowerUsername, password);
       console.log('[Login] DB verifyUser result:', pass);
-      
+
       if (!pass) {
         // Fallback
         const passOriginal = await db.verifyUser(username, password);
         console.log('[Login] DB verifyUser(original) result:', passOriginal);
         if (!passOriginal) {
-             return NextResponse.json(
-              { error: '用户名或密码错误' },
-              { status: 401 }
-            );
+          return NextResponse.json(
+            { error: '用户名或密码错误' },
+            { status: 401 },
+          );
         }
       }
 
@@ -230,20 +282,40 @@ export async function POST(req: NextRequest) {
       // 验证成功，设置认证cookie
       const response = NextResponse.json({ ok: true });
       const cookieValue = await generateAuthCookie(
-        lowerUsername, 
+        lowerUsername,
         password,
-        user?.role || 'user'
-      ); 
+        user?.role || 'user',
+      );
       const expires = new Date();
       expires.setDate(expires.getDate() + 7); // 7天过期
 
       response.cookies.set('auth', cookieValue, {
         path: '/',
         expires,
-        sameSite: 'lax', 
-        httpOnly: false, 
-        secure: process.env.NODE_ENV === 'production' && process.env.DISABLE_SECURE_COOKIES !== 'true',
+        sameSite: 'lax',
+        httpOnly: false,
+        secure:
+          process.env.NODE_ENV === 'production' &&
+          process.env.DISABLE_SECURE_COOKIES !== 'true',
       });
+
+      // Set public UI cookie
+      response.cookies.set(
+        'auth-user',
+        encodeURIComponent(
+          JSON.stringify({
+            username: lowerUsername,
+            role: user?.role || 'user',
+          }),
+        ),
+        {
+          path: '/',
+          expires,
+          sameSite: 'lax',
+          httpOnly: false,
+          secure: process.env.NODE_ENV === 'production',
+        },
+      );
 
       return response;
     } catch (err) {

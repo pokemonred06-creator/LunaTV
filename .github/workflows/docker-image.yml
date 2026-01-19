@@ -9,9 +9,9 @@ on:
         default: 'latest'
         type: string
   push:
-    branches: [ main, master ]
+    branches: [main, master]
   pull_request:
-    branches: [ main, master ]
+    branches: [main, master]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -35,8 +35,10 @@ jobs:
 
     steps:
       - name: Prepare platform name
+        id: prepare
         run: |
-          echo "PLATFORM_NAME=${{ matrix.platform }}" | sed 's|/|-|g' >> $GITHUB_ENV
+          platform=${{ matrix.platform }}
+          echo "platform_name=${platform//\//-}" >> $GITHUB_OUTPUT
 
       - name: Checkout source code
         uses: actions/checkout@v4
@@ -84,7 +86,7 @@ jobs:
       - name: Upload digest
         uses: actions/upload-artifact@v4
         with:
-          name: digests-${{ env.PLATFORM_NAME }}
+          name: digests-${{ steps.prepare.outputs.platform_name }}
           path: /tmp/digests/*
           if-no-files-found: error
           retention-days: 1
