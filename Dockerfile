@@ -33,7 +33,7 @@ COPY . .
 RUN rm -rf .next
 
 # 禁用 Next.js 遥测
-ENV NEXT_TELEMETRY_DISABLED 1
+ENV NEXT_TELEMETRY_DISABLED=1
 
 # 构建
 RUN npm run build
@@ -42,9 +42,9 @@ RUN npm run build
 FROM base AS runner
 WORKDIR /app
 
-ENV NODE_ENV production
-ENV NEXT_TELEMETRY_DISABLED 1
-ENV DISABLE_SECURE_COOKIES true
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV DISABLE_SECURE_COOKIES=true
 
 # 创建非 root 用户
 RUN addgroup --system --gid 1001 nodejs
