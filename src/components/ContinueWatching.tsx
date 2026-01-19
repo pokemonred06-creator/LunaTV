@@ -1,7 +1,6 @@
- 
 'use client';
 
-import { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 
 import type { PlayRecord } from '@/lib/db.client';
 import {
@@ -25,108 +24,133 @@ export default function ContinueWatching({ className }: ContinueWatchingProps) {
   >([]);
   const [loading, setLoading] = useState(true);
 
-  // 处理播放记录数据更新的函数
-  const updatePlayRecords = (allRecords: Record<string, PlayRecord>) => {
-    // 将记录转换为数组并根据 save_time 由近到远排序
-    const recordsArray = Object.entries(allRecords).map(([key, record]) => ({
-      ...record,
-      key,
-    }));
+  // Memoize the parsing logic to avoid re-creating function on render
+  // Helper to safely parse the compound key (source+id)
+  const parseKey = useCallback((key: string) => {
+    const parts = key.split('+');
+    // Default fallback if key is malformed
+    if (parts.length < 2) return { source: 'douban', id: parts[0] || '' };
+    return { source: parts[0], id: parts[1] };
+  }, []);
 
-    // 按 save_time 降序排序（最新的在前面）
-    const sortedRecords = recordsArray.sort(
-      (a, b) => b.save_time - a.save_time
-    );
+  // Update records and sort by time (newest first)
+  const updatePlayRecords = useCallback(
+    (allRecords: Record<string, PlayRecord>) => {
+      const recordsArray = Object.entries(allRecords).map(([key, record]) => ({
+        ...record,
+        key,
+      }));
 
-    setPlayRecords(sortedRecords);
-  };
+      // Sort descending by save_time
+      recordsArray.sort((a, b) => b.save_time - a.save_time);
+
+      setPlayRecords(recordsArray);
+    },
+    [],
+  );
 
   useEffect(() => {
+    let mounted = true;
+
     const fetchPlayRecords = async () => {
       try {
         setLoading(true);
-
-        // 从缓存或API获取所有播放记录
         const allRecords = await getAllPlayRecords();
-        updatePlayRecords(allRecords);
+        if (mounted) updatePlayRecords(allRecords);
       } catch (error) {
-        console.error('获取播放记录失败:', error);
-        setPlayRecords([]);
+        console.error('Failed to fetch play records:', error);
+        if (mounted) setPlayRecords([]);
       } finally {
-        setLoading(false);
+        if (mounted) setLoading(false);
       }
     };
 
     fetchPlayRecords();
 
-    // 监听播放记录更新事件
+    // Subscribe to DB changes
     const unsubscribe = subscribeToDataUpdates(
       'playRecordsUpdated',
       (newRecords: Record<string, PlayRecord>) => {
-        updatePlayRecords(newRecords);
-      }
+        if (mounted) updatePlayRecords(newRecords);
+      },
     );
 
-    return unsubscribe;
+    return () => {
+      mounted = false;
+      unsubscribe();
+    };
+  }, [updatePlayRecords]);
+
+  // Optimistic UI Delete Handler
+  // Removes the item from screen immediately without waiting for DB sync
+  const handleDelete = useCallback((keyToDelete: string) => {
+    setPlayRecords((prev) => prev.filter((r) => r.key !== keyToDelete));
   }, []);
 
-  // 如果没有播放记录，则不渲染组件
+  const handleClearAll = async () => {
+    // Optimistic clear
+    setPlayRecords([]);
+    await clearAllPlayRecords();
+  };
+
+  // Safe Progress Calculation
+  const getProgress = (record: PlayRecord) => {
+    if (!record.total_time || record.total_time <= 0) return 0;
+    const progress = (record.play_time / record.total_time) * 100;
+    return Math.min(Math.max(progress, 0), 100); // Clamp between 0-100
+  };
+
+  // Don't render empty section (unless loading)
   if (!loading && playRecords.length === 0) {
     return null;
   }
 
-  // 计算播放进度百分比
-  const getProgress = (record: PlayRecord) => {
-    if (record.total_time === 0) return 0;
-    return (record.play_time / record.total_time) * 100;
-  };
-
-  // 从 key 中解析 source 和 id
-  const parseKey = (key: string) => {
-    const [source, id] = key.split('+');
-    return { source, id };
-  };
-
   return (
-    <section className={`mb-8 ${className || ''}`}>
-      <div className='mb-4 flex items-center justify-between'>
+    <section
+      className={`mb-8 animate-in fade-in slide-in-from-bottom-4 duration-500 ${className || ''}`}
+    >
+      <div className='mb-4 flex items-center justify-between px-1'>
         <h2 className='text-xl font-bold text-gray-800 dark:text-gray-200'>
           {convert('继续观看')}
         </h2>
         {!loading && playRecords.length > 0 && (
           <button
-            className='text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
-            onClick={async () => {
-              await clearAllPlayRecords();
-              setPlayRecords([]);
-            }}
+            onClick={handleClearAll}
+            className='group flex items-center gap-1 text-sm text-gray-500 hover:text-red-600 dark:text-gray-400 dark:hover:text-red-400 transition-colors'
+            aria-label={convert('清空播放记录')}
           >
-            {convert('清空')}
+            <span className='text-xs'>{convert('清空')}</span>
           </button>
         )}
       </div>
+
       <ScrollableRow>
         {loading
-          ? // 加载状态显示灰色占位数据
+          ? // Skeletons
             Array.from({ length: 6 }).map((_, index) => (
               <div
-                key={index}
+                key={`skeleton-${index}`}
                 className='min-w-[96px] w-24 sm:min-w-[180px] sm:w-44'
               >
-                <div className='relative aspect-2/3 w-full overflow-hidden rounded-lg bg-gray-200 animate-pulse dark:bg-gray-800'>
-                  <div className='absolute inset-0 bg-gray-300 dark:bg-gray-700'></div>
+                {/* Fixed aspect ratio syntax: aspect-[2/3] -> aspect-2/3 */}
+                <div className='relative aspect-2/3 w-full overflow-hidden rounded-lg bg-gray-200 dark:bg-gray-800'>
+                  <div className='absolute inset-0 bg-linear-to-r from-transparent via-white/20 to-transparent -translate-x-full animate-[shimmer_1.5s_infinite]'></div>
                 </div>
-                <div className='mt-2 h-4 bg-gray-200 rounded animate-pulse dark:bg-gray-800'></div>
-                <div className='mt-1 h-3 bg-gray-200 rounded animate-pulse dark:bg-gray-800'></div>
+                <div className='mt-2 h-4 w-3/4 bg-gray-200 rounded dark:bg-gray-800'></div>
+                <div className='mt-1 h-3 w-1/2 bg-gray-200 rounded dark:bg-gray-800'></div>
               </div>
             ))
-          : // 显示真实数据
+          : // Real Data
             playRecords.map((record) => {
               const { source, id } = parseKey(record.key);
+
+              // Skip rendering if data is corrupted (missing id)
+              if (!id) return null;
+
               return (
                 <div
                   key={record.key}
-                  className='min-w-[96px] w-24 sm:min-w-[180px] sm:w-44'
+                  className='min-w-[96px] w-24 sm:min-w-[180px] sm:w-44 snap-start'
                 >
                   <VideoCard
                     id={id}
@@ -140,12 +164,9 @@ export default function ContinueWatching({ className }: ContinueWatchingProps) {
                     currentEpisode={record.index}
                     query={record.search_title}
                     from='playrecord'
-                    onDelete={() =>
-                      setPlayRecords((prev) =>
-                        prev.filter((r) => r.key !== record.key)
-                      )
-                    }
-                    type={record.total_episodes > 1 ? 'tv' : ''}
+                    // Pass the optimistic delete handler
+                    onDelete={() => handleDelete(record.key)}
+                    type={record.total_episodes > 1 ? 'tv' : 'movie'}
                   />
                 </div>
               );

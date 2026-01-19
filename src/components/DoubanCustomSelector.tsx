@@ -1,8 +1,13 @@
-/* eslint-disable react-hooks/exhaustive-deps */
-
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 
 interface CustomCategory {
   name: string;
@@ -25,28 +30,25 @@ const DoubanCustomSelector: React.FC<DoubanCustomSelectorProps> = ({
   onPrimaryChange,
   onSecondaryChange,
 }) => {
-  // 为不同的选择器创建独立的refs和状态
+  // Merged Refs: These now handle BOTH positioning and scrolling
   const primaryContainerRef = useRef<HTMLDivElement>(null);
-  const primaryButtonRefs = useRef<(HTMLButtonElement | null)[]>([]);
-  const [primaryIndicatorStyle, setPrimaryIndicatorStyle] = useState<{
-    left: number;
-    width: number;
-  }>({ left: 0, width: 0 });
-
   const secondaryContainerRef = useRef<HTMLDivElement>(null);
+
+  const primaryButtonRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const secondaryButtonRefs = useRef<(HTMLButtonElement | null)[]>([]);
-  const [secondaryIndicatorStyle, setSecondaryIndicatorStyle] = useState<{
-    left: number;
-    width: number;
-  }>({ left: 0, width: 0 });
 
-  // 二级选择器滚动容器的ref
-  const secondaryScrollContainerRef = useRef<HTMLDivElement>(null);
+  const [primaryIndicatorStyle, setPrimaryIndicatorStyle] = useState({
+    left: 0,
+    width: 0,
+  });
+  const [secondaryIndicatorStyle, setSecondaryIndicatorStyle] = useState({
+    left: 0,
+    width: 0,
+  });
 
-  // 根据 customCategories 生成一级选择器选项（按 type 分组，电影优先）
-  const primaryOptions = React.useMemo(() => {
+  // 1. Generate Options
+  const primaryOptions = useMemo(() => {
     const types = Array.from(new Set(customCategories.map((cat) => cat.type)));
-    // 确保电影类型排在前面
     const sortedTypes = types.sort((a, b) => {
       if (a === 'movie' && b !== 'movie') return -1;
       if (a !== 'movie' && b === 'movie') return 1;
@@ -58,8 +60,7 @@ const DoubanCustomSelector: React.FC<DoubanCustomSelectorProps> = ({
     }));
   }, [customCategories]);
 
-  // 根据选中的一级选项生成二级选择器选项
-  const secondaryOptions = React.useMemo(() => {
+  const secondaryOptions = useMemo(() => {
     if (!primarySelection) return [];
     return customCategories
       .filter((cat) => cat.type === primarySelection)
@@ -69,159 +70,172 @@ const DoubanCustomSelector: React.FC<DoubanCustomSelectorProps> = ({
       }));
   }, [customCategories, primarySelection]);
 
-  // 处理二级选择器的鼠标滚轮事件（原生 DOM 事件）
-  const handleSecondaryWheel = React.useCallback((e: WheelEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const container = secondaryScrollContainerRef.current;
-    if (container) {
-      const scrollAmount = e.deltaY * 2;
-      container.scrollLeft += scrollAmount;
-    }
-  }, []);
-
-  // 添加二级选择器的鼠标滚轮事件监听器
+  // 2. Ref Hygiene
   useEffect(() => {
-    const scrollContainer = secondaryScrollContainerRef.current;
-    const capsuleContainer = secondaryContainerRef.current;
-
-    if (scrollContainer && capsuleContainer) {
-      // 同时监听滚动容器和胶囊容器的滚轮事件
-      scrollContainer.addEventListener('wheel', handleSecondaryWheel, {
-        passive: false,
-      });
-      capsuleContainer.addEventListener('wheel', handleSecondaryWheel, {
-        passive: false,
-      });
-
-      return () => {
-        scrollContainer.removeEventListener('wheel', handleSecondaryWheel);
-        capsuleContainer.removeEventListener('wheel', handleSecondaryWheel);
-      };
-    }
-  }, [handleSecondaryWheel]);
-
-  // 当二级选项变化时重新添加事件监听器
+    primaryButtonRefs.current = [];
+  }, [primaryOptions.length]);
   useEffect(() => {
-    const scrollContainer = secondaryScrollContainerRef.current;
-    const capsuleContainer = secondaryContainerRef.current;
+    secondaryButtonRefs.current = [];
+  }, [secondaryOptions.length]);
 
-    if (scrollContainer && capsuleContainer && secondaryOptions.length > 0) {
-      // 重新添加事件监听器
-      scrollContainer.addEventListener('wheel', handleSecondaryWheel, {
-        passive: false,
-      });
-      capsuleContainer.addEventListener('wheel', handleSecondaryWheel, {
-        passive: false,
-      });
-
-      return () => {
-        scrollContainer.removeEventListener('wheel', handleSecondaryWheel);
-        capsuleContainer.removeEventListener('wheel', handleSecondaryWheel);
-      };
+  // 3. Auto-select defaults
+  useEffect(() => {
+    if (primaryOptions.length > 0 && !primarySelection) {
+      onPrimaryChange(primaryOptions[0].value);
     }
-  }, [handleSecondaryWheel, secondaryOptions]);
+  }, [primaryOptions, primarySelection, onPrimaryChange]);
 
-  // 更新指示器位置的通用函数
-  const updateIndicatorPosition = (
-    activeIndex: number,
-    containerRef: React.RefObject<HTMLDivElement | null>,
-    buttonRefs: React.MutableRefObject<(HTMLButtonElement | null)[]>,
-    setIndicatorStyle: React.Dispatch<
-      React.SetStateAction<{ left: number; width: number }>
-    >
-  ) => {
-    if (
-      activeIndex >= 0 &&
-      buttonRefs.current[activeIndex] &&
-      containerRef.current
-    ) {
-      const timeoutId = setTimeout(() => {
-        const button = buttonRefs.current[activeIndex];
-        const container = containerRef.current;
-        if (button && container) {
-          const buttonRect = button.getBoundingClientRect();
-          const containerRect = container.getBoundingClientRect();
+  useEffect(() => {
+    if (secondaryOptions.length > 0) {
+      const exists = secondaryOptions.find(
+        (opt) => opt.value === secondarySelection,
+      );
+      if (!exists) {
+        onSecondaryChange(secondaryOptions[0].value);
+      }
+    }
+  }, [secondaryOptions, secondarySelection, onSecondaryChange]);
 
-          if (buttonRect.width > 0) {
-            setIndicatorStyle({
-              left: buttonRect.left - containerRect.left,
-              width: buttonRect.width,
-            });
-          }
+  // 4. Indicator Calculation
+  // Since container and scroll are merged, offsetLeft is always correct
+  const updateIndicatorPosition = useCallback(
+    (
+      activeIndex: number,
+      container: HTMLDivElement | null,
+      buttons: (HTMLButtonElement | null)[],
+      setIndicator: React.Dispatch<
+        React.SetStateAction<{ left: number; width: number }>
+      >,
+    ) => {
+      if (activeIndex >= 0 && buttons[activeIndex] && container) {
+        const button = buttons[activeIndex];
+        if (button) {
+          setIndicator({
+            left: button.offsetLeft,
+            width: button.offsetWidth,
+          });
         }
-      }, 0);
-      return () => clearTimeout(timeoutId);
+      } else if (activeIndex === -1) {
+        setIndicator({ left: 0, width: 0 });
+      }
+    },
+    [],
+  );
+
+  // 5. Layout & Resize Handling
+  useLayoutEffect(() => {
+    const handleResize = () => {
+      const pIndex = primaryOptions.findIndex(
+        (opt) => opt.value === primarySelection,
+      );
+      updateIndicatorPosition(
+        pIndex,
+        primaryContainerRef.current,
+        primaryButtonRefs.current,
+        setPrimaryIndicatorStyle,
+      );
+
+      const sIndex = secondaryOptions.findIndex(
+        (opt) => opt.value === secondarySelection,
+      );
+      updateIndicatorPosition(
+        sIndex,
+        secondaryContainerRef.current,
+        secondaryButtonRefs.current,
+        setSecondaryIndicatorStyle,
+      );
+    };
+
+    handleResize();
+
+    // Guard against environments without ResizeObserver
+    if (typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(() => {
+        window.requestAnimationFrame(handleResize);
+      });
+      if (primaryContainerRef.current)
+        observer.observe(primaryContainerRef.current);
+      if (secondaryContainerRef.current)
+        observer.observe(secondaryContainerRef.current);
+      return () => observer.disconnect();
+    } else {
+      // Fallback
+      window.addEventListener('resize', handleResize);
+      return () => window.removeEventListener('resize', handleResize);
+    }
+  }, [
+    primarySelection,
+    secondarySelection,
+    primaryOptions,
+    secondaryOptions,
+    updateIndicatorPosition,
+  ]);
+
+  // 6. Manual Scroll-to-Center (Replaces scrollIntoView)
+  const scrollToActive = (
+    container: HTMLDivElement | null,
+    buttons: (HTMLButtonElement | null)[],
+    selection: string | undefined,
+    options: { value: string }[],
+  ) => {
+    if (!container || !selection) return;
+    const index = options.findIndex((opt) => opt.value === selection);
+    const button = buttons[index];
+
+    if (button) {
+      // Calculate center position
+      const scrollLeft =
+        button.offsetLeft - container.clientWidth / 2 + button.offsetWidth / 2;
+      container.scrollTo({ left: scrollLeft, behavior: 'smooth' });
     }
   };
 
-  // 组件挂载时立即计算初始位置
   useEffect(() => {
-    // 主选择器初始位置
-    if (primaryOptions.length > 0) {
-      const activeIndex = primaryOptions.findIndex(
-        (opt) => opt.value === (primarySelection || primaryOptions[0].value)
-      );
-      updateIndicatorPosition(
-        activeIndex,
-        primaryContainerRef,
-        primaryButtonRefs,
-        setPrimaryIndicatorStyle
-      );
-    }
-
-    // 副选择器初始位置
-    if (secondaryOptions.length > 0) {
-      const activeIndex = secondaryOptions.findIndex(
-        (opt) => opt.value === (secondarySelection || secondaryOptions[0].value)
-      );
-      updateIndicatorPosition(
-        activeIndex,
-        secondaryContainerRef,
-        secondaryButtonRefs,
-        setSecondaryIndicatorStyle
-      );
-    }
-  }, [primaryOptions, secondaryOptions]); // 当选项变化时重新计算
-
-  // 监听主选择器变化
-  useEffect(() => {
-    if (primaryOptions.length > 0) {
-      const activeIndex = primaryOptions.findIndex(
-        (opt) => opt.value === primarySelection
-      );
-      const cleanup = updateIndicatorPosition(
-        activeIndex,
-        primaryContainerRef,
-        primaryButtonRefs,
-        setPrimaryIndicatorStyle
-      );
-      return cleanup;
-    }
-  }, [primarySelection, primaryOptions]);
-
-  // 监听副选择器变化
-  useEffect(() => {
-    if (secondaryOptions.length > 0) {
-      const activeIndex = secondaryOptions.findIndex(
-        (opt) => opt.value === secondarySelection
-      );
-      const cleanup = updateIndicatorPosition(
-        activeIndex,
-        secondaryContainerRef,
-        secondaryButtonRefs,
-        setSecondaryIndicatorStyle
-      );
-      return cleanup;
-    }
+    scrollToActive(
+      secondaryContainerRef.current,
+      secondaryButtonRefs.current,
+      secondarySelection,
+      secondaryOptions,
+    );
   }, [secondarySelection, secondaryOptions]);
 
-  // 渲染胶囊式选择器
+  // 7. Optimized Wheel Handler
+  const handleWheel = useCallback((e: WheelEvent) => {
+    const container = e.currentTarget as HTMLDivElement;
+    if (container.scrollWidth <= container.clientWidth) return;
+
+    const isVerticalScroll = Math.abs(e.deltaY) > Math.abs(e.deltaX);
+    if (!isVerticalScroll) return;
+
+    const { scrollLeft, scrollWidth, clientWidth } = container;
+    const delta = e.deltaY;
+
+    const canScrollRight = scrollLeft + clientWidth < scrollWidth - 1;
+    const canScrollLeft = scrollLeft > 1;
+
+    if ((delta > 0 && canScrollRight) || (delta < 0 && canScrollLeft)) {
+      e.preventDefault();
+      // Use rAF for smoother scroll
+      requestAnimationFrame(() => {
+        container.scrollLeft += delta;
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    const el = secondaryContainerRef.current;
+    if (el) {
+      el.addEventListener('wheel', handleWheel, { passive: false });
+      return () => el.removeEventListener('wheel', handleWheel);
+    }
+  }, [handleWheel, secondaryOptions]);
+
+  // Render Helper
   const renderCapsuleSelector = (
     options: { label: string; value: string }[],
     activeValue: string | undefined,
     onChange: (value: string) => void,
-    isPrimary = false
+    isPrimary: boolean,
   ) => {
     const containerRef = isPrimary
       ? primaryContainerRef
@@ -234,18 +248,17 @@ const DoubanCustomSelector: React.FC<DoubanCustomSelectorProps> = ({
     return (
       <div
         ref={containerRef}
-        className='relative inline-flex bg-gray-200/60 rounded-full p-0.5 sm:p-1 dark:bg-gray-700/60 backdrop-blur-sm'
+        className='relative flex items-center overflow-x-auto bg-gray-200/60 dark:bg-gray-700/60 rounded-full p-1 backdrop-blur-sm [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]'
       >
-        {/* 滑动的白色背景指示器 */}
-        {indicatorStyle.width > 0 && (
-          <div
-            className='absolute top-0.5 bottom-0.5 sm:top-1 sm:bottom-1 bg-white dark:bg-gray-500 rounded-full shadow-sm transition-all duration-300 ease-out'
-            style={{
-              left: `${indicatorStyle.left}px`,
-              width: `${indicatorStyle.width}px`,
-            }}
-          />
-        )}
+        {/* Animated Background Indicator */}
+        <div
+          className='absolute top-1 bottom-1 bg-white dark:bg-gray-600 rounded-full shadow-sm transition-all duration-300 ease-out pointer-events-none'
+          style={{
+            left: `${indicatorStyle.left}px`,
+            width: `${indicatorStyle.width}px`,
+            opacity: indicatorStyle.width > 0 ? 1 : 0,
+          }}
+        />
 
         {options.map((option, index) => {
           const isActive = activeValue === option.value;
@@ -256,10 +269,10 @@ const DoubanCustomSelector: React.FC<DoubanCustomSelectorProps> = ({
                 buttonRefs.current[index] = el;
               }}
               onClick={() => onChange(option.value)}
-              className={`relative z-10 px-2 py-1 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium rounded-full transition-all duration-200 whitespace-nowrap ${
+              className={`relative z-10 px-4 py-1.5 text-sm font-medium rounded-full transition-colors duration-200 whitespace-nowrap outline-none focus-visible:ring-2 focus-visible:ring-blue-500 shrink-0 ${
                 isActive
-                  ? 'text-gray-900 dark:text-gray-100 cursor-default'
-                  : 'text-gray-700 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100 cursor-pointer'
+                  ? 'text-gray-900 dark:text-gray-100'
+                  : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
               }`}
             >
               {option.label}
@@ -270,47 +283,41 @@ const DoubanCustomSelector: React.FC<DoubanCustomSelectorProps> = ({
     );
   };
 
-  // 如果没有自定义分类，则不渲染任何内容
-  if (!customCategories || customCategories.length === 0) {
-    return null;
-  }
+  if (!customCategories || customCategories.length === 0) return null;
 
   return (
-    <div className='space-y-4 sm:space-y-6'>
-      {/* 两级选择器包装 */}
-      <div className='space-y-3 sm:space-y-4'>
-        {/* 一级选择器 */}
-        <div className='flex flex-col sm:flex-row sm:items-center gap-2'>
-          <span className='text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400 min-w-[48px]'>
-            类型
+    <div className='space-y-4'>
+      {/* Primary Selector */}
+      <div className='flex flex-col sm:flex-row sm:items-center gap-3'>
+        <span className='text-sm font-medium text-gray-500 dark:text-gray-400 min-w-[40px] pt-1 sm:pt-0'>
+          类型
+        </span>
+        <div className='w-full sm:w-auto overflow-hidden'>
+          {renderCapsuleSelector(
+            primaryOptions,
+            primarySelection,
+            onPrimaryChange,
+            true,
+          )}
+        </div>
+      </div>
+
+      {/* Secondary Selector */}
+      {secondaryOptions.length > 0 && (
+        <div className='flex flex-col sm:flex-row sm:items-center gap-3'>
+          <span className='text-sm font-medium text-gray-500 dark:text-gray-400 min-w-[40px] pt-1 sm:pt-0'>
+            片单
           </span>
-          <div className='overflow-x-auto'>
+          <div className='w-full overflow-hidden'>
             {renderCapsuleSelector(
-              primaryOptions,
-              primarySelection || primaryOptions[0]?.value,
-              onPrimaryChange,
-              true
+              secondaryOptions,
+              secondarySelection,
+              onSecondaryChange,
+              false,
             )}
           </div>
         </div>
-
-        {/* 二级选择器 */}
-        {secondaryOptions.length > 0 && (
-          <div className='flex flex-col sm:flex-row sm:items-center gap-2'>
-            <span className='text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400 min-w-[48px]'>
-              片单
-            </span>
-            <div ref={secondaryScrollContainerRef} className='overflow-x-auto'>
-              {renderCapsuleSelector(
-                secondaryOptions,
-                secondarySelection || secondaryOptions[0]?.value,
-                onSecondaryChange,
-                false
-              )}
-            </div>
-          </div>
-        )}
-      </div>
+      )}
     </div>
   );
 };
