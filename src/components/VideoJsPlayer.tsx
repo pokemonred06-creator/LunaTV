@@ -1084,19 +1084,29 @@ export default function VideoJsPlayer({
             className='progress-bar'
             onPointerDown={(e) => {
               const rect = e.currentTarget.getBoundingClientRect();
-              const p = Math.max(
-                0,
-                Math.min(1, (e.clientX - rect.left) / rect.width),
-              );
+
+              // FIX: Rotated Coordinate Logic
+              // When rotated 90deg, progress runs Top->Bottom (clientY), not Left->Right (clientX)
+              let rawP = (e.clientX - rect.left) / rect.width;
+              if (isRotatedFullscreen) {
+                rawP = (e.clientY - rect.top) / rect.height;
+              }
+
+              const p = Math.max(0, Math.min(1, rawP));
+
               unifiedSeek.begin({ showOverlay: true });
               unifiedSeek.preview(p * duration);
               e.stopPropagation();
+
               const onMove = (mv: PointerEvent) => {
                 const r = rect;
-                const pm = Math.max(
-                  0,
-                  Math.min(1, (mv.clientX - r.left) / r.width),
-                );
+
+                let rawPm = (mv.clientX - r.left) / r.width;
+                if (isRotatedFullscreen) {
+                  rawPm = (mv.clientY - r.top) / r.height;
+                }
+
+                const pm = Math.max(0, Math.min(1, rawPm));
                 unifiedSeek.preview(pm * duration);
               };
               const onUp = () => {
@@ -1291,5 +1301,5 @@ const CSS = `
 .toggle-switch.active .toggle-knob { transform: translateX(18px); }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes slideUp { from { transform: translateY(10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-.videojs-rotated-fullscreen { position: fixed !important; width: 100vh !important; height: 100vw !important; top: 50% !important; left: 50% !important; transform: translate(-50%, -50%) rotate(90deg) !important; z-index: 99999 !important; background: #000 !important; }
+.videojs-rotated-fullscreen { position: fixed !important; width: 100vh !important; width: 100dvh !important; height: 100vw !important; top: 50% !important; left: 50% !important; transform: translate(-50%, -50%) rotate(90deg) !important; z-index: 99999 !important; background: #000 !important; }
 `;
