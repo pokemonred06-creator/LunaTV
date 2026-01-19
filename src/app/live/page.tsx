@@ -1,6 +1,6 @@
 'use client';
 
-import { Heart, Radio, Tv } from 'lucide-react';
+import { AlertTriangle, Heart, Loader2, Radio, Tv } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
 import {
   Suspense,
@@ -11,8 +11,7 @@ import {
   useState,
 } from 'react';
 import type Player from 'video.js/dist/types/player';
-// Import videojs-flvjs if you need FLV support. If not installed, remove this line.
-import 'videojs-flvjs';
+import 'videojs-flvjs'; // Ensure installed
 
 import {
   deleteFavorite,
@@ -48,10 +47,6 @@ interface FavoriteData {
   };
 }
 
-interface XhrRequestOptions {
-  uri: string;
-}
-
 interface LiveChannel {
   id: string;
   tvgId: string;
@@ -84,60 +79,64 @@ interface ProcessedProgram extends EpgProgram {
 
 // --- Utils ---
 
+/**
+ * PRODUCTION EPG CLEANER
+ * Strategy: "Trim Previous"
+ * 1. Filter for Today
+ * 2. Sort by Start Time
+ * 3. If overlap detected: Trim the END of the previous show to match the START of the current show.
+ * This ensures continuous timeline without dropping shows (unless they are fully swallowed).
+ */
 const cleanEpgData = (programs: EpgProgram[]) => {
   if (!programs || programs.length === 0) return programs;
 
-  const today = new Date();
-  const todayStart = new Date(
-    today.getFullYear(),
-    today.getMonth(),
-    today.getDate(),
+  const now = new Date();
+  const startOfDay = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
   ).getTime();
-  const todayEnd = todayStart + 86400000;
+  const endOfDay = startOfDay + 86400000;
 
-  const parsedPrograms: ProcessedProgram[] = programs.map((p) => ({
-    ...p,
-    startTime: parseCustomTimeFormat(p.start).getTime(),
-    endTime: parseCustomTimeFormat(p.end).getTime(),
-  }));
-
-  const todayPrograms = parsedPrograms
-    .filter(
-      (p) =>
-        (p.startTime >= todayStart && p.startTime < todayEnd) ||
-        (p.endTime >= todayStart && p.endTime < todayEnd) ||
-        (p.startTime < todayStart && p.endTime >= todayEnd),
-    )
-    .sort((a, b) => a.startTime - b.startTime);
-
-  const cleanedPrograms: ProcessedProgram[] = [];
-
-  for (const current of todayPrograms) {
-    let hasOverlap = false;
-    for (let i = 0; i < cleanedPrograms.length; i++) {
-      const existing = cleanedPrograms[i];
-      if (
-        (current.startTime >= existing.startTime &&
-          current.startTime < existing.endTime) ||
-        (current.endTime > existing.startTime &&
-          current.endTime <= existing.endTime) ||
-        (current.startTime <= existing.startTime &&
-          current.endTime >= existing.endTime)
-      ) {
-        hasOverlap = true;
-        if (
-          current.endTime - current.startTime <
-          existing.endTime - existing.startTime
-        ) {
-          cleanedPrograms[i] = current;
-        }
-        break;
-      }
+  // 1. Parse & Filter (Single Pass)
+  const validPrograms: ProcessedProgram[] = [];
+  for (const p of programs) {
+    const s = parseCustomTimeFormat(p.start).getTime();
+    const e = parseCustomTimeFormat(p.end).getTime();
+    if (s < endOfDay && e > startOfDay) {
+      validPrograms.push({ ...p, startTime: s, endTime: e });
     }
-    if (!hasOverlap) cleanedPrograms.push(current);
   }
 
-  return cleanedPrograms.map(({ startTime, endTime, ...rest }) => rest);
+  // 2. Sort
+  validPrograms.sort((a, b) => a.startTime - b.startTime);
+
+  // 3. Trim Overlaps
+  const result: ProcessedProgram[] = [];
+
+  for (const current of validPrograms) {
+    if (result.length === 0) {
+      result.push(current);
+      continue;
+    }
+
+    const prev = result[result.length - 1];
+
+    // If current starts before prev ends, we have an overlap
+    if (current.startTime < prev.endTime) {
+      // Trim prev to end when current starts
+      prev.endTime = current.startTime;
+
+      // If trimming made prev invalid (start >= end), remove it (it was fully swallowed)
+      if (prev.startTime >= prev.endTime) {
+        result.pop();
+      }
+    }
+
+    result.push(current);
+  }
+
+  return result.map(({ startTime, endTime, ...rest }) => rest);
 };
 
 const getProxiedLogoUrl = (logoUrl: string, sourceKey?: string) => {
@@ -146,9 +145,17 @@ const getProxiedLogoUrl = (logoUrl: string, sourceKey?: string) => {
   return `/api/proxy/logo?url=${encodeURIComponent(logoUrl)}&source=${sourceKey || ''}`;
 };
 
+function useDebounce<T>(value: T, delay: number): T {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+  useEffect(() => {
+    const handler = setTimeout(() => setDebouncedValue(value), delay);
+    return () => clearTimeout(handler);
+  }, [value, delay]);
+  return debouncedValue;
+}
+
 // --- Custom Hooks ---
 
-// 1. Core Data Hook
 function useLiveCore() {
   const searchParams = useSearchParams();
   const [sources, setSources] = useState<LiveSource[]>([]);
@@ -164,19 +171,20 @@ function useLiveCore() {
   const [isChannelLoading, setIsChannelLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const abortControllerRef = useRef<AbortController | null>(null);
+  // Use AbortController ref for channel fetching
+  const channelsAbortRef = useRef<AbortController | null>(null);
 
-  useEffect(() => {
-    return () => {
-      if (abortControllerRef.current) abortControllerRef.current.abort();
-    };
-  }, []);
+  // Cleanup on unmount
+  useEffect(() => () => channelsAbortRef.current?.abort(), []);
 
   const fetchChannels = useCallback(
     async (source: LiveSource, targetChannelId?: string) => {
-      if (abortControllerRef.current) abortControllerRef.current.abort();
+      // 1. Abort previous in-flight request
+      channelsAbortRef.current?.abort();
+
+      // 2. Create new controller
       const controller = new AbortController();
-      abortControllerRef.current = controller;
+      channelsAbortRef.current = controller;
 
       try {
         setIsChannelLoading(true);
@@ -185,24 +193,15 @@ function useLiveCore() {
         const res = await fetch(`/api/live/channels?source=${source.key}`, {
           signal: controller.signal,
         });
+
         const result = await res.json();
 
+        if (controller.signal.aborted)
+          return { channels: [], initialChannel: null };
         if (!result.success)
           throw new Error(result.error || 'Failed to fetch channels');
 
         const rawChannels = result.data || [];
-
-        if (rawChannels.length === 0) {
-          setSources((prev) =>
-            prev.map((s) =>
-              s.key === source.key ? { ...s, channelNumber: 0 } : s,
-            ),
-          );
-          setChannels([]);
-          setCurrentChannel(null);
-          return { channels: [], initialChannel: null };
-        }
-
         const parsedChannels: LiveChannel[] = rawChannels.map(
           (c: ChannelApiResponse) => ({
             id: c.id,
@@ -229,25 +228,25 @@ function useLiveCore() {
           : parsedChannels[0];
 
         setCurrentChannel(initialChannel);
-
         return { channels: parsedChannels, initialChannel };
       } catch (err: unknown) {
-        if (err instanceof Error && err.name !== 'AbortError') {
+        // Only handle error if NOT aborted
+        if (!controller.signal.aborted) {
           console.error(err);
-          setError(err.message || 'Failed to load channels');
           setChannels([]);
+          setError(err instanceof Error ? err.message : 'Channel load failed');
         }
         return { channels: [], initialChannel: null };
       } finally {
         if (!controller.signal.aborted) {
           setIsChannelLoading(false);
-          abortControllerRef.current = null;
         }
       }
     },
     [],
   );
 
+  // Initialization Logic
   useEffect(() => {
     const controller = new AbortController();
 
@@ -260,7 +259,6 @@ function useLiveCore() {
         const result = await res.json();
 
         if (controller.signal.aborted) return;
-
         if (!result.success)
           throw new Error(result.error || 'Failed to load sources');
 
@@ -270,23 +268,19 @@ function useLiveCore() {
         if (loadedSources.length > 0) {
           const urlSource = searchParams.get('source');
           const urlChannel = searchParams.get('id');
-
           const target =
             loadedSources.find((s: LiveSource) => s.key === urlSource) ||
             loadedSources[0];
-          setCurrentSource(target);
 
+          setCurrentSource(target);
           await fetchChannels(target, urlChannel || undefined);
 
           if (!controller.signal.aborted) {
             window.history.replaceState(null, '', window.location.pathname);
           }
         }
-
-        if (!controller.signal.aborted) {
-          setLoadingStage('ready');
-        }
-      } catch (e: unknown) {
+        if (!controller.signal.aborted) setLoadingStage('ready');
+      } catch (e) {
         if (!controller.signal.aborted) {
           console.error(e);
           setError('System initialization failed.');
@@ -312,15 +306,15 @@ function useLiveCore() {
   };
 }
 
-// Helper to guess stream type from URL
 const guessType = (url: string) => {
-  if (url.includes('.flv') || url.includes('/huya/') || url.includes('douyu') || url.includes('.xs')) return 'flv';
-  if (url.includes('.m3u8')) return 'm3u8';
-  return 'm3u8'; // default
+  if (/\.(flv|xs)(\?|$)/i.test(url) || /huya|douyu/i.test(url)) return 'flv';
+  return 'm3u8';
 };
 
-// 2. Player State Hook (Updated with FLV check logic)
 function usePlayerState(videoUrl: string, sourceKey?: string) {
+  const debouncedUrl = useDebounce(videoUrl, 500);
+  const debouncedKey = useDebounce(sourceKey, 500);
+
   const [proxiedUrl, setProxiedUrl] = useState('');
   const [isStreamLoading, setIsStreamLoading] = useState(false);
   const [unsupportedType, setUnsupportedType] = useState<string | null>(null);
@@ -329,82 +323,77 @@ function usePlayerState(videoUrl: string, sourceKey?: string) {
   >(null);
 
   useEffect(() => {
-    if (!videoUrl || !sourceKey) {
+    if (videoUrl !== debouncedUrl) {
+      setIsStreamLoading(true);
+      return;
+    }
+
+    if (!debouncedUrl || !debouncedKey) {
       setProxiedUrl('');
-      setUnsupportedType(null);
       setIsStreamLoading(false);
-      setStreamType(null);
       return;
     }
 
     const controller = new AbortController();
     setIsStreamLoading(true);
     setUnsupportedType(null);
-    setProxiedUrl('');
 
-    async function check() {
+    const check = async () => {
       try {
-        const checkUrl = `/api/live/precheck?url=${encodeURIComponent(videoUrl)}&moontv-source=${sourceKey}`;
+        const checkUrl = `/api/live/precheck?url=${encodeURIComponent(debouncedUrl)}&moontv-source=${debouncedKey}`;
         const res = await fetch(checkUrl, { signal: controller.signal });
         const data = await res.json();
 
-        if (!controller.signal.aborted) {
-          let detected = data.type;
-          
-          // Fallback if detection fails or is unknown
-          if (!detected || detected === 'unknown') {
-             detected = guessType(videoUrl);
-          }
+        if (controller.signal.aborted) return;
 
-          // Allow: m3u8, unknown, and flv (if you have the tech)
-          if (
-            detected !== 'm3u8' &&
-            detected !== 'flv' &&
-            detected !== 'unknown'
-          ) {
-            setUnsupportedType(detected);
-          } else {
-            setUnsupportedType(null);
-            setStreamType(detected as 'm3u8' | 'flv' | 'unknown');
-            // Construct proxy URL
-            const typeParam = detected === 'flv' ? 'flv' : 'm3u8';
-            setProxiedUrl(
-              `/api/proxy/${typeParam}?url=${encodeURIComponent(videoUrl)}&moontv-source=${sourceKey}`,
-            );
-          }
-        }
-      } catch (e: unknown) {
-        if (e instanceof Error && e.name !== 'AbortError') {
-          console.warn('Precheck failed, attempting heuristic playback:', e);
-          const fallbackType = guessType(videoUrl);
-          setUnsupportedType(null);
-          setStreamType(fallbackType as 'm3u8' | 'flv');
-          const typeParam = fallbackType === 'flv' ? 'flv' : 'm3u8';
+        let detected = data.type;
+        if (!detected || detected === 'unknown')
+          detected = guessType(debouncedUrl);
+
+        if (
+          detected !== 'm3u8' &&
+          detected !== 'flv' &&
+          detected !== 'unknown'
+        ) {
+          setUnsupportedType(detected);
+        } else {
+          setStreamType(detected as 'm3u8' | 'flv');
+          const typeParam = detected === 'flv' ? 'flv' : 'm3u8';
           setProxiedUrl(
-            `/api/proxy/${typeParam}?url=${encodeURIComponent(videoUrl)}&moontv-source=${sourceKey}`,
+            `/api/proxy/${typeParam}?url=${encodeURIComponent(debouncedUrl)}&moontv-source=${debouncedKey}`,
+          );
+        }
+      } catch (e) {
+        if ((e as Error).name !== 'AbortError') {
+          const fallback = guessType(debouncedUrl);
+          setStreamType(fallback as 'm3u8' | 'flv');
+          setProxiedUrl(
+            `/api/proxy/${fallback === 'flv' ? 'flv' : 'm3u8'}?url=${encodeURIComponent(debouncedUrl)}&moontv-source=${debouncedKey}`,
           );
         }
       } finally {
         if (!controller.signal.aborted) setIsStreamLoading(false);
       }
-    }
+    };
 
     check();
     return () => controller.abort();
-  }, [videoUrl, sourceKey]);
+  }, [debouncedUrl, debouncedKey, videoUrl]);
 
   return { proxiedUrl, isStreamLoading, unsupportedType, streamType };
 }
 
-// 3. EPG Hook
 function useEpg(sourceKey?: string, tvgId?: string) {
+  const debouncedKey = useDebounce(sourceKey, 1000);
+  const debouncedId = useDebounce(tvgId, 1000);
+
   const [epgData, setEpgData] = useState<{ programs: EpgProgram[] } | null>(
     null,
   );
   const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
-    if (!sourceKey || !tvgId) {
+    if (!debouncedKey || !debouncedId) {
       setEpgData(null);
       return;
     }
@@ -412,14 +401,13 @@ function useEpg(sourceKey?: string, tvgId?: string) {
     const controller = new AbortController();
     setIsLoading(true);
 
-    fetch(`/api/live/epg?source=${sourceKey}&tvgId=${tvgId}`, {
+    fetch(`/api/live/epg?source=${debouncedKey}&tvgId=${debouncedId}`, {
       signal: controller.signal,
     })
       .then((res) => res.json())
       .then((data) => {
-        if (!controller.signal.aborted) {
+        if (!controller.signal.aborted)
           setEpgData(data.success ? data.data : null);
-        }
       })
       .catch(() => {
         if (!controller.signal.aborted) setEpgData(null);
@@ -429,17 +417,15 @@ function useEpg(sourceKey?: string, tvgId?: string) {
       });
 
     return () => controller.abort();
-  }, [sourceKey, tvgId]);
+  }, [debouncedKey, debouncedId]);
 
-  const processedPrograms = useMemo(
+  const programs = useMemo(
     () => (epgData ? cleanEpgData(epgData.programs) : []),
     [epgData],
   );
-
-  return { programs: processedPrograms, isLoading };
+  return { programs, isLoading };
 }
 
-// 4. Favorites Hook
 function useFavorites(
   source?: LiveSource | null,
   channel?: LiveChannel | null,
@@ -457,24 +443,21 @@ function useFavorites(
 
     checkIsFavorited(sid, cid).then(setIsFavorite);
 
-    const unsub = subscribeToDataUpdates(
-      'favoritesUpdated',
-      (favs: FavoriteData) => {
-        const key = generateStorageKey(sid, cid);
-        setIsFavorite(!!favs[key]);
-      },
-    );
-    return unsub;
+    return subscribeToDataUpdates('favoritesUpdated', (favs: FavoriteData) => {
+      const key = generateStorageKey(sid, cid);
+      setIsFavorite(!!favs[key]);
+    });
   }, [source, channel]);
 
   const toggle = async () => {
     if (!source || !channel) return;
+    const sid = `live_${source.key}`;
+    const cid = `live_${channel.id}`;
     const newVal = !isFavorite;
+
     setIsFavorite(newVal);
 
     try {
-      const sid = `live_${source.key}`;
-      const cid = `live_${channel.id}`;
       if (newVal) {
         await saveFavorite(sid, cid, {
           title: channel.name,
@@ -496,7 +479,7 @@ function useFavorites(
   return { isFavorite, toggle };
 }
 
-// --- Main Client Component ---
+// --- Main Component ---
 
 function LivePageClient() {
   const {
@@ -512,7 +495,6 @@ function LivePageClient() {
     fetchChannels,
   } = useLiveCore();
 
-  // Passing streamType now to handle tech selection if needed
   const { proxiedUrl, isStreamLoading, unsupportedType, streamType } =
     usePlayerState(currentChannel?.url || '', currentSource?.key);
 
@@ -520,7 +502,6 @@ function LivePageClient() {
     currentSource?.key,
     currentChannel?.tvgId,
   );
-
   const { isFavorite, toggle: toggleFavorite } = useFavorites(
     currentSource,
     currentChannel,
@@ -538,7 +519,6 @@ function LivePageClient() {
   const playerContainerRef = useRef<HTMLDivElement>(null);
   const channelListRef = useRef<HTMLDivElement>(null);
   const groupButtonRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
-  const groupContainerRef = useRef<HTMLDivElement>(null);
   const sourceRef = useRef<LiveSource | null>(null);
 
   useEffect(() => {
@@ -546,32 +526,31 @@ function LivePageClient() {
   }, [currentSource]);
 
   const groupedChannels = useMemo(() => {
-    return channels.reduce(
-      (acc, c) => {
-        const g = c.group || '其他';
-        if (!acc[g]) acc[g] = [];
-        acc[g].push(c);
-        return acc;
-      },
-      {} as Record<string, LiveChannel[]>,
-    );
+    const groups: Record<string, LiveChannel[]> = {};
+    channels.forEach((c) => {
+      const g = c.group || '其他';
+      if (!groups[g]) groups[g] = [];
+      groups[g].push(c);
+    });
+    return groups;
   }, [channels]);
 
   const groupKeys = useMemo(
     () => Object.keys(groupedChannels).sort(),
     [groupedChannels],
   );
+  const filteredChannels = useMemo(
+    () => (selectedGroup ? groupedChannels[selectedGroup] || [] : channels),
+    [selectedGroup, groupedChannels, channels],
+  );
 
-  const filteredChannels = useMemo(() => {
-    return selectedGroup ? groupedChannels[selectedGroup] || [] : channels;
-  }, [selectedGroup, groupedChannels, channels]);
-
-  const isIOS = useMemo(() => {
-    if (typeof window === 'undefined') return false;
-    return (
-      /iPad|iPhone|iPod/.test(navigator.userAgent) && !('MSStream' in window)
-    );
-  }, []);
+  const isIOS = useMemo(
+    () =>
+      typeof window !== 'undefined' &&
+      /iPad|iPhone|iPod/.test(navigator.userAgent) &&
+      !('MSStream' in window),
+    [],
+  );
 
   const videoOptions = useMemo(
     () => ({
@@ -580,23 +559,11 @@ function LivePageClient() {
       responsive: true,
       fluid: false,
       liveui: true,
-      html5: {
-        vhs: {
-          lowLatencyMode: true,
-          overrideNative: !isIOS,
-        },
-      },
-      // Always include flvjs in techOrder to support fallback or auto-detection
+      html5: { vhs: { lowLatencyMode: true, overrideNative: !isIOS } },
       techOrder: ['html5', 'flvjs'],
-      controlBar: {
-        pictureInPictureToggle: false,
-      },
+      controlBar: { pictureInPictureToggle: false },
       flvjs: {
-        mediaDataSource: {
-          isLive: true,
-          cors: true,
-          withCredentials: false,
-        },
+        mediaDataSource: { isLive: true, cors: true, withCredentials: false },
       },
     }),
     [isIOS],
@@ -610,56 +577,38 @@ function LivePageClient() {
     el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
   }, []);
 
-  // 1. Restore Mouse Wheel Horizontal Scroll
-  useEffect(() => {
-    const container = groupContainerRef.current;
-    if (!container) return;
-
-    const handleWheel = (e: WheelEvent) => {
-      if (container.scrollWidth > container.clientWidth) {
-        e.preventDefault();
-        container.scrollLeft += e.deltaY;
-      }
-    };
-
-    container.addEventListener('wheel', handleWheel, { passive: false });
-    return () => container.removeEventListener('wheel', handleWheel);
-  }, [groupKeys]); // Re-bind if keys change
-
   useEffect(() => {
     if (
       channels.length > 0 &&
       selectedGroup &&
       !groupedChannels[selectedGroup]
     ) {
-      const fallback = groupKeys[0] || '';
-      setSelectedGroup(fallback);
+      setSelectedGroup(groupKeys[0] || '');
     }
   }, [channels, selectedGroup, groupedChannels, groupKeys]);
 
   const handleSourceChange = async (s: LiveSource) => {
-    if (isSwitchingSource) return;
+    if (isSwitchingSource || s.key === currentSource?.key) return;
     setIsSwitchingSource(true);
     setSelectedGroup('');
     setCurrentSource(s);
+
     const { initialChannel } = await fetchChannels(s);
-    if (initialChannel) {
-      setSelectedGroup(initialChannel.group || '其他');
-    }
+    if (initialChannel) setSelectedGroup(initialChannel.group || '其他');
+
     setIsSwitchingSource(false);
     setActiveTab('channels');
   };
 
   const handleChannelChange = (c: LiveChannel) => {
-    if (isSwitchingSource) return;
+    if (isSwitchingSource || c.id === currentChannel?.id) return;
     setCurrentChannel(c);
     scrollToChannel(c.id);
   };
 
   const handleGroupChange = (g: string) => {
     setSelectedGroup(g);
-    const btn = groupButtonRefs.current.get(g);
-    btn?.scrollIntoView({
+    groupButtonRefs.current.get(g)?.scrollIntoView({
       behavior: 'smooth',
       block: 'nearest',
       inline: 'center',
@@ -669,23 +618,19 @@ function LivePageClient() {
 
   const handlePlayerReady = useCallback((player: Player) => {
     playerRef.current = player;
-
-    // 2. FLV Support: Cleanup logic logic is handled internally by Video.js tech,
-    // but we can ensure clean detach on unmount or source change via VideoJsPlayer component.
-
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const vhs = (player as any).tech?.({ IWillNotUseThisInPlugins: true })?.vhs;
     if (vhs?.xhr) {
-      vhs.xhr.beforeRequest = (options: XhrRequestOptions) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      vhs.xhr.beforeRequest = (options: any) => {
         try {
-          const isDirectConnect =
-            localStorage.getItem('liveDirectConnect') === 'true';
-          if (isDirectConnect) {
-            const base = document.baseURI || window.location.href;
-            const u = new URL(options.uri, base);
-            const currentKey = sourceRef.current?.key;
-            if (currentKey && !u.searchParams.has('moontv-source')) {
-              u.searchParams.set('moontv-source', currentKey);
+          if (localStorage.getItem('liveDirectConnect') === 'true') {
+            const u = new URL(options.uri, document.baseURI);
+            if (
+              sourceRef.current?.key &&
+              !u.searchParams.has('moontv-source')
+            ) {
+              u.searchParams.set('moontv-source', sourceRef.current.key);
             }
             if (!u.searchParams.has('allowCORS')) {
               u.searchParams.set('allowCORS', 'true');
@@ -693,75 +638,61 @@ function LivePageClient() {
             options.uri = u.toString();
           }
         } catch {
-          /* ignore */
+          /* safely ignore */
         }
         return options;
       };
     }
   }, []);
 
-  useEffect(() => {
-    const handleKeys = (e: KeyboardEvent) => {
-      if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName))
-        return;
-      const p = playerRef.current;
-      if (!p) return;
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (!playerRef.current) return;
+    const p = playerRef.current;
 
-      if (playerFocused) {
-        if (e.key === 'ArrowUp') {
-          e.preventDefault();
-          p.volume(Math.min(1, (p.volume() ?? 0.5) + 0.1));
+    switch (e.key) {
+      case 'ArrowUp':
+        e.preventDefault();
+        p.volume(Math.min(1, (p.volume() ?? 0.5) + 0.1));
+        break;
+      case 'ArrowDown':
+        e.preventDefault();
+        p.volume(Math.max(0, (p.volume() ?? 0.5) - 0.1));
+        break;
+      case ' ':
+      case 'k':
+        e.preventDefault();
+        if (p.paused()) {
+          p.play();
+        } else {
+          p.pause();
         }
-        if (e.key === 'ArrowDown') {
-          e.preventDefault();
-          p.volume(Math.max(0, (p.volume() ?? 0.5) - 0.1));
-        }
-        if (e.key === ' ') {
-          e.preventDefault();
-          if (p.paused()) {
-            p.play();
-          } else {
-            p.pause();
-          }
-        }
-      }
-    };
-    document.addEventListener('keydown', handleKeys);
-    return () => document.removeEventListener('keydown', handleKeys);
-  }, [playerFocused]);
-
-  useEffect(() => {
-    const handleGlobalClick = (e: Event) => {
-      if (
-        playerContainerRef.current &&
-        !playerContainerRef.current.contains(e.target as Node)
-      ) {
-        setPlayerFocused(false);
-      }
-    };
-    document.addEventListener('pointerdown', handleGlobalClick);
-    return () => document.removeEventListener('pointerdown', handleGlobalClick);
-  }, []);
-
-  useEffect(() => {
-    if (currentChannel) {
-      if (!selectedGroup) setSelectedGroup(currentChannel.group || '其他');
-      requestAnimationFrame(() => scrollToChannel(currentChannel.id));
+        break;
+      case 'm':
+        e.preventDefault();
+        p.muted(!p.muted());
+        break;
     }
-  }, [currentChannel, selectedGroup, scrollToChannel]);
+  };
+
+  // Initial scroll
+  useEffect(() => {
+    if (currentChannel && !isChannelLoading) {
+      if (!selectedGroup) setSelectedGroup(currentChannel.group || '其他');
+      const timer = setTimeout(() => scrollToChannel(currentChannel.id), 100);
+      return () => clearTimeout(timer);
+    }
+  }, [currentChannel, isChannelLoading, selectedGroup, scrollToChannel]);
 
   if (loadingStage !== 'ready' && !error) {
     return (
       <PageLayout activePath='/live'>
-        <div className='flex items-center justify-center min-h-screen'>
-          <div className='text-center'>
-            <div className='text-4xl mb-4 animate-bounce'>📺</div>
-            <p className='animate-pulse'>
-              {loadingStage === 'fetching'
-                ? 'Fetching sources...'
-                : 'Initializing...'}
-            </p>
-          </div>
+        <div className='flex flex-col items-center justify-center min-h-[60vh] text-gray-500'>
+          <Loader2 className='w-12 h-12 mb-4 animate-spin text-blue-500' />
+          <p className='animate-pulse font-medium'>
+            {loadingStage === 'fetching'
+              ? 'Loading Live Sources...'
+              : 'Initializing Channels...'}
+          </p>
         </div>
       </PageLayout>
     );
@@ -770,13 +701,17 @@ function LivePageClient() {
   if (error) {
     return (
       <PageLayout activePath='/live'>
-        <div className='flex items-center justify-center min-h-screen text-red-500 gap-4'>
-          <span className='font-bold'>Error:</span> {error}
+        <div className='flex flex-col items-center justify-center min-h-[60vh] text-red-500 gap-4'>
+          <AlertTriangle className='w-16 h-16' />
+          <h2 className='text-xl font-bold'>System Error</h2>
+          <p className='text-gray-600 dark:text-gray-400 max-w-md text-center'>
+            {error}
+          </p>
           <button
             onClick={() => window.location.reload()}
-            className='underline hover:text-red-700'
+            className='px-4 py-2 bg-red-100 hover:bg-red-200 text-red-700 rounded-lg transition-colors'
           >
-            Retry
+            Reload Page
           </button>
         </div>
       </PageLayout>
@@ -785,149 +720,203 @@ function LivePageClient() {
 
   return (
     <PageLayout activePath='/live'>
-      <style>{`
-        .video-js { width: 100% !important; height: 100% !important; overflow: hidden; }
-        .video-js .vjs-tech { width: 100% !important; height: 100% !important; object-fit: contain; }
-        .video-js .vjs-control-bar { display: flex !important; width: 100%; position: absolute; bottom: 0; left: 0; z-index: 2; }
-        .video-js .vjs-progress-control { flex: 1 1 auto; width: auto; min-width: 0; }
-        .video-js.vjs-fluid { padding-top: 0 !important; }
-      `}</style>
-
-      <div className='flex flex-col gap-3 py-4 px-5 lg:px-12 2xl:px-20'>
-        <div className='py-1'>
-          <h1 className='text-xl font-semibold flex items-center gap-2'>
-            <Radio className='w-5 h-5 text-blue-500' />
-            <span>
-              {currentSource?.name}{' '}
-              {currentChannel && `> ${currentChannel.name}`}
+      <div className='flex flex-col gap-3 py-4 px-4 sm:px-6 lg:px-8 xl:px-12 h-[calc(100vh-64px)]'>
+        <div className='flex items-center justify-between shrink-0'>
+          <h1 className='text-lg sm:text-xl font-semibold flex items-center gap-2 truncate'>
+            <Radio className='w-5 h-5 text-blue-500 shrink-0' />
+            <span className='truncate'>
+              {currentSource?.name}
+              {currentChannel && (
+                <span className='opacity-70 text-sm ml-2 font-normal'>
+                  / {currentChannel.name}
+                </span>
+              )}
             </span>
           </h1>
+          <button
+            onClick={() => setIsChannelListCollapsed(!isChannelListCollapsed)}
+            className='hidden lg:block text-xs px-3 py-1.5 bg-gray-100 dark:bg-gray-800 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors'
+          >
+            {isChannelListCollapsed ? 'Show List' : 'Hide List'}
+          </button>
         </div>
 
-        <div className='space-y-2'>
-          <div className='hidden lg:flex justify-end'>
-            <button
-              onClick={() => setIsChannelListCollapsed(!isChannelListCollapsed)}
-              className='text-xs px-3 py-1 bg-gray-100 rounded-full hover:bg-gray-200 transition-colors'
-            >
-              {isChannelListCollapsed ? 'Show List' : 'Hide List'}
-            </button>
-          </div>
-
+        <div
+          className={`grid gap-4 flex-1 min-h-0 transition-all duration-300 ${isChannelListCollapsed ? 'grid-cols-1' : 'grid-cols-1 lg:grid-cols-4'}`}
+        >
           <div
-            className={`grid gap-4 lg:h-[600px] transition-all duration-300 ${isChannelListCollapsed ? 'grid-cols-1' : 'grid-cols-1 md:grid-cols-4'}`}
+            className={`flex flex-col min-h-0 ${isChannelListCollapsed ? 'col-span-1' : 'lg:col-span-3'}`}
           >
             <div
               ref={playerContainerRef}
-              className={`h-full ${isChannelListCollapsed ? 'col-span-1' : 'md:col-span-3'} outline-none`}
+              // Tailwind Arbitrary Variants for Video.js overrides
+              className={`
+                relative flex-1 bg-black rounded-xl overflow-hidden outline-none shadow-lg transition-ring duration-200 
+                ${playerFocused ? 'ring-2 ring-blue-500/50' : ''}
+                [&_.video-js]:w-full [&_.video-js]:h-full [&_.video-js]:overflow-hidden
+                [&_.vjs-tech]:object-contain
+                [&_.vjs-control-bar]:flex [&_.vjs-control-bar]:bg-linear-to-t [&_.vjs-control-bar]:from-black/80 [&_.vjs-control-bar]:to-transparent
+                [&_.vjs-big-play-button]:top-1/2 [&_.vjs-big-play-button]:left-1/2 [&_.vjs-big-play-button]:-translate-x-1/2 [&_.vjs-big-play-button]:-translate-y-1/2 [&_.vjs-big-play-button]:rounded-full [&_.vjs-big-play-button]:bg-black/60 [&_.vjs-big-play-button]:border-none
+              `}
               tabIndex={0}
-              onFocusCapture={() => setPlayerFocused(true)}
-              onBlurCapture={(e) => {
-                if (
-                  playerContainerRef.current?.contains(e.relatedTarget as Node)
-                )
-                  return;
-                setPlayerFocused(false);
-              }}
-              onPointerDown={(e) => {
+              onKeyDown={handleKeyDown}
+              onFocus={() => setPlayerFocused(true)}
+              onBlur={() => setPlayerFocused(false)}
+              onMouseDown={() => {
                 setPlayerFocused(true);
-                e.currentTarget.focus();
+                playerContainerRef.current?.focus();
               }}
             >
-              <div
-                className={`relative w-full h-[300px] lg:h-full bg-black rounded-xl overflow-hidden transition-all ${playerFocused ? 'ring-2 ring-blue-500/50' : ''}`}
-              >
-                {proxiedUrl && !unsupportedType && (
-                  <VideoJsPlayer
-                    key={proxiedUrl}
-                    url={proxiedUrl}
-                    poster={getProxiedLogoUrl(
-                      currentChannel?.logo || '',
-                      currentSource?.key,
-                    )}
-                    type={streamType === 'flv' ? 'video/x-flv' : 'application/x-mpegURL'}
-                    autoPlay={true}
-                    onReady={handlePlayerReady}
-                    className='w-full h-full'
-                    isLive={true}
-                    videoJsOptions={videoOptions}
-                  />
-                )}
-
-                {isStreamLoading && (
-                  <div className='absolute inset-0 flex items-center justify-center bg-black/80 text-white z-10'>
-                    <div className='flex flex-col items-center'>
-                      <div className='w-8 h-8 border-4 border-white/20 border-t-white rounded-full animate-spin mb-2' />
-                      <div>Loading Stream...</div>
+              {proxiedUrl && !unsupportedType ? (
+                <VideoJsPlayer
+                  key={proxiedUrl}
+                  url={proxiedUrl}
+                  poster={getProxiedLogoUrl(
+                    currentChannel?.logo || '',
+                    currentSource?.key,
+                  )}
+                  type={
+                    streamType === 'flv'
+                      ? 'video/x-flv'
+                      : 'application/x-mpegURL'
+                  }
+                  autoPlay={true}
+                  onReady={handlePlayerReady}
+                  className='w-full h-full'
+                  isLive={true}
+                  videoJsOptions={videoOptions}
+                />
+              ) : (
+                <div className='absolute inset-0 flex items-center justify-center text-gray-500'>
+                  {unsupportedType ? (
+                    <div className='text-center text-red-400'>
+                      <AlertTriangle className='w-10 h-10 mx-auto mb-2' />
+                      <p>Format Not Supported: {unsupportedType}</p>
                     </div>
-                  </div>
-                )}
+                  ) : (
+                    <p>No Signal</p>
+                  )}
+                </div>
+              )}
 
-                {unsupportedType && (
-                  <div className='absolute inset-0 flex items-center justify-center bg-black/90 text-red-500 z-10 flex-col'>
-                    <h3 className='text-xl font-bold'>Format Not Supported</h3>
-                    <p>{unsupportedType.toUpperCase()}</p>
+              {isStreamLoading && (
+                <div className='absolute inset-0 flex items-center justify-center bg-black/60 backdrop-blur-sm text-white z-20 pointer-events-none'>
+                  <div className='flex flex-col items-center gap-2'>
+                    <Loader2 className='w-8 h-8 animate-spin' />
+                    <span className='text-sm font-medium'>Connecting...</span>
                   </div>
-                )}
-              </div>
+                </div>
+              )}
             </div>
 
-            <div
-              className={`h-[400px] lg:h-full flex flex-col bg-gray-50 dark:bg-gray-800 rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700 ${isChannelListCollapsed ? 'hidden' : 'block'}`}
-            >
-              <div className='flex border-b border-gray-200 dark:border-gray-700'>
-                <button
-                  onClick={() => setActiveTab('channels')}
-                  className={`flex-1 py-3 font-medium transition-colors ${activeTab === 'channels' ? 'text-green-600 border-b-2 border-green-600' : 'text-gray-500 hover:text-gray-700'}`}
-                >
-                  Channels
-                </button>
-                <button
-                  onClick={() => setActiveTab('sources')}
-                  className={`flex-1 py-3 font-medium transition-colors ${activeTab === 'sources' ? 'text-green-600 border-b-2 border-green-600' : 'text-gray-500 hover:text-gray-700'}`}
-                >
-                  Sources
-                </button>
-              </div>
-
-              {activeTab === 'channels' ? (
-                <>
-                  <div
-                    className='flex overflow-x-auto p-2 gap-2 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/50'
-                    ref={groupContainerRef}
+            {currentChannel && (
+              <div className='mt-3 shrink-0 bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm border border-gray-100 dark:border-gray-700'>
+                <div className='flex items-center justify-between mb-4'>
+                  <div className='flex items-center gap-3 overflow-hidden'>
+                    <div className='w-12 h-12 bg-gray-50 dark:bg-gray-700 rounded-lg shrink-0 flex items-center justify-center p-1'>
+                      {currentChannel.logo ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={getProxiedLogoUrl(
+                            currentChannel.logo,
+                            currentSource?.key,
+                          )}
+                          className='w-full h-full object-contain'
+                          alt={currentChannel.name}
+                          loading='lazy'
+                        />
+                      ) : (
+                        <Tv className='w-6 h-6 opacity-30' />
+                      )}
+                    </div>
+                    <div className='min-w-0'>
+                      <h2 className='text-lg font-bold truncate text-gray-900 dark:text-gray-100'>
+                        {currentChannel.name}
+                      </h2>
+                      <p className='text-xs text-gray-500 truncate'>
+                        {currentSource?.name}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={toggleFavorite}
+                    className='p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors active:scale-95'
+                    title='Toggle Favorite'
                   >
+                    <Heart
+                      className={`w-6 h-6 ${isFavorite ? 'fill-red-500 text-red-500' : 'text-gray-400'}`}
+                    />
+                  </button>
+                </div>
+                <EpgScrollableRow
+                  programs={programs}
+                  currentTime={new Date()}
+                  isLoading={isEpgLoading}
+                />
+              </div>
+            )}
+          </div>
+
+          <div
+            className={`flex flex-col bg-white dark:bg-gray-800 rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700 shadow-sm ${isChannelListCollapsed ? 'hidden' : 'flex'}`}
+          >
+            <div className='flex border-b border-gray-200 dark:border-gray-700'>
+              <button
+                onClick={() => setActiveTab('channels')}
+                className={`flex-1 py-3 text-sm font-medium transition-colors ${activeTab === 'channels' ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50/50 dark:bg-blue-900/10' : 'text-gray-500 hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
+              >
+                Channels
+              </button>
+              <button
+                onClick={() => setActiveTab('sources')}
+                className={`flex-1 py-3 text-sm font-medium transition-colors ${activeTab === 'sources' ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50/50 dark:bg-blue-900/10' : 'text-gray-500 hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
+              >
+                Sources
+              </button>
+            </div>
+
+            {activeTab === 'channels' ? (
+              <>
+                <div className='overflow-x-auto p-2 border-b border-gray-100 dark:border-gray-700 scrollbar-hide'>
+                  <div className='flex gap-2'>
                     {groupKeys.map((g) => (
                       <button
                         key={g}
                         ref={(el) => {
                           if (el) groupButtonRefs.current.set(g, el);
-                          else groupButtonRefs.current.delete(g);
                         }}
                         onClick={() => handleGroupChange(g)}
-                        className={`whitespace-nowrap px-3 py-1 rounded-full text-sm transition-colors ${selectedGroup === g ? 'bg-green-600 text-white' : 'bg-gray-200 dark:bg-gray-700 hover:bg-gray-300'}`}
+                        className={`whitespace-nowrap px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${selectedGroup === g ? 'bg-blue-600 text-white shadow-md' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'}`}
                       >
                         {g}
                       </button>
                     ))}
                   </div>
+                </div>
 
-                  <div
-                    className='flex-1 overflow-y-auto p-2 space-y-1 scrollbar-thin'
-                    ref={channelListRef}
-                  >
-                    {isChannelLoading ? (
-                      <div className='p-4 text-center text-gray-500'>
-                        Loading channels...
-                      </div>
-                    ) : (
-                      filteredChannels.map((c) => (
+                <div
+                  className='flex-1 overflow-y-auto p-2'
+                  ref={channelListRef}
+                >
+                  {isChannelLoading ? (
+                    <div className='flex flex-col items-center justify-center h-32 text-gray-400'>
+                      <Loader2 className='w-6 h-6 animate-spin mb-2' />
+                      <span className='text-xs'>Loading List...</span>
+                    </div>
+                  ) : filteredChannels.length === 0 ? (
+                    <div className='p-4 text-center text-sm text-gray-500'>
+                      No channels in this group.
+                    </div>
+                  ) : (
+                    <div className='space-y-1'>
+                      {filteredChannels.map((c) => (
                         <button
                           key={c.id}
                           data-channel-id={c.id}
                           onClick={() => handleChannelChange(c)}
-                          className={`w-full text-left p-2 rounded flex items-center gap-3 transition-colors ${c.id === currentChannel?.id ? 'bg-green-100 dark:bg-green-900/40 text-green-900 dark:text-green-100' : 'hover:bg-gray-200 dark:hover:bg-gray-700'}`}
+                          className={`w-full text-left p-2 rounded-lg flex items-center gap-3 transition-all ${c.id === currentChannel?.id ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 ring-1 ring-blue-200 dark:ring-blue-800' : 'hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
                         >
-                          <div className='w-8 h-8 bg-gray-200 dark:bg-gray-600 rounded overflow-hidden shrink-0 flex items-center justify-center'>
+                          <div className='w-8 h-8 bg-gray-100 dark:bg-gray-700 rounded-md overflow-hidden shrink-0 flex items-center justify-center'>
                             {c.logo ? (
                               // eslint-disable-next-line @next/next/no-img-element
                               <img
@@ -940,92 +929,57 @@ function LivePageClient() {
                                 alt={c.name}
                               />
                             ) : (
-                              <Tv className='w-4 h-4 opacity-50' />
+                              <Tv className='w-4 h-4 opacity-30' />
                             )}
                           </div>
-                          <div className='truncate flex-1'>
-                            <div className='text-sm font-medium'>{c.name}</div>
-                          </div>
+                          <span className='text-sm font-medium truncate'>
+                            {c.name}
+                          </span>
                         </button>
-                      ))
-                    )}
-                  </div>
-                </>
-              ) : (
-                <div className='flex-1 overflow-y-auto p-2 space-y-2'>
-                  {sources.map((s) => (
-                    <button
-                      key={s.key}
-                      onClick={() => handleSourceChange(s)}
-                      className={`w-full text-left p-3 rounded bg-white dark:bg-gray-700/50 flex items-center gap-3 border border-transparent transition-all ${currentSource?.key === s.key ? 'border-green-500 bg-green-50 dark:bg-green-900/20' : 'hover:border-gray-300'}`}
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </>
+            ) : (
+              <div className='flex-1 overflow-y-auto p-2 space-y-2'>
+                {sources.map((s) => (
+                  <button
+                    key={s.key}
+                    onClick={() => handleSourceChange(s)}
+                    className={`w-full text-left p-3 rounded-xl flex items-center gap-3 border transition-all ${currentSource?.key === s.key ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 shadow-sm' : 'border-transparent bg-gray-50 dark:bg-gray-700/30 hover:bg-gray-100 dark:hover:bg-gray-700'}`}
+                  >
+                    <div
+                      className={`p-2 rounded-full ${currentSource?.key === s.key ? 'bg-blue-100 text-blue-600' : 'bg-gray-200 text-gray-500'}`}
                     >
-                      <Radio className='w-6 h-6 shrink-0 text-gray-400' />
-                      <div>
-                        <div className='font-medium'>{s.name}</div>
-                        <div className='text-xs text-gray-500'>
-                          {s.channelNumber || 0} channels
-                        </div>
+                      <Radio className='w-5 h-5' />
+                    </div>
+                    <div>
+                      <div className='font-semibold text-sm'>{s.name}</div>
+                      <div className='text-xs text-gray-500 mt-0.5'>
+                        {s.channelNumber ?? 0} channels
                       </div>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {currentChannel && (
-            <div className='mt-4'>
-              <div className='flex items-center justify-between mb-4'>
-                <div className='flex items-center gap-3 overflow-hidden'>
-                  <div className='w-12 h-12 bg-gray-200 dark:bg-gray-700 rounded-lg shrink-0 flex items-center justify-center overflow-hidden'>
-                    {currentChannel.logo ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={getProxiedLogoUrl(
-                          currentChannel.logo,
-                          currentSource?.key,
-                        )}
-                        className='w-full h-full object-contain'
-                        alt={currentChannel.name}
-                      />
-                    ) : (
-                      <Tv className='w-6 h-6 opacity-50' />
-                    )}
-                  </div>
-                  <h2 className='text-xl font-bold truncate'>
-                    {currentChannel.name}
-                  </h2>
-                </div>
-                <button
-                  onClick={toggleFavorite}
-                  className='hover:scale-110 transition-transform'
-                >
-                  <FavoriteIcon filled={isFavorite} />
-                </button>
+                    </div>
+                  </button>
+                ))}
               </div>
-              <EpgScrollableRow
-                programs={programs}
-                currentTime={new Date()}
-                isLoading={isEpgLoading}
-              />
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
     </PageLayout>
   );
 }
 
-const FavoriteIcon = ({ filled }: { filled: boolean }) =>
-  filled ? (
-    <Heart fill='#ef4444' className='text-red-500' />
-  ) : (
-    <Heart className='text-gray-500' />
-  );
-
 export default function LivePage() {
   return (
-    <Suspense fallback={<div>Loading...</div>}>
+    <Suspense
+      fallback={
+        <div className='h-screen w-full flex items-center justify-center bg-gray-50'>
+          <Loader2 className='animate-spin w-8 h-8 text-gray-400' />
+        </div>
+      }
+    >
       <LivePageClient />
     </Suspense>
   );
