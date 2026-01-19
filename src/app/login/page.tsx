@@ -129,7 +129,7 @@ function LoginPageClient() {
       {/* Main Card */}
       <div className='relative z-10 w-full max-w-md'>
         <div className='rounded-3xl bg-white/80 dark:bg-zinc-900/60 backdrop-blur-xl shadow-2xl p-8 sm:p-10 border border-white/20 dark:border-zinc-800/50'>
-          <h1 className='text-3xl font-extrabold text-center mb-8 bg-gradient-to-r from-green-600 to-emerald-600 bg-clip-text text-transparent drop-shadow-sm tracking-tight'>
+          <h1 className='text-3xl font-extrabold text-center mb-8 bg-linear-to-r from-green-600 to-emerald-600 bg-clip-text text-transparent drop-shadow-sm tracking-tight'>
             {siteName}
           </h1>
 
