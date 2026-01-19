@@ -604,6 +604,37 @@ export default function VideoJsPlayer({
       : `${m}:${sec.toString().padStart(2, '0')}`;
   };
 
+  // FIX: Bypass iOS Silent Mode (Web Audio Unlock)
+  const audioUnlockedRef = useRef(false);
+  const unlockAudio = useCallback(() => {
+    if (audioUnlockedRef.current) return;
+
+    // Create connection to wake up audio engine
+    const AudioContext =
+      window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContext) return;
+
+    try {
+      const ctx = new AudioContext();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      // Zero gain (silent)
+      gain.gain.value = 0;
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      if (osc.start) osc.start(0);
+      osc.stop(0.001); // Stop immediately
+
+      console.log('[Audio] Unlocked audio engine');
+      audioUnlockedRef.current = true;
+    } catch (e) {
+      console.warn('[Audio] Failed to unlock:', e);
+    }
+  }, []);
+
   const clearNativeAutoplayListeners = useCallback(() => {
     const prev = nativeAutoplayRef.current;
     if (prev.video && prev.handler) {
@@ -1117,6 +1148,7 @@ export default function VideoJsPlayer({
         ref={setGestureNode}
         className='tap-layer'
         onClick={() => {
+          unlockAudio();
           if (settingsOpen) {
             setSettingsOpen(false);
             return;
