@@ -1,6 +1,8 @@
+'use client';
+
 import { useEffect, useState } from 'react';
 
-import { isForcedMobile } from '@/lib/utils';
+import { isForcedMobile } from '@/lib/utils'; // Assuming this checks window.innerWidth
 
 import { BackButton } from './BackButton';
 import { LanguageToggle } from './LanguageToggle';
@@ -10,57 +12,101 @@ import Sidebar from './Sidebar';
 import { ThemeToggle } from './ThemeToggle';
 import { UserMenu } from './UserMenu';
 
-
 interface PageLayoutProps {
   children: React.ReactNode;
   activePath?: string;
 }
 
 const PageLayout = ({ children, activePath = '/' }: PageLayoutProps) => {
+  // Default to false to match Server Side Rendering (SSR)
   const [forcedMobile, setForcedMobile] = useState(false);
 
+  // Sync state after mount to avoid Hydration Mismatch
   useEffect(() => {
+    // If your isForcedMobile() is just "window.innerWidth < 768",
+    // you might not even need this state and could rely purely on CSS 'md:'.
+    // We keep it here in case you have complex logic (e.g. user preference override).
     setForcedMobile(isForcedMobile());
+
+    // Optional: Add resize listener if 'forcedMobile' depends on window width
+    const handleResize = () => setForcedMobile(isForcedMobile());
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  return (
-    <div className='w-full min-h-screen'>
-      {/* 移动端头部 */}
-      <MobileHeader 
-        showBackButton={['/play', '/live'].includes(activePath)} 
-        forced={forcedMobile}
-      />
+  // Helper: Are we effectively in desktop mode?
+  // We use CSS 'md:' for the base truth, but this bool helps with conditional rendering
+  const isDesktopMode = !forcedMobile;
+  const showBackButton = ['/play', '/live'].includes(activePath);
 
-      {/* 主要布局容器 */}
-      <div className={`flex ${forcedMobile ? '' : 'md:grid md:grid-cols-[auto_1fr]'} w-full min-h-screen md:min-h-auto`}>
-        {/* 侧边栏 - 桌面端显示，移动端隐藏 */}
-        <div className={forcedMobile ? 'hidden' : 'hidden md:block'}>
+  return (
+    <div className='relative min-h-screen w-full bg-background text-foreground'>
+      {/* --- Mobile Header --- */}
+      {/* Hidden on desktop via CSS, or forced visible if isDesktopMode is false */}
+      <div className={isDesktopMode ? 'md:hidden' : 'block'}>
+        <MobileHeader showBackButton={showBackButton} forced={forcedMobile} />
+      </div>
+
+      {/* --- Main Layout Wrapper --- */}
+      {/* Structure:
+         - Mobile: Flex column
+         - Desktop: Grid (Sidebar | Content)
+         - We conditionally apply 'md:grid' only if we are NOT in forced mobile mode.
+      */}
+      <div
+        className={`
+        flex flex-col min-h-screen w-full
+        ${isDesktopMode ? 'md:grid md:grid-cols-[auto_1fr]' : ''}
+      `}
+      >
+        {/* --- Sidebar (Desktop) --- */}
+        {/* Sticky Sidebar Pattern: 
+            Sidebar stays fixed height, Main content scrolls the body.
+            'self-start' ensures it sticks to top.
+        */}
+        <div
+          className={`
+          ${isDesktopMode ? 'hidden md:block' : 'hidden'} 
+          sticky top-0 h-screen overflow-y-auto self-start 
+          border-r border-border bg-card/50 backdrop-blur-sm z-30
+        `}
+        >
           <Sidebar activePath={activePath} />
         </div>
 
-        {/* 主内容区域 */}
-        <div className='relative min-w-0 flex-1 transition-all duration-300'>
-          {/* 桌面端左上角返回按钮 */}
-          {['/play', '/live'].includes(activePath) && (
-            <div className={`absolute top-3 left-1 z-20 ${forcedMobile ? 'hidden' : 'hidden md:flex'}`}>
-              <BackButton />
-            </div>
+        {/* --- Content Area --- */}
+        <div className='relative flex flex-1 flex-col min-w-0'>
+          {/* Desktop Controls (Absolute Top-Right) */}
+          {isDesktopMode && (
+            <>
+              {showBackButton && (
+                <div className='hidden md:flex absolute top-4 left-4 z-40'>
+                  <BackButton />
+                </div>
+              )}
+
+              <div className='hidden md:flex absolute top-4 right-6 z-40 items-center gap-3'>
+                <LanguageToggle />
+                <ThemeToggle />
+                <UserMenu />
+              </div>
+            </>
           )}
 
-          {/* 桌面端顶部按钮 */}
-          <div className={`absolute top-2 right-4 z-20 ${forcedMobile ? 'hidden' : 'hidden md:flex'} items-center gap-2`}>
-            <LanguageToggle />
-            <ThemeToggle />
-            <UserMenu />
-          </div>
-
-          {/* 主内容 */}
+          {/* Main Content */}
           <main
-            className={`flex-1 ${forcedMobile ? 'mt-12 mb-14' : 'md:min-h-0 mb-14 md:mb-0 md:mt-0 mt-12'}`}
+            className={`
+              flex-1 w-full
+              /* Mobile: add top margin for header */
+              mt-[48px] 
+              /* Desktop: remove top margin */
+              ${isDesktopMode ? 'md:mt-0' : ''}
+            `}
             style={{
-              paddingBottom: forcedMobile 
-                ? 'calc(3.5rem + env(safe-area-inset-bottom))' 
-                : 'calc(3.5rem + env(safe-area-inset-bottom))',
+              // Safe area padding for mobile bottom nav
+              paddingBottom: isDesktopMode
+                ? '0px'
+                : 'calc(4rem + env(safe-area-inset-bottom))',
             }}
           >
             {children}
@@ -68,8 +114,8 @@ const PageLayout = ({ children, activePath = '/' }: PageLayoutProps) => {
         </div>
       </div>
 
-      {/* 移动端底部导航 */}
-      <div className={forcedMobile ? 'block' : 'md:hidden'}>
+      {/* --- Mobile Bottom Nav --- */}
+      <div className={isDesktopMode ? 'md:hidden' : 'block'}>
         <MobileBottomNav activePath={activePath} forced={forcedMobile} />
       </div>
     </div>
