@@ -1,6 +1,14 @@
-/* eslint-disable @typescript-eslint/no-explicit-any,react-hooks/exhaustive-deps */
+/* eslint-disable @typescript-eslint/no-explicit-any */
+'use client';
 
-import { ExternalLink, Heart, Link, PlayCircleIcon, Radio, Trash2 } from 'lucide-react';
+import {
+  ExternalLink,
+  Heart,
+  Link,
+  PlayCircleIcon,
+  Radio,
+  Trash2,
+} from 'lucide-react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import React, {
@@ -27,6 +35,8 @@ import { useLongPress } from '@/hooks/useLongPress';
 import { ImagePlaceholder } from '@/components/ImagePlaceholder';
 import { useLanguage } from '@/components/LanguageProvider';
 import MobileActionSheet from '@/components/MobileActionSheet';
+
+// --- Types ---
 
 export interface VideoCardProps {
   id?: string;
@@ -56,1018 +66,563 @@ export type VideoCardHandle = {
   setDoubanId: (id?: number) => void;
 };
 
-const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard(
-  {
-    id,
-    title = '',
-    query = '',
-    poster = '',
-    episodes,
-    source,
-    source_name,
-    source_names,
-    progress = 0,
-    year,
-    from,
-    currentEpisode,
-    douban_id,
-    onDelete,
-    rate,
-    type = '',
-    isBangumi = false,
-    isAggregate = false,
-    origin = 'vod',
-  }: VideoCardProps,
-  ref
-) {
-  const router = useRouter();
-  const { convert } = useLanguage();
+// --- Helpers ---
+
+const getConfig = (from: string, rate?: string) => {
+  const configs: Record<string, any> = {
+    playrecord: {
+      showSourceName: true,
+      showProgress: true,
+      showPlayButton: true,
+      showHeart: true,
+      showCheckCircle: true,
+      showDoubanLink: false,
+      showRating: false,
+      showYear: false,
+    },
+    favorite: {
+      showSourceName: true,
+      showProgress: false,
+      showPlayButton: true,
+      showHeart: true,
+      showCheckCircle: false,
+      showDoubanLink: false,
+      showRating: false,
+      showYear: false,
+    },
+    search: {
+      showSourceName: true,
+      showProgress: false,
+      showPlayButton: true,
+      showHeart: true,
+      showCheckCircle: false,
+      showDoubanLink: true,
+      showRating: false,
+      showYear: true,
+    },
+    douban: {
+      showSourceName: false,
+      showProgress: false,
+      showPlayButton: true,
+      showHeart: true,
+      showCheckCircle: false,
+      showDoubanLink: true,
+      showRating: !!rate,
+      showYear: false,
+    },
+  };
+  return configs[from] || configs.search;
+};
+
+// --- Custom Hook: Unified Favorite Logic ---
+
+const useFavoriteStatus = (
+  shouldCheck: boolean, // If false, we wait for explicit check
+  source?: string,
+  id?: string,
+) => {
   const [favorited, setFavorited] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [showMobileActions, setShowMobileActions] = useState(false);
-  const [searchFavorited, setSearchFavorited] = useState<boolean | null>(null); // 搜索结果的收藏状态
+  const [hasChecked, setHasChecked] = useState(false);
 
-  // 可外部修改的可控字段
-  const [dynamicEpisodes, setDynamicEpisodes] = useState<number | undefined>(
-    episodes
-  );
-  const [dynamicSourceNames, setDynamicSourceNames] = useState<string[] | undefined>(
-    source_names
-  );
-  const [dynamicDoubanId, setDynamicDoubanId] = useState<number | undefined>(
-    douban_id
-  );
+  // DB Check Function
+  const checkStatus = useCallback(async () => {
+    if (!source || !id) return;
+    try {
+      const status = await isFavorited(source, id);
+      setFavorited(status);
+      setHasChecked(true);
+    } catch {
+      setFavorited(false);
+    }
+  }, [source, id]);
 
+  // Initial Auto-Check (only for non-lazy contexts)
   useEffect(() => {
-    setDynamicEpisodes(episodes);
-  }, [episodes]);
+    if (shouldCheck && !hasChecked) checkStatus();
+  }, [shouldCheck, hasChecked, checkStatus]);
 
+  // Subscription (Always active once we know the ID, to keep UI in sync)
   useEffect(() => {
-    setDynamicSourceNames(source_names);
-  }, [source_names]);
-
-  useEffect(() => {
-    setDynamicDoubanId(douban_id);
-  }, [douban_id]);
-
-  useImperativeHandle(ref, () => ({
-    setEpisodes: (eps?: number) => setDynamicEpisodes(eps),
-    setSourceNames: (names?: string[]) => setDynamicSourceNames(names),
-    setDoubanId: (id?: number) => setDynamicDoubanId(id),
-  }));
-
-  const actualTitle = title;
-  const actualPoster = poster;
-  const actualSource = source;
-  const actualId = id;
-  const actualDoubanId = dynamicDoubanId;
-  const actualEpisodes = dynamicEpisodes;
-  const actualYear = year;
-  const actualQuery = query || '';
-  const actualSearchType = isAggregate
-    ? (actualEpisodes && actualEpisodes === 1 ? 'movie' : 'tv')
-    : type;
-
-  // 获取收藏状态（搜索结果页面不检查）
-  useEffect(() => {
-    if (from === 'douban' || from === 'search' || !actualSource || !actualId) return;
-
-    const fetchFavoriteStatus = async () => {
-      try {
-        const fav = await isFavorited(actualSource, actualId);
-        setFavorited(fav);
-      } catch (err) {
-        throw new Error('检查收藏状态失败');
-      }
-    };
-
-    fetchFavoriteStatus();
-
-    // 监听收藏状态更新事件
-    const storageKey = generateStorageKey(actualSource, actualId);
-    const unsubscribe = subscribeToDataUpdates(
+    if (!source || !id) return;
+    const storageKey = generateStorageKey(source, id);
+    return subscribeToDataUpdates(
       'favoritesUpdated',
       (newFavorites: Record<string, any>) => {
-        // 检查当前项目是否在新的收藏列表中
-        const isNowFavorited = !!newFavorites[storageKey];
-        setFavorited(isNowFavorited);
-      }
+        setFavorited(!!newFavorites[storageKey]);
+      },
+    );
+  }, [source, id]);
+
+  return { favorited, setFavorited, checkStatus, hasChecked };
+};
+
+// --- Main Component ---
+
+const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
+  function VideoCard(
+    {
+      id,
+      title = '',
+      query = '',
+      poster = '',
+      episodes,
+      source,
+      source_name,
+      source_names,
+      progress = 0,
+      year,
+      from,
+      currentEpisode,
+      douban_id,
+      onDelete,
+      rate,
+      type = '',
+      isBangumi = false,
+      isAggregate = false,
+      origin = 'vod',
+    },
+    ref,
+  ) {
+    const router = useRouter();
+    const { convert } = useLanguage();
+
+    // State
+    const [imageLoaded, setImageLoaded] = useState(false);
+    const [showMobileActions, setShowMobileActions] = useState(false);
+
+    // Dynamic props: Initialize from props ONCE.
+    // Updates should come via imperative handle or parent remounting with new key.
+    const [dynamicEpisodes, setDynamicEpisodes] = useState(episodes);
+    const [dynamicSourceNames, setDynamicSourceNames] = useState(source_names);
+    const [dynamicDoubanId, setDynamicDoubanId] = useState(douban_id);
+
+    useImperativeHandle(ref, () => ({
+      setEpisodes: setDynamicEpisodes,
+      setSourceNames: setDynamicSourceNames,
+      setDoubanId: setDynamicDoubanId,
+    }));
+
+    // Derived values
+    const actualEpisodes = dynamicEpisodes;
+    const actualDoubanId = dynamicDoubanId;
+    const searchType = isAggregate
+      ? actualEpisodes === 1
+        ? 'movie'
+        : 'tv'
+      : type;
+    const config = useMemo(() => getConfig(from, rate), [from, rate]);
+
+    // Unified Favorite Logic
+    // Lazy check only for search results to save DB reads
+    const isSearch = from === 'search';
+    const { favorited, setFavorited, checkStatus, hasChecked } =
+      useFavoriteStatus(
+        !isSearch, // Auto-check if NOT search
+        source,
+        id,
+      );
+
+    // Handlers
+    const handleToggleFavorite = useCallback(
+      async (e: React.MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (from === 'douban' || !source || !id) return;
+
+        // Ensure we have latest state before toggling
+        if (isSearch && !hasChecked) await checkStatus();
+
+        try {
+          if (favorited) {
+            await deleteFavorite(source, id);
+            setFavorited(false); // Optimistic update
+          } else {
+            await saveFavorite(source, id, {
+              title,
+              source_name: source_name || '',
+              year: year || '',
+              cover: poster,
+              total_episodes: actualEpisodes ?? 1,
+              save_time: Date.now(),
+            });
+            setFavorited(true); // Optimistic update
+          }
+        } catch {
+          /* safely ignore */
+        }
+      },
+      [
+        from,
+        source,
+        id,
+        title,
+        source_name,
+        year,
+        poster,
+        actualEpisodes,
+        favorited,
+        isSearch,
+        hasChecked,
+        checkStatus,
+        setFavorited,
+      ],
     );
 
-    return unsubscribe;
-  }, [from, actualSource, actualId]);
-
-  const handleToggleFavorite = useCallback(
-    async (e: React.MouseEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (from === 'douban' || !actualSource || !actualId) return;
-
-      try {
-        // 确定当前收藏状态
-        const currentFavorited = from === 'search' ? searchFavorited : favorited;
-
-        if (currentFavorited) {
-          // 如果已收藏，删除收藏
-          await deleteFavorite(actualSource, actualId);
-          if (from === 'search') {
-            setSearchFavorited(false);
-          } else {
-            setFavorited(false);
-          }
-        } else {
-          // 如果未收藏，添加收藏
-          await saveFavorite(actualSource, actualId, {
-            title: actualTitle,
-            source_name: source_name || '',
-            year: actualYear || '',
-            cover: actualPoster,
-            total_episodes: actualEpisodes ?? 1,
-            save_time: Date.now(),
-          });
-          if (from === 'search') {
-            setSearchFavorited(true);
-          } else {
-            setFavorited(true);
-          }
+    const handleDeleteRecord = useCallback(
+      async (e: React.MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (from !== 'playrecord' || !source || !id) return;
+        try {
+          await deletePlayRecord(source, id);
+          onDelete?.();
+        } catch {
+          /* safely ignore */
         }
-      } catch (err) {
-        throw new Error('切换收藏状态失败');
+      },
+      [from, source, id, onDelete],
+    );
+
+    const getPlayUrl = useCallback(() => {
+      const params = new URLSearchParams();
+      if (title) params.set('title', title.trim());
+      if (year) params.set('year', year);
+      if (searchType) params.set('stype', searchType);
+      if (isAggregate) params.set('prefer', 'true');
+      if (query) params.set('stitle', query.trim());
+
+      if (!source && !id && poster) params.set('cover', poster);
+
+      if (origin === 'live' && source && id) {
+        return `/live?source=${source.replace('live_', '')}&id=${id.replace('live_', '')}`;
       }
-    },
-    [
+
+      if (
+        source &&
+        id &&
+        !from?.includes('douban') &&
+        (!isAggregate || (source && id))
+      ) {
+        return `/play?source=${source}&id=${id}&${params.toString()}&cover=${encodeURIComponent(poster)}`;
+      }
+
+      return `/play?${params.toString()}`;
+    }, [
+      origin,
+      source,
+      id,
+      title,
+      year,
+      searchType,
+      isAggregate,
+      query,
       from,
-      actualSource,
-      actualId,
-      actualTitle,
-      source_name,
-      actualYear,
-      actualPoster,
-      actualEpisodes,
-      favorited,
-      searchFavorited,
-    ]
-  );
+      poster,
+    ]);
 
-  const handleDeleteRecord = useCallback(
-    async (e: React.MouseEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (from !== 'playrecord' || !actualSource || !actualId) return;
-      try {
-        await deletePlayRecord(actualSource, actualId);
-        onDelete?.();
-      } catch (err) {
-        throw new Error('删除播放记录失败');
+    const handleClick = useCallback(
+      () => router.push(getPlayUrl()),
+      [router, getPlayUrl],
+    );
+    const handlePlayInNewTab = useCallback(() => {
+      window.open(getPlayUrl(), '_blank');
+    }, [getPlayUrl]);
+
+    // Interaction Handlers
+    const handleInteractionStart = useCallback(() => {
+      if (isSearch && !hasChecked) checkStatus();
+    }, [isSearch, hasChecked, checkStatus]);
+
+    const handleLongPress = useCallback(() => {
+      if (!showMobileActions) {
+        setShowMobileActions(true);
+        handleInteractionStart();
       }
-    },
-    [from, actualSource, actualId, onDelete]
-  );
+    }, [showMobileActions, handleInteractionStart]);
 
-  const handleClick = useCallback(() => {
-    if (origin === 'live' && actualSource && actualId) {
-      // 直播内容跳转到直播页面
-      const url = `/live?source=${actualSource.replace('live_', '')}&id=${actualId.replace('live_', '')}`;
-      router.push(url);
-    } else if (from === 'douban' || (isAggregate && !actualSource && !actualId)) {
-      const url = `/play?title=${encodeURIComponent(actualTitle.trim())}${actualYear ? `&year=${actualYear}` : ''
-        }${actualSearchType ? `&stype=${actualSearchType}` : ''}${isAggregate ? '&prefer=true' : ''}${actualQuery ? `&stitle=${encodeURIComponent(actualQuery.trim())}` : ''}${actualPoster ? `&cover=${encodeURIComponent(actualPoster)}` : ''}`;
-      router.push(url);
-    } else if (actualSource && actualId) {
-      const url = `/play?source=${actualSource}&id=${actualId}&title=${encodeURIComponent(
-        actualTitle
-      )}${actualYear ? `&year=${actualYear}` : ''}${isAggregate ? '&prefer=true' : ''
-        }${actualQuery ? `&stitle=${encodeURIComponent(actualQuery.trim())}` : ''
-        }${actualSearchType ? `&stype=${actualSearchType}` : ''}${actualPoster ? `&cover=${encodeURIComponent(actualPoster)}` : ''}`;
-      router.push(url);
-    }
-  }, [
-    origin,
-    from,
-    actualSource,
-    actualId,
-    router,
-    actualTitle,
-    actualYear,
-    isAggregate,
-    actualQuery,
-    actualSearchType,
-  ]);
+    const { isPressed, ...longPressProps } = useLongPress({
+      onLongPress: handleLongPress,
+      longPressDelay: 500,
+      moveThreshold: 50,
+    });
 
-  // 新标签页播放处理函数
-  const handlePlayInNewTab = useCallback(() => {
-    if (origin === 'live' && actualSource && actualId) {
-      // 直播内容跳转到直播页面
-      const url = `/live?source=${actualSource.replace('live_', '')}&id=${actualId.replace('live_', '')}`;
-      window.open(url, '_blank');
-    } else if (from === 'douban' || (isAggregate && !actualSource && !actualId)) {
-      const url = `/play?title=${encodeURIComponent(actualTitle.trim())}${actualYear ? `&year=${actualYear}` : ''}${actualSearchType ? `&stype=${actualSearchType}` : ''}${isAggregate ? '&prefer=true' : ''}${actualQuery ? `&stitle=${encodeURIComponent(actualQuery.trim())}` : ''}`;
-      window.open(url, '_blank');
-    } else if (actualSource && actualId) {
-      const url = `/play?source=${actualSource}&id=${actualId}&title=${encodeURIComponent(
-        actualTitle
-      )}${actualYear ? `&year=${actualYear}` : ''}${isAggregate ? '&prefer=true' : ''
-        }${actualQuery ? `&stitle=${encodeURIComponent(actualQuery.trim())}` : ''
-        }${actualSearchType ? `&stype=${actualSearchType}` : ''}`;
-      window.open(url, '_blank');
-    }
-  }, [
-    origin,
-    from,
-    actualSource,
-    actualId,
-    actualTitle,
-    actualYear,
-    isAggregate,
-    actualQuery,
-    actualSearchType,
-  ]);
+    // Context Menu: Only open sheet on touch devices
+    const handleContextMenu = useCallback(
+      (e: React.MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
 
-  // 检查搜索结果的收藏状态
-  const checkSearchFavoriteStatus = useCallback(async () => {
-    if (from === 'search' && !isAggregate && actualSource && actualId && searchFavorited === null) {
-      try {
-        const fav = await isFavorited(actualSource, actualId);
-        setSearchFavorited(fav);
-      } catch (err) {
-        setSearchFavorited(false);
-      }
-    }
-  }, [from, isAggregate, actualSource, actualId, searchFavorited]);
+        // Check for coarse pointer (touch)
+        const isTouch =
+          typeof window !== 'undefined' &&
+          window.matchMedia('(pointer: coarse)').matches;
 
-  // 长按操作
-  const handleLongPress = useCallback(() => {
-    if (!showMobileActions) { // 防止重复触发
-      // 立即显示菜单，避免等待数据加载导致动画卡顿
-      setShowMobileActions(true);
-
-      // 异步检查收藏状态，不阻塞菜单显示
-      if (from === 'search' && !isAggregate && actualSource && actualId && searchFavorited === null) {
-        checkSearchFavoriteStatus();
-      }
-    }
-  }, [showMobileActions, from, isAggregate, actualSource, actualId, searchFavorited, checkSearchFavoriteStatus]);
-
-  // 长按手势hook
-  const { isPressed, ...longPressProps } = useLongPress({
-    onLongPress: handleLongPress,
-    longPressDelay: 500,
-    moveThreshold: 50, // Increase threshold to allow for finger 'roll'
-  });
-
-  // Calculate dynamic classes for interaction feedback
-  const containerClasses = useMemo(() => {
-    // Dynamic transition speed: fast in, smooth out
-    const transitionClass = isPressed 
-      ? 'transition-all duration-75 ease-out' 
-      : 'transition-all duration-200 ease-out';
-      
-    const baseClasses = `group relative w-full rounded-lg bg-transparent cursor-pointer ${transitionClass}`;
-    
-    if (showMobileActions) {
-      // Long press triggered (Magnify)
-      return `${baseClasses} scale-110 z-500 brightness-110`;
-    }
-    
-    if (isPressed) {
-      // Pressing (Dim + Shrink)
-      return `${baseClasses} scale-95 opacity-80 brightness-90 z-10`;
-    }
-    
-    // Idle state
-    return `${baseClasses} scale-100 hover:scale-[1.05] hover:z-500`;
-  }, [showMobileActions, isPressed]);
-
-  const config = useMemo(() => {
-    const configs = {
-      playrecord: {
-        showSourceName: true,
-        showProgress: true,
-        showPlayButton: true,
-        showHeart: true,
-        showCheckCircle: true,
-        showDoubanLink: false,
-        showRating: false,
-        showYear: false,
-      },
-      favorite: {
-        showSourceName: true,
-        showProgress: false,
-        showPlayButton: true,
-        showHeart: true,
-        showCheckCircle: false,
-        showDoubanLink: false,
-        showRating: false,
-        showYear: false,
-      },
-      search: {
-        showSourceName: true,
-        showProgress: false,
-        showPlayButton: true,
-        showHeart: true, // 移动端菜单中需要显示收藏选项
-        showCheckCircle: false,
-        showDoubanLink: true, // 移动端菜单中显示豆瓣链接
-        showRating: false,
-        showYear: true,
-      },
-      douban: {
-        showSourceName: false,
-        showProgress: false,
-        showPlayButton: true,
-        showHeart: true,
-        showCheckCircle: false,
-        showDoubanLink: true,
-        showRating: !!rate,
-        showYear: false,
-      },
-    };
-    return configs[from] || configs.search;
-  }, [from, isAggregate, douban_id, rate]);
-
-  // 移动端操作菜单配置
-  const mobileActions = useMemo(() => {
-    const actions = [];
-
-    // 播放操作
-    if (config.showPlayButton) {
-      actions.push({
-        id: 'play',
-        label: origin === 'live' ? '观看直播' : '播放',
-        icon: <PlayCircleIcon size={20} />,
-        onClick: handleClick,
-        color: 'primary' as const,
-      });
-
-      // 新标签页播放
-      actions.push({
-        id: 'play-new-tab',
-        label: origin === 'live' ? '新标签页观看' : '新标签页播放',
-        icon: <ExternalLink size={20} />,
-        onClick: handlePlayInNewTab,
-        color: 'default' as const,
-      });
-    }
-
-    // 聚合源信息 - 直接在菜单中展示，不需要单独的操作项
-
-    // 收藏/取消收藏操作
-    if (config.showHeart && actualSource && actualId) {
-      const currentFavorited = from === 'search' ? searchFavorited : favorited;
-
-      if (from === 'search') {
-        // 搜索结果：根据加载状态显示不同的选项
-        if (searchFavorited !== null) {
-          // 已加载完成，显示实际的收藏状态
-          actions.push({
-            id: 'favorite',
-            label: currentFavorited ? '取消收藏' : '添加收藏',
-            icon: currentFavorited ? (
-              <Heart size={20} className="fill-red-600 stroke-red-600" />
-            ) : (
-              <Heart size={20} className="fill-transparent stroke-red-500" />
-            ),
-            onClick: () => {
-              const mockEvent = {
-                preventDefault: () => { },
-                stopPropagation: () => { },
-              } as React.MouseEvent;
-              handleToggleFavorite(mockEvent);
-            },
-            color: currentFavorited ? ('danger' as const) : ('default' as const),
-          });
-        } else {
-          // 正在加载中，显示占位项
-          actions.push({
-            id: 'favorite-loading',
-            label: '收藏加载中...',
-            icon: <Heart size={20} />,
-            onClick: () => { }, // 加载中时不响应点击
-            disabled: true,
-          });
+        if (isTouch) {
+          setShowMobileActions(true);
+          handleInteractionStart();
         }
-      } else {
-        // 非搜索结果：直接显示收藏选项
+        return false;
+      },
+      [handleInteractionStart],
+    );
+
+    // Action Menu Config
+    const mobileActions = useMemo(() => {
+      const actions = [];
+      if (config.showPlayButton) {
         actions.push({
-          id: 'favorite',
-          label: currentFavorited ? '取消收藏' : '添加收藏',
-          icon: currentFavorited ? (
-            <Heart size={20} className="fill-red-600 stroke-red-600" />
-          ) : (
-            <Heart size={20} className="fill-transparent stroke-red-500" />
-          ),
-          onClick: () => {
-            const mockEvent = {
-              preventDefault: () => { },
-              stopPropagation: () => { },
-            } as React.MouseEvent;
-            handleToggleFavorite(mockEvent);
-          },
-          color: currentFavorited ? ('danger' as const) : ('default' as const),
+          id: 'play',
+          label: origin === 'live' ? '观看直播' : '播放',
+          icon: <PlayCircleIcon size={20} />,
+          onClick: handleClick,
+          color: 'primary' as const,
+        });
+        actions.push({
+          id: 'play-new-tab',
+          label: '新标签页打开',
+          icon: <ExternalLink size={20} />,
+          onClick: handlePlayInNewTab,
+          color: 'default' as const,
         });
       }
-    }
 
-    // 删除播放记录操作
-    if (config.showCheckCircle && from === 'playrecord' && actualSource && actualId) {
-      actions.push({
-        id: 'delete',
-        label: '删除记录',
-        icon: <Trash2 size={20} />,
-        onClick: () => {
-          const mockEvent = {
-            preventDefault: () => { },
-            stopPropagation: () => { },
-          } as React.MouseEvent;
-          handleDeleteRecord(mockEvent);
-        },
-        color: 'danger' as const,
-      });
-    }
+      if (config.showHeart && source && id) {
+        const loading = isSearch && !hasChecked;
+        actions.push({
+          id: 'favorite',
+          label: loading ? '加载中...' : favorited ? '取消收藏' : '添加收藏',
+          icon: (
+            <Heart
+              size={20}
+              className={favorited ? 'fill-red-600 stroke-red-600' : ''}
+            />
+          ),
+          onClick: (e?: any) => {
+            if (!loading && e) handleToggleFavorite(e);
+          },
+          color: (favorited ? 'danger' : 'default') as 'danger' | 'default',
+          disabled: loading,
+        });
+      }
 
-    // 豆瓣链接操作
-    if (config.showDoubanLink && actualDoubanId && actualDoubanId !== 0) {
-      actions.push({
-        id: 'douban',
-        label: isBangumi ? 'Bangumi 详情' : '豆瓣详情',
-        icon: <Link size={20} />,
-        onClick: () => {
-          const url = isBangumi
-            ? `https://bgm.tv/subject/${actualDoubanId.toString()}`
-            : `https://movie.douban.com/subject/${actualDoubanId.toString()}`;
-          window.open(url, '_blank', 'noopener,noreferrer');
-        },
-        color: 'default' as const,
-      });
-    }
+      if (config.showCheckCircle && from === 'playrecord') {
+        actions.push({
+          id: 'delete',
+          label: '删除记录',
+          icon: <Trash2 size={20} />,
+          onClick: (e?: any) => {
+            if (e) handleDeleteRecord(e);
+          },
+          color: 'danger' as const,
+        });
+      }
 
-    return actions;
-  }, [
-    config,
-    from,
-    actualSource,
-    actualId,
-    favorited,
-    searchFavorited,
-    actualDoubanId,
-    isBangumi,
-    isAggregate,
-    dynamicSourceNames,
-    handleClick,
-    handleToggleFavorite,
-    handleDeleteRecord,
-  ]);
+      if (config.showDoubanLink && actualDoubanId) {
+        actions.push({
+          id: 'douban',
+          label: isBangumi ? 'Bangumi' : '豆瓣详情',
+          icon: <Link size={20} />,
+          onClick: () => {
+            window.open(
+              isBangumi
+                ? `https://bgm.tv/subject/${actualDoubanId}`
+                : `https://movie.douban.com/subject/${actualDoubanId}`,
+              '_blank',
+            );
+          },
+          color: 'default' as const,
+        });
+      }
+      return actions;
+    }, [
+      config,
+      origin,
+      handleClick,
+      handlePlayInNewTab,
+      source,
+      id,
+      isSearch,
+      hasChecked,
+      favorited,
+      handleToggleFavorite,
+      handleDeleteRecord,
+      actualDoubanId,
+      isBangumi,
+      from,
+    ]);
 
-  return (
-    <>
-      <div
-        className={containerClasses}
-        onClick={handleClick}
-        {...longPressProps}
-        style={{
-          // 禁用所有默认的长按和选择效果
-          WebkitUserSelect: 'none',
-          userSelect: 'none',
-          WebkitTouchCallout: 'none',
-          WebkitTapHighlightColor: 'transparent',
-          touchAction: 'manipulation',
-          // 禁用右键菜单和长按菜单
-          pointerEvents: 'auto',
-        } as React.CSSProperties}
-        onContextMenu={(e) => {
-          // 阻止默认右键菜单
-          e.preventDefault();
-          e.stopPropagation();
+    // Dynamic Styles
+    const containerStyle = useMemo(
+      () => ({
+        transform: showMobileActions
+          ? 'scale(1.1)'
+          : isPressed
+            ? 'scale(0.95)'
+            : 'scale(1)',
+        opacity: isPressed ? 0.8 : 1,
+        zIndex: showMobileActions ? 50 : isPressed ? 10 : 'auto',
+        filter: showMobileActions
+          ? 'brightness(1.1)'
+          : isPressed
+            ? 'brightness(0.9)'
+            : 'none',
+        transition: isPressed ? 'all 0.1s ease-out' : 'all 0.2s ease-out',
+      }),
+      [showMobileActions, isPressed],
+    );
 
-          // 右键弹出操作菜单
-          setShowMobileActions(true);
-
-          // 异步检查收藏状态，不阻塞菜单显示
-          if (from === 'search' && !isAggregate && actualSource && actualId && searchFavorited === null) {
-            checkSearchFavoriteStatus();
-          }
-
-          return false;
-        }}
-
-        onDragStart={(e) => {
-          // 阻止拖拽
-          e.preventDefault();
-          return false;
-        }}
-      >
-        {/* 海报容器 */}
+    return (
+      <>
         <div
-          className={`relative aspect-2/3 overflow-hidden rounded-lg ${origin === 'live' ? 'ring-1 ring-gray-300/80 dark:ring-gray-600/80' : ''}`}
-          style={{
-            WebkitUserSelect: 'none',
-            userSelect: 'none',
-            WebkitTouchCallout: 'none',
-          } as React.CSSProperties}
-          onContextMenu={(e) => {
-            e.preventDefault();
-            return false;
-          }}
+          className='group relative w-full rounded-lg bg-transparent cursor-pointer select-none touch-manipulation'
+          onClick={handleClick}
+          {...longPressProps}
+          style={containerStyle}
+          onContextMenu={handleContextMenu}
+          onDragStart={(e) => e.preventDefault()}
         >
-          {/* 骨架屏 */}
-          {!isLoading && <ImagePlaceholder aspectRatio='aspect-2/3' />}
-          {/* 图片 */}
-          <Image
-            src={processImageUrl(actualPoster)}
-            alt={actualTitle}
-            fill
-            className={origin === 'live' ? 'object-contain' : 'object-cover'}
-            referrerPolicy='no-referrer'
-            loading='lazy'
-            onLoadingComplete={() => setIsLoading(true)}
-            onError={(e) => {
-              // 图片加载失败时的重试机制
-              const img = e.target as HTMLImageElement;
-              if (!img.dataset.retried) {
-                img.dataset.retried = 'true';
-                setTimeout(() => {
-                  img.src = processImageUrl(actualPoster);
-                }, 2000);
-              }
-            }}
-            style={{
-              // 禁用图片的默认长按效果
-              WebkitUserSelect: 'none',
-              userSelect: 'none',
-              WebkitTouchCallout: 'none',
-              pointerEvents: 'none', // 图片不响应任何指针事件
-            } as React.CSSProperties}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              return false;
-            }}
-            onDragStart={(e) => {
-              e.preventDefault();
-              return false;
-            }}
-          />
-
-          {/* 悬浮遮罩 */}
+          {/* Poster */}
           <div
-            className='absolute inset-0 bg-linear-to-t from-black/80 via-black/20 to-transparent transition-opacity duration-300 ease-in-out opacity-0 group-hover:opacity-100'
-            style={{
-              WebkitUserSelect: 'none',
-              userSelect: 'none',
-              WebkitTouchCallout: 'none',
-            } as React.CSSProperties}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              return false;
-            }}
-          />
-
-          {/* 播放按钮 */}
-          {config.showPlayButton && (
-            <div
-              data-button="true"
-              className='absolute inset-0 flex items-center justify-center opacity-0 transition-all duration-300 ease-in-out delay-75 group-hover:opacity-100 group-hover:scale-100'
-              style={{
-                WebkitUserSelect: 'none',
-                userSelect: 'none',
-                WebkitTouchCallout: 'none',
-              } as React.CSSProperties}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                return false;
+            className={`relative aspect-2/3 overflow-hidden rounded-lg ${origin === 'live' ? 'ring-1 ring-gray-300/80 dark:ring-gray-600/80' : ''}`}
+          >
+            {!imageLoaded && <ImagePlaceholder aspectRatio='aspect-2/3' />}
+            <Image
+              src={processImageUrl(poster)}
+              alt={title}
+              fill
+              className={origin === 'live' ? 'object-contain' : 'object-cover'}
+              referrerPolicy='no-referrer'
+              loading='lazy'
+              onLoadingComplete={() => setImageLoaded(true)}
+              onError={(e) => {
+                const img = e.target as HTMLImageElement;
+                if (!img.dataset.retried) {
+                  img.dataset.retried = 'true';
+                  setTimeout(() => (img.src = processImageUrl(poster)), 2000);
+                }
               }}
-            >
-              <PlayCircleIcon
-                size={50}
-                strokeWidth={0.8}
-                className='text-white fill-transparent transition-all duration-300 ease-out hover:fill-green-500 hover:scale-[1.1]'
-                style={{
-                  WebkitUserSelect: 'none',
-                  userSelect: 'none',
-                  WebkitTouchCallout: 'none',
-                } as React.CSSProperties}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  return false;
-                }}
-              />
+              unoptimized
+            />
+
+            {/* Overlay */}
+            <div className='absolute inset-0 bg-linear-to-t from-black/80 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300' />
+
+            {/* Hover Play Button */}
+            {config.showPlayButton && (
+              <div className='absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-300 delay-75 scale-90 group-hover:scale-100'>
+                <PlayCircleIcon
+                  size={50}
+                  strokeWidth={0.8}
+                  className='text-white hover:fill-green-500 hover:scale-110 transition-transform'
+                />
+              </div>
+            )}
+
+            {/* Badges - Top Left */}
+            {config.showYear && year && year !== 'unknown' && (
+              <div className='absolute top-2 left-2 bg-black/60 text-white text-xs px-1.5 py-0.5 rounded backdrop-blur-md'>
+                {year}
+              </div>
+            )}
+
+            {/* Badges - Top Right */}
+            <div className='absolute top-2 right-2 flex flex-col items-end gap-1'>
+              {config.showRating && rate && (
+                <div className='bg-pink-500 text-white text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center shadow-sm'>
+                  {rate}
+                </div>
+              )}
+              {actualEpisodes && actualEpisodes > 1 && (
+                <div className='bg-green-600 text-white text-xs font-semibold px-1.5 py-0.5 rounded shadow-sm'>
+                  {currentEpisode
+                    ? `${currentEpisode}/${actualEpisodes}`
+                    : actualEpisodes}
+                </div>
+              )}
             </div>
-          )}
 
-          {/* 操作按钮 */}
-          {(config.showHeart || config.showCheckCircle) && (
-            <div
-              data-button="true"
-              className='absolute bottom-3 right-3 flex gap-3 opacity-0 translate-y-2 transition-all duration-300 ease-in-out sm:group-hover:opacity-100 sm:group-hover:translate-y-0'
-              style={{
-                WebkitUserSelect: 'none',
-                userSelect: 'none',
-                WebkitTouchCallout: 'none',
-              } as React.CSSProperties}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                return false;
-              }}
-            >
+            {/* Actions - Bottom Right */}
+            <div className='absolute bottom-2 right-2 flex gap-2 opacity-0 translate-y-2 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-300'>
               {config.showCheckCircle && (
                 <Trash2
                   onClick={handleDeleteRecord}
-                  size={20}
-                  className='text-white transition-all duration-300 ease-out hover:stroke-red-500 hover:scale-[1.1]'
-                  style={{
-                    WebkitUserSelect: 'none',
-                    userSelect: 'none',
-                    WebkitTouchCallout: 'none',
-                  } as React.CSSProperties}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    return false;
-                  }}
+                  size={18}
+                  className='text-white hover:text-red-500'
                 />
               )}
               {config.showHeart && from !== 'search' && (
                 <Heart
                   onClick={handleToggleFavorite}
-                  size={20}
-                  className={`transition-all duration-300 ease-out ${favorited
-                    ? 'fill-red-600 stroke-red-600'
-                    : 'fill-transparent stroke-white hover:stroke-red-400'
-                    } hover:scale-[1.1]`}
-                  style={{
-                    WebkitUserSelect: 'none',
-                    userSelect: 'none',
-                    WebkitTouchCallout: 'none',
-                  } as React.CSSProperties}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    return false;
-                  }}
+                  size={18}
+                  className={`hover:scale-110 transition-transform ${favorited ? 'fill-red-600 text-red-600' : 'text-white hover:text-red-400'}`}
                 />
               )}
             </div>
-          )}
 
-          {/* 年份徽章 */}
-          {config.showYear && actualYear && actualYear !== 'unknown' && actualYear.trim() !== '' && (
-            <div
-              className="absolute top-2 bg-black/50 text-white text-xs font-medium px-2 py-1 rounded backdrop-blur-sm shadow-sm transition-all duration-300 ease-out group-hover:opacity-90 left-2"
-              style={{
-                WebkitUserSelect: 'none',
-                userSelect: 'none',
-                WebkitTouchCallout: 'none',
-              } as React.CSSProperties}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                return false;
-              }}
-            >
-              {actualYear}
-            </div>
-          )}
-
-          {/* 徽章 */}
-          {config.showRating && rate && (
-            <div
-              className='absolute top-2 right-2 bg-pink-500 text-white text-xs font-bold w-7 h-7 rounded-full flex items-center justify-center shadow-md transition-all duration-300 ease-out group-hover:scale-110'
-              style={{
-                WebkitUserSelect: 'none',
-                userSelect: 'none',
-                WebkitTouchCallout: 'none',
-              } as React.CSSProperties}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                return false;
-              }}
-            >
-              {rate}
-            </div>
-          )}
-
-          {actualEpisodes && actualEpisodes > 1 && (
-            <div
-              className='absolute top-2 right-2 bg-green-500 text-white text-xs font-semibold px-2 py-1 rounded-md shadow-md transition-all duration-300 ease-out group-hover:scale-110'
-              style={{
-                WebkitUserSelect: 'none',
-                userSelect: 'none',
-                WebkitTouchCallout: 'none',
-              } as React.CSSProperties}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                return false;
-              }}
-            >
-              {currentEpisode
-                ? `${currentEpisode}/${actualEpisodes}`
-                : actualEpisodes}
-            </div>
-          )}
-
-          {/* 豆瓣链接 */}
-          {config.showDoubanLink && actualDoubanId && actualDoubanId !== 0 && (
-            <a
-              href={
-                isBangumi
-                  ? `https://bgm.tv/subject/${actualDoubanId.toString()}`
-                  : `https://movie.douban.com/subject/${actualDoubanId.toString()}`
-              }
-              target='_blank'
-              rel='noopener noreferrer'
-              onClick={(e) => e.stopPropagation()}
-              className='absolute top-2 left-2 opacity-0 -translate-x-2 transition-all duration-300 ease-in-out delay-100 sm:group-hover:opacity-100 sm:group-hover:translate-x-0'
-              style={{
-                WebkitUserSelect: 'none',
-                userSelect: 'none',
-                WebkitTouchCallout: 'none',
-              } as React.CSSProperties}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                return false;
-              }}
-            >
-              <div
-                className='bg-green-500 text-white text-xs font-bold w-7 h-7 rounded-full flex items-center justify-center shadow-md hover:bg-green-600 hover:scale-[1.1] transition-all duration-300 ease-out'
-                style={{
-                  WebkitUserSelect: 'none',
-                  userSelect: 'none',
-                  WebkitTouchCallout: 'none',
-                } as React.CSSProperties}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  return false;
-                }}
-              >
-                <Link
-                  size={16}
-                  style={{
-                    WebkitUserSelect: 'none',
-                    userSelect: 'none',
-                    WebkitTouchCallout: 'none',
-                    pointerEvents: 'none',
-                  } as React.CSSProperties}
-                />
-              </div>
-            </a>
-          )}
-
-          {/* 聚合播放源指示器 */}
-          {isAggregate && dynamicSourceNames && dynamicSourceNames.length > 0 && (() => {
-            const uniqueSources = Array.from(new Set(dynamicSourceNames));
-            const sourceCount = uniqueSources.length;
-
-            return (
-              <div
-                className='absolute bottom-2 right-2 opacity-0 transition-all duration-300 ease-in-out delay-75 sm:group-hover:opacity-100'
-                style={{
-                  WebkitUserSelect: 'none',
-                  userSelect: 'none',
-                  WebkitTouchCallout: 'none',
-                } as React.CSSProperties}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  return false;
-                }}
-              >
-                <div
-                  className='relative group/sources'
-                  style={{
-                    WebkitUserSelect: 'none',
-                    userSelect: 'none',
-                    WebkitTouchCallout: 'none',
-                  } as React.CSSProperties}
-                >
-                  <div
-                    className='bg-gray-700 text-white text-xs font-bold w-6 h-6 sm:w-7 sm:h-7 rounded-full flex items-center justify-center shadow-md hover:bg-gray-600 hover:scale-[1.1] transition-all duration-300 ease-out cursor-pointer'
-                    style={{
-                      WebkitUserSelect: 'none',
-                      userSelect: 'none',
-                      WebkitTouchCallout: 'none',
-                    } as React.CSSProperties}
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      return false;
-                    }}
-                  >
-                    {sourceCount}
+            {/* Source Counter - Bottom Left (Moved to prevent collision) */}
+            {isAggregate &&
+              dynamicSourceNames &&
+              dynamicSourceNames.length > 0 && (
+                <div className='absolute bottom-2 left-2 opacity-0 group-hover:opacity-100 transition-opacity'>
+                  <div className='bg-gray-800/80 backdrop-blur-md text-white text-xs font-bold px-1.5 py-0.5 rounded-md flex items-center justify-center'>
+                    {new Set(dynamicSourceNames).size} 源
                   </div>
-
-                  {/* 播放源详情悬浮框 */}
-                  {(() => {
-                    // 优先显示的播放源（常见的主流平台）
-                    const prioritySources = ['爱奇艺', '腾讯视频', '优酷', '芒果TV', '哔哩哔哩', 'Netflix', 'Disney+'];
-
-                    // 按优先级排序播放源
-                    const sortedSources = uniqueSources.sort((a, b) => {
-                      const aIndex = prioritySources.indexOf(a);
-                      const bIndex = prioritySources.indexOf(b);
-                      if (aIndex !== -1 && bIndex !== -1) return aIndex - bIndex;
-                      if (aIndex !== -1) return -1;
-                      if (bIndex !== -1) return 1;
-                      return a.localeCompare(b);
-                    });
-
-                    const maxDisplayCount = 6; // 最多显示6个
-                    const displaySources = sortedSources.slice(0, maxDisplayCount);
-                    const hasMore = sortedSources.length > maxDisplayCount;
-                    const remainingCount = sortedSources.length - maxDisplayCount;
-
-                    return (
-                      <div
-                        className='absolute bottom-full mb-2 opacity-0 invisible group-hover/sources:opacity-100 group-hover/sources:visible transition-all duration-200 ease-out delay-100 pointer-events-none z-50 right-0 sm:right-0 translate-x-0 sm:translate-x-0'
-                        style={{
-                          WebkitUserSelect: 'none',
-                          userSelect: 'none',
-                          WebkitTouchCallout: 'none',
-                        } as React.CSSProperties}
-                        onContextMenu={(e) => {
-                          e.preventDefault();
-                          return false;
-                        }}
-                      >
-                        <div
-                          className='bg-gray-800/90 backdrop-blur-sm text-white text-xs sm:text-xs rounded-lg shadow-xl border border-white/10 p-1.5 sm:p-2 min-w-[100px] sm:min-w-[120px] max-w-[140px] sm:max-w-[200px] overflow-hidden'
-                          style={{
-                            WebkitUserSelect: 'none',
-                            userSelect: 'none',
-                            WebkitTouchCallout: 'none',
-                          } as React.CSSProperties}
-                          onContextMenu={(e) => {
-                            e.preventDefault();
-                            return false;
-                          }}
-                        >
-                          {/* 单列布局 */}
-                          <div className='space-y-0.5 sm:space-y-1'>
-                            {displaySources.map((sourceName, index) => (
-                              <div key={index} className='flex items-center gap-1 sm:gap-1.5'>
-                                <div className='w-0.5 h-0.5 sm:w-1 sm:h-1 bg-blue-400 rounded-full shrink-0'></div>
-                                <span className='truncate text-[10px] sm:text-xs leading-tight' title={convert(sourceName)}>
-                                  {convert(sourceName)}
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-
-                          {/* 显示更多提示 */}
-                          {hasMore && (
-                            <div className='mt-1 sm:mt-2 pt-1 sm:pt-1.5 border-t border-gray-700/50'>
-                              <div className='flex items-center justify-center text-gray-400'>
-                                <span className='text-[10px] sm:text-xs font-medium'>+{remainingCount} 播放源</span>
-                              </div>
-                            </div>
-                          )}
-
-                          {/* 小箭头 */}
-                          <div className='absolute top-full right-2 sm:right-3 w-0 h-0 border-l-4 border-r-4 border-t-4 sm:border-l-[6px] sm:border-r-[6px] sm:border-t-[6px] border-transparent border-t-gray-800/90'></div>
-                        </div>
-                      </div>
-                    );
-                  })()}
                 </div>
-              </div>
-            );
-          })()}
-        </div>
-
-        {/* 进度条 */}
-        {config.showProgress && progress !== undefined && (
-          <div
-            className='mt-1 h-1 w-full bg-gray-200 rounded-full overflow-hidden'
-            style={{
-              WebkitUserSelect: 'none',
-              userSelect: 'none',
-              WebkitTouchCallout: 'none',
-            } as React.CSSProperties}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              return false;
-            }}
-          >
-            <div
-              className='h-full bg-green-500 transition-all duration-500 ease-out'
-              style={{
-                width: `${progress}%`,
-                WebkitUserSelect: 'none',
-                userSelect: 'none',
-                WebkitTouchCallout: 'none',
-              } as React.CSSProperties}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                return false;
-              }}
-            />
+              )}
           </div>
-        )}
 
-        {/* 标题与来源 */}
-        <div
-          className='mt-2 text-center'
-          style={{
-            WebkitUserSelect: 'none',
-            userSelect: 'none',
-            WebkitTouchCallout: 'none',
-          } as React.CSSProperties}
-          onContextMenu={(e) => {
-            e.preventDefault();
-            return false;
-          }}
-        >
-          <div
-            className='relative'
-            style={{
-              WebkitUserSelect: 'none',
-              userSelect: 'none',
-              WebkitTouchCallout: 'none',
-            } as React.CSSProperties}
-          >
-            <span
-              className='block text-sm font-semibold truncate text-gray-900 dark:text-gray-100 transition-colors duration-300 ease-in-out group-hover:text-green-600 dark:group-hover:text-green-400 peer'
-              style={{
-                WebkitUserSelect: 'none',
-                userSelect: 'none',
-                WebkitTouchCallout: 'none',
-              } as React.CSSProperties}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                return false;
-              }}
-            >
-              {convert(actualTitle)}
-            </span>
-            {/* 自定义 tooltip */}
-            <div
-              className='absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-1 bg-gray-800 text-white text-xs rounded-md shadow-lg opacity-0 invisible peer-hover:opacity-100 peer-hover:visible transition-all duration-200 ease-out delay-100 whitespace-nowrap pointer-events-none'
-              style={{
-                WebkitUserSelect: 'none',
-                userSelect: 'none',
-                WebkitTouchCallout: 'none',
-              } as React.CSSProperties}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                return false;
-              }}
-            >
-              {convert(actualTitle)}
+          {/* Progress Bar */}
+          {config.showProgress && progress > 0 && (
+            <div className='mt-1 h-1 w-full bg-gray-200 rounded-full overflow-hidden'>
               <div
-                className='absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-800'
-                style={{
-                  WebkitUserSelect: 'none',
-                  userSelect: 'none',
-                  WebkitTouchCallout: 'none',
-                } as React.CSSProperties}
-              ></div>
+                className='h-full bg-green-500'
+                style={{ width: `${progress}%` }}
+              />
             </div>
-          </div>
-          {config.showSourceName && source_name && (
-            <span
-              className='block text-xs text-gray-500 dark:text-gray-400 mt-1'
-              style={{
-                WebkitUserSelect: 'none',
-                userSelect: 'none',
-                WebkitTouchCallout: 'none',
-              } as React.CSSProperties}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                return false;
-              }}
-            >
-              <span
-                className='inline-block border rounded px-2 py-0.5 border-gray-500/60 dark:border-gray-400/60 transition-all duration-300 ease-in-out group-hover:border-green-500/60 group-hover:text-green-600 dark:group-hover:text-green-400'
-                style={{
-                  WebkitUserSelect: 'none',
-                  userSelect: 'none',
-                  WebkitTouchCallout: 'none',
-                } as React.CSSProperties}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  return false;
-                }}
-              >
+          )}
+
+          {/* Metadata */}
+          <div className='mt-2 text-center'>
+            <div className='relative group/title'>
+              <span className='block text-sm font-semibold truncate text-gray-900 dark:text-gray-100 group-hover:text-green-600 dark:group-hover:text-green-400 transition-colors'>
+                {convert(title)}
+              </span>
+              <div className='absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 invisible group-hover/title:opacity-100 group-hover/title:visible transition-all delay-500 whitespace-nowrap z-50 pointer-events-none'>
+                {convert(title)}
+              </div>
+            </div>
+
+            {config.showSourceName && source_name && (
+              <div className='mt-1 text-xs text-gray-500 dark:text-gray-400 truncate'>
                 {origin === 'live' && (
-                  <Radio size={12} className="inline-block text-gray-500 dark:text-gray-400 mr-1.5" />
+                  <Radio size={10} className='inline mr-1' />
                 )}
                 {convert(source_name)}
-              </span>
-            </span>
-          )}
+              </div>
+            )}
+          </div>
         </div>
-      </div>
 
-      {/* 操作菜单 - 支持右键和长按触发 */}
-      <MobileActionSheet
-        isOpen={showMobileActions}
-        onClose={() => setShowMobileActions(false)}
-        title={convert(actualTitle)}
-        poster={processImageUrl(actualPoster)}
-        actions={mobileActions}
-        sources={isAggregate && dynamicSourceNames ? Array.from(new Set(dynamicSourceNames)) : undefined}
-        isAggregate={isAggregate}
-        sourceName={convert(source_name || '')}
-        currentEpisode={currentEpisode}
-        totalEpisodes={actualEpisodes}
-        origin={origin}
-      />
-    </>
-  );
-}
-
+        <MobileActionSheet
+          isOpen={showMobileActions}
+          onClose={() => setShowMobileActions(false)}
+          title={convert(title)}
+          poster={processImageUrl(poster)}
+          actions={mobileActions}
+          sources={
+            isAggregate && dynamicSourceNames
+              ? Array.from(new Set(dynamicSourceNames))
+              : undefined
+          }
+          isAggregate={isAggregate}
+          sourceName={convert(source_name || '')}
+          currentEpisode={currentEpisode}
+          totalEpisodes={actualEpisodes}
+          origin={origin}
+        />
+      </>
+    );
+  },
 );
 
 export default memo(VideoCard);

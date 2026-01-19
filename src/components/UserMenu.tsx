@@ -1,13 +1,9 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
 'use client';
 
 import {
-  Check,
-  ChevronDown,
-  ExternalLink,
   KeyRound,
   LogOut,
+  LucideIcon,
   Settings,
   Shield,
   User,
@@ -15,7 +11,7 @@ import {
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTheme } from 'next-themes';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth';
@@ -25,1158 +21,693 @@ import { checkForUpdates, UpdateStatus } from '@/lib/version_check';
 import { themeOptions } from './ThemeToggle';
 import { VersionPanel } from './VersionPanel';
 
+// --- Global Utilities & Hooks ---
+
+// 1. Reference-Counted Scroll Lock
+// Prevents body scroll from unlocking if multiple modals overlap
+let scrollLockCount = 0;
+let originalOverflow = '';
+
+const useScrollLock = (isLocked: boolean) => {
+  useEffect(() => {
+    if (!isLocked) return;
+
+    scrollLockCount++;
+    if (scrollLockCount === 1) {
+      originalOverflow = window.getComputedStyle(document.body).overflow;
+      document.body.style.overflow = 'hidden';
+    }
+
+    return () => {
+      scrollLockCount--;
+      if (scrollLockCount <= 0) {
+        scrollLockCount = 0; // Safety reset
+        document.body.style.overflow = originalOverflow;
+      }
+    };
+  }, [isLocked]);
+};
+
+// 2. Robust LocalStorage Hook (SSR Safe + Cross-Tab Sync)
+function useLocalStorage<T>(
+  key: string,
+  initialValue: T,
+): [T, (value: T | ((val: T) => T)) => void] {
+  // Lazy initialization to avoid hydration mismatch
+  const readValue = useCallback((): T => {
+    if (typeof window === 'undefined') return initialValue;
+    try {
+      const item = window.localStorage.getItem(key);
+      return item ? (JSON.parse(item) as T) : initialValue;
+    } catch (error) {
+      console.warn(`Error reading localStorage key "${key}":`, error);
+      return initialValue;
+    }
+  }, [initialValue, key]);
+
+  const [storedValue, setStoredValue] = useState<T>(initialValue);
+
+  // Sync state with local storage on mount
+  useEffect(() => {
+    setStoredValue(readValue());
+  }, [readValue]);
+
+  // Sync across tabs
+  useEffect(() => {
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === key && e.newValue !== null) {
+        try {
+          setStoredValue(JSON.parse(e.newValue));
+        } catch {
+          /* ignore */
+        }
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, [key]);
+
+  const setValue = useCallback(
+    (value: T | ((val: T) => T)) => {
+      try {
+        const valueToStore =
+          value instanceof Function ? value(storedValue) : value;
+        setStoredValue(valueToStore);
+        if (typeof window !== 'undefined') {
+          window.localStorage.setItem(key, JSON.stringify(valueToStore));
+        }
+      } catch (error) {
+        console.warn(`Error setting localStorage key "${key}":`, error);
+      }
+    },
+    [key, storedValue],
+  );
+
+  return [storedValue, setValue];
+}
+
+// --- Types ---
+
 interface AuthInfo {
   username?: string;
   role?: 'owner' | 'admin' | 'user';
 }
 
-export const UserMenu: React.FC = () => {
-  const router = useRouter();
-  const [isOpen, setIsOpen] = useState(false);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
-  const [isVersionPanelOpen, setIsVersionPanelOpen] = useState(false);
-  const [authInfo, setAuthInfo] = useState<AuthInfo | null>(null);
-  const [storageType, setStorageType] = useState<string>('localstorage');
-  const [mounted, setMounted] = useState(false);
+interface MenuItemProps {
+  icon: LucideIcon;
+  label: string;
+  onClick: () => void;
+  className?: string;
+}
 
-  // Body 滚动锁定 - 使用 overflow 方式避免布局问题
-  useEffect(() => {
-    if (isSettingsOpen || isChangePasswordOpen) {
-      const body = document.body;
-      const html = document.documentElement;
+// --- Sub-Components ---
 
-      // 保存原始样式
-      const originalBodyOverflow = body.style.overflow;
-      const originalHtmlOverflow = html.style.overflow;
-
-      // 只设置 overflow 来阻止滚动
-      body.style.overflow = 'hidden';
-      html.style.overflow = 'hidden';
-
-      return () => {
-
-        // 恢复所有原始样式
-        body.style.overflow = originalBodyOverflow;
-        html.style.overflow = originalHtmlOverflow;
-      };
-    }
-  }, [isSettingsOpen, isChangePasswordOpen]);
-
-  // 设置相关状态
-  const [defaultAggregateSearch, setDefaultAggregateSearch] = useState(true);
-  const [doubanProxyUrl, setDoubanProxyUrl] = useState('');
-  const [enableOptimization, setEnableOptimization] = useState(true);
-  const [fluidSearch, setFluidSearch] = useState(true);
-  const [liveDirectConnect, setLiveDirectConnect] = useState(false);
-  const [doubanDataSource, setDoubanDataSource] = useState('cmliussss-cdn-tencent');
-  const [doubanImageProxyType, setDoubanImageProxyType] = useState('cmliussss-cdn-tencent');
-  const [doubanImageProxyUrl, setDoubanImageProxyUrl] = useState('');
-  const [isDoubanDropdownOpen, setIsDoubanDropdownOpen] = useState(false);
-  const [isDoubanImageProxyDropdownOpen, setIsDoubanImageProxyDropdownOpen] =
-    useState(false);
-
-
-  // 主题设置
-  const { theme: currentTheme, setTheme } = useTheme();
-
-  // 豆瓣数据源选项
-  const doubanDataSourceOptions = [
-    { value: 'direct', label: '直连（服务器直接请求豆瓣）' },
-    { value: 'cors-proxy-zwei', label: 'Cors Proxy By Zwei' },
-    {
-      value: 'cmliussss-cdn-tencent',
-      label: '豆瓣 CDN By CMLiussss（腾讯云）',
-    },
-    { value: 'cmliussss-cdn-ali', label: '豆瓣 CDN By CMLiussss（阿里云）' },
-    { value: 'custom', label: '自定义代理' },
-  ];
-
-  // 豆瓣图片代理选项
-  const doubanImageProxyTypeOptions = [
-    { value: 'direct', label: '直连（浏览器直接请求豆瓣）' },
-    { value: 'server', label: '服务器代理（由服务器代理请求豆瓣）' },
-    { value: 'img3', label: '豆瓣官方精品 CDN（阿里云）' },
-    {
-      value: 'cmliussss-cdn-tencent',
-      label: '豆瓣 CDN By CMLiussss（腾讯云）',
-    },
-    { value: 'cmliussss-cdn-ali', label: '豆瓣 CDN By CMLiussss（阿里云）' },
-    { value: 'custom', label: '自定义代理' },
-  ];
-
-  // 修改密码相关状态
+// 1. Change Password Modal
+const ChangePasswordModal = ({
+  isOpen,
+  onClose,
+  onLogout,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  onLogout: () => void;
+}) => {
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [passwordLoading, setPasswordLoading] = useState(false);
-  const [passwordError, setPasswordError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
-  // 版本检查相关状态
-  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
-  const [isChecking, setIsChecking] = useState(true);
+  useScrollLock(isOpen);
 
-  // 确保组件已挂载
+  // Keyboard trap
   useEffect(() => {
-    setMounted(true);
-  }, []);
+    if (!isOpen) return;
+    const handleEsc = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [isOpen, onClose]);
 
-  // 获取认证信息和存储类型
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const auth = getAuthInfoFromBrowserCookie();
-      setAuthInfo(auth);
+  if (!isOpen) return null;
 
-      const type =
-        (window as any).RUNTIME_CONFIG?.STORAGE_TYPE || 'localstorage';
-      setStorageType(type);
-    }
-  }, []);
+  const handleSubmit = async () => {
+    setError('');
+    if (!newPassword) return setError('新密码不得为空');
+    if (newPassword !== confirmPassword)
+      return setError('两次输入的密码不一致');
 
-  // 从 localStorage 读取设置
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const savedAggregateSearch = localStorage.getItem(
-        'defaultAggregateSearch'
-      );
-      if (savedAggregateSearch !== null) {
-        setDefaultAggregateSearch(JSON.parse(savedAggregateSearch));
-      }
-
-      const savedDoubanDataSource = localStorage.getItem('doubanDataSource');
-      const defaultDoubanProxyType =
-        (window as any).RUNTIME_CONFIG?.DOUBAN_PROXY_TYPE || 'cmliussss-cdn-tencent';
-      if (savedDoubanDataSource !== null) {
-        setDoubanDataSource(savedDoubanDataSource);
-      } else if (defaultDoubanProxyType) {
-        setDoubanDataSource(defaultDoubanProxyType);
-      }
-
-      const savedDoubanProxyUrl = localStorage.getItem('doubanProxyUrl');
-      const defaultDoubanProxy =
-        (window as any).RUNTIME_CONFIG?.DOUBAN_PROXY || '';
-      if (savedDoubanProxyUrl !== null) {
-        setDoubanProxyUrl(savedDoubanProxyUrl);
-      } else if (defaultDoubanProxy) {
-        setDoubanProxyUrl(defaultDoubanProxy);
-      }
-
-      const savedDoubanImageProxyType = localStorage.getItem(
-        'doubanImageProxyType'
-      );
-      const defaultDoubanImageProxyType =
-        (window as any).RUNTIME_CONFIG?.DOUBAN_IMAGE_PROXY_TYPE || 'cmliussss-cdn-tencent';
-      if (savedDoubanImageProxyType !== null) {
-        setDoubanImageProxyType(savedDoubanImageProxyType);
-      } else if (defaultDoubanImageProxyType) {
-        setDoubanImageProxyType(defaultDoubanImageProxyType);
-      }
-
-      const savedDoubanImageProxyUrl = localStorage.getItem(
-        'doubanImageProxyUrl'
-      );
-      const defaultDoubanImageProxyUrl =
-        (window as any).RUNTIME_CONFIG?.DOUBAN_IMAGE_PROXY || '';
-      if (savedDoubanImageProxyUrl !== null) {
-        setDoubanImageProxyUrl(savedDoubanImageProxyUrl);
-      } else if (defaultDoubanImageProxyUrl) {
-        setDoubanImageProxyUrl(defaultDoubanImageProxyUrl);
-      }
-
-      const savedEnableOptimization =
-        localStorage.getItem('enableOptimization');
-      if (savedEnableOptimization !== null) {
-        setEnableOptimization(JSON.parse(savedEnableOptimization));
-      }
-
-      const savedFluidSearch = localStorage.getItem('fluidSearch');
-      const defaultFluidSearch =
-        (window as any).RUNTIME_CONFIG?.FLUID_SEARCH !== false;
-      if (savedFluidSearch !== null) {
-        setFluidSearch(JSON.parse(savedFluidSearch));
-      } else if (defaultFluidSearch !== undefined) {
-        setFluidSearch(defaultFluidSearch);
-      }
-
-      const savedLiveDirectConnect = localStorage.getItem('liveDirectConnect');
-      if (savedLiveDirectConnect !== null) {
-        setLiveDirectConnect(JSON.parse(savedLiveDirectConnect));
-      }
-    }
-  }, []);
-
-  // 版本检查
-  useEffect(() => {
-    const checkUpdate = async () => {
-      try {
-        const status = await checkForUpdates();
-        setUpdateStatus(status);
-      } catch (error) {
-        console.warn('版本检查失败:', error);
-      } finally {
-        setIsChecking(false);
-      }
-    };
-
-    checkUpdate();
-  }, []);
-
-  // 点击外部区域关闭下拉框
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (isDoubanDropdownOpen) {
-        const target = event.target as Element;
-        if (!target.closest('[data-dropdown="douban-datasource"]')) {
-          setIsDoubanDropdownOpen(false);
-        }
-      }
-    };
-
-    if (isDoubanDropdownOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-      return () =>
-        document.removeEventListener('mousedown', handleClickOutside);
-    }
-  }, [isDoubanDropdownOpen]);
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (isDoubanImageProxyDropdownOpen) {
-        const target = event.target as Element;
-        if (!target.closest('[data-dropdown="douban-image-proxy"]')) {
-          setIsDoubanImageProxyDropdownOpen(false);
-        }
-      }
-    };
-
-    if (isDoubanImageProxyDropdownOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-      return () =>
-        document.removeEventListener('mousedown', handleClickOutside);
-    }
-  }, [isDoubanImageProxyDropdownOpen]);
-
-  const handleMenuClick = () => {
-    setIsOpen(!isOpen);
-  };
-
-  const handleCloseMenu = () => {
-    setIsOpen(false);
-  };
-
-  const handleLogout = async () => {
+    setLoading(true);
     try {
-      await fetch('/api/logout', {
+      const res = await fetch('/api/change-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentPassword, newPassword }),
       });
-    } catch (error) {
-      console.error('注销请求失败:', error);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || '修改密码失败');
+
+      onClose();
+      onLogout();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '网络错误');
+    } finally {
+      setLoading(false);
     }
+  };
+
+  return createPortal(
+    <div
+      className='fixed inset-0 z-1000 flex items-center justify-center p-4'
+      role='dialog'
+      aria-modal='true'
+      aria-labelledby='modal-pw-title'
+    >
+      <div
+        className='fixed inset-0 bg-black/50 backdrop-blur-sm'
+        onClick={onClose}
+        aria-hidden='true'
+      />
+      <div className='relative w-full max-w-md bg-white dark:bg-gray-900 rounded-xl shadow-xl z-10 overflow-hidden animate-in fade-in zoom-in-95 duration-200'>
+        <div className='flex justify-between items-center p-6 border-b dark:border-gray-800'>
+          <h3 id='modal-pw-title' className='text-xl font-bold dark:text-white'>
+            修改密码
+          </h3>
+          <button
+            onClick={onClose}
+            className='p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors'
+            aria-label='关闭'
+          >
+            <X className='w-5 h-5' />
+          </button>
+        </div>
+        <div className='p-6 space-y-4'>
+          <input
+            type='password'
+            placeholder='当前密码'
+            className='w-full p-2 border rounded dark:bg-gray-800 dark:border-gray-700'
+            value={currentPassword}
+            onChange={(e) => setCurrentPassword(e.target.value)}
+          />
+          <input
+            type='password'
+            placeholder='新密码'
+            className='w-full p-2 border rounded dark:bg-gray-800 dark:border-gray-700'
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+          />
+          <input
+            type='password'
+            placeholder='确认新密码'
+            className='w-full p-2 border rounded dark:bg-gray-800 dark:border-gray-700'
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+          />
+          {error && <p className='text-red-500 text-sm'>{error}</p>}
+        </div>
+        <div className='p-6 bg-gray-50 dark:bg-gray-800/50 flex justify-end gap-3'>
+          <button
+            onClick={onClose}
+            className='px-4 py-2 text-sm rounded bg-gray-200 dark:bg-gray-700 hover:opacity-80 transition-opacity'
+          >
+            取消
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={loading}
+            className='px-4 py-2 text-sm rounded bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 transition-colors'
+          >
+            {loading ? '提交中...' : '确认修改'}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+};
+
+// 2. Settings Modal
+const SettingsModal = ({
+  isOpen,
+  onClose,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+}) => {
+  const { theme, setTheme } = useTheme();
+
+  // Settings State using robust hook
+  const [doubanSource, setDoubanSource] = useLocalStorage(
+    'doubanDataSource',
+    'cmliussss-cdn-tencent',
+  );
+  const [doubanProxy, setDoubanProxy] = useLocalStorage('doubanProxyUrl', '');
+  const [imageProxyType, setImageProxyType] = useLocalStorage(
+    'doubanImageProxyType',
+    'cmliussss-cdn-tencent',
+  );
+  const [imageProxyUrl, setImageProxyUrl] = useLocalStorage(
+    'doubanImageProxyUrl',
+    '',
+  );
+
+  const [aggSearch, setAggSearch] = useLocalStorage(
+    'defaultAggregateSearch',
+    true,
+  );
+  const [optimize, setOptimize] = useLocalStorage('enableOptimization', true);
+  const [fluid, setFluid] = useLocalStorage('fluidSearch', true);
+  const [directLive, setDirectLive] = useLocalStorage(
+    'liveDirectConnect',
+    false,
+  );
+
+  useScrollLock(isOpen);
+
+  // Esc to close
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleEsc = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [isOpen, onClose]);
+
+  if (!isOpen) return null;
+
+  return createPortal(
+    <div
+      className='fixed inset-0 z-1000 flex items-center justify-center p-4'
+      role='dialog'
+      aria-modal='true'
+      aria-labelledby='modal-settings-title'
+    >
+      <div
+        className='fixed inset-0 bg-black/50 backdrop-blur-sm'
+        onClick={onClose}
+        aria-hidden='true'
+      />
+      <div className='relative w-full max-w-xl max-h-[85vh] flex flex-col bg-white dark:bg-gray-900 rounded-xl shadow-xl z-10 overflow-hidden animate-in fade-in zoom-in-95 duration-200'>
+        {/* Header */}
+        <div className='flex justify-between items-center p-6 border-b dark:border-gray-800 shrink-0'>
+          <h3
+            id='modal-settings-title'
+            className='text-xl font-bold dark:text-white'
+          >
+            本地设置
+          </h3>
+          <button
+            onClick={onClose}
+            className='p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors'
+            aria-label='关闭'
+          >
+            <X className='w-5 h-5' />
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className='flex-1 overflow-y-auto p-6 space-y-8'>
+          {/* Theme */}
+          <section>
+            <h4 className='text-sm font-medium mb-3 dark:text-gray-200'>
+              外观主题
+            </h4>
+            <div className='flex gap-2'>
+              {themeOptions.map((opt) => {
+                const Icon = opt.icon;
+                return (
+                  <button
+                    key={opt.value}
+                    onClick={() => setTheme(opt.value)}
+                    className={`flex-1 flex items-center justify-center gap-2 p-2.5 rounded-lg border text-sm transition-all
+                      ${
+                        theme === opt.value
+                          ? 'border-green-500 bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-400'
+                          : 'border-gray-200 dark:border-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
+                      }`}
+                  >
+                    <Icon className='w-4 h-4' /> {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+
+          <hr className='border-gray-100 dark:border-gray-800' />
+
+          {/* Sources */}
+          <section className='space-y-4'>
+            <div>
+              <label className='block text-sm font-medium mb-1 dark:text-gray-200'>
+                豆瓣数据源
+              </label>
+              <select
+                value={doubanSource}
+                onChange={(e) => setDoubanSource(e.target.value)}
+                className='w-full p-2.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-transparent dark:bg-gray-800 outline-none focus:ring-2 focus:ring-green-500'
+              >
+                <option value='direct'>直连</option>
+                <option value='cors-proxy-zwei'>Cors Proxy By Zwei</option>
+                <option value='cmliussss-cdn-tencent'>
+                  CMLiussss (腾讯云)
+                </option>
+                <option value='cmliussss-cdn-ali'>CMLiussss (阿里云)</option>
+                <option value='custom'>自定义</option>
+              </select>
+              {doubanSource === 'custom' && (
+                <input
+                  className='mt-2 w-full p-2 border rounded dark:bg-gray-800 dark:border-gray-700'
+                  placeholder='https://api...'
+                  value={doubanProxy}
+                  onChange={(e) => setDoubanProxy(e.target.value)}
+                />
+              )}
+            </div>
+
+            <div>
+              <label className='block text-sm font-medium mb-1 dark:text-gray-200'>
+                图片代理
+              </label>
+              <select
+                value={imageProxyType}
+                onChange={(e) => setImageProxyType(e.target.value)}
+                className='w-full p-2.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-transparent dark:bg-gray-800 outline-none focus:ring-2 focus:ring-green-500'
+              >
+                <option value='direct'>直连</option>
+                <option value='cmliussss-cdn-tencent'>
+                  CMLiussss (腾讯云)
+                </option>
+                <option value='custom'>自定义</option>
+              </select>
+              {imageProxyType === 'custom' && (
+                <input
+                  className='mt-2 w-full p-2 border rounded dark:bg-gray-800 dark:border-gray-700'
+                  placeholder='https://img...'
+                  value={imageProxyUrl}
+                  onChange={(e) => setImageProxyUrl(e.target.value)}
+                />
+              )}
+            </div>
+          </section>
+
+          <hr className='border-gray-100 dark:border-gray-800' />
+
+          {/* Toggles */}
+          <section className='space-y-4'>
+            <ToggleItem
+              label='默认聚合搜索'
+              sub='按标题和年份聚合结果'
+              checked={aggSearch}
+              onChange={setAggSearch}
+            />
+            <ToggleItem
+              label='优选测速'
+              sub='解决播放劫持问题'
+              checked={optimize}
+              onChange={setOptimize}
+            />
+            <ToggleItem
+              label='流式搜索'
+              sub='实时显示搜索结果'
+              checked={fluid}
+              onChange={setFluid}
+            />
+            <ToggleItem
+              label='IPTV 直连'
+              sub='需安装 Allow CORS 插件'
+              checked={directLive}
+              onChange={setDirectLive}
+            />
+          </section>
+        </div>
+        <div className='p-4 border-t dark:border-gray-800 text-center text-xs text-gray-400'>
+          设置自动保存在本地
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+};
+
+const ToggleItem = ({
+  label,
+  sub,
+  checked,
+  onChange,
+}: {
+  label: string;
+  sub: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}) => (
+  <div className='flex items-center justify-between'>
+    <div>
+      <div className='text-sm font-medium dark:text-gray-200'>{label}</div>
+      <div className='text-xs text-gray-500'>{sub}</div>
+    </div>
+    <label className='relative inline-flex items-center cursor-pointer'>
+      <input
+        type='checkbox'
+        className='sr-only peer'
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+      />
+      <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600"></div>
+    </label>
+  </div>
+);
+
+const MenuItem = ({
+  icon: Icon,
+  label,
+  onClick,
+  className = '',
+}: MenuItemProps) => (
+  <button
+    onClick={onClick}
+    role='menuitem'
+    className={`w-full flex items-center justify-start gap-3 px-3 py-2.5 text-sm font-medium rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-gray-700 dark:text-gray-200 text-left ${className}`}
+  >
+    <Icon className='w-4 h-4' />
+    {label}
+  </button>
+);
+
+// --- Main Component ---
+
+export const UserMenu: React.FC = () => {
+  const router = useRouter();
+  const [isOpen, setIsOpen] = useState(false);
+
+  // Modals state
+  const [showSettings, setShowSettings] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showVersion, setShowVersion] = useState(false);
+
+  const [authInfo, setAuthInfo] = useState<AuthInfo | null>(null);
+  const [storageType, setStorageType] = useState('localstorage');
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
+  const [mounted, setMounted] = useState(false);
+
+  // Refs for Accessibility
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setMounted(true);
+    if (typeof window !== 'undefined') {
+      setAuthInfo(getAuthInfoFromBrowserCookie());
+
+      setStorageType(
+        (window as unknown as { RUNTIME_CONFIG?: { STORAGE_TYPE?: string } })
+          .RUNTIME_CONFIG?.STORAGE_TYPE || 'localstorage',
+      );
+    }
+    checkForUpdates()
+      .then(setUpdateStatus)
+      .catch(() => {});
+  }, []);
+
+  // Menu Accessibility Logic
+  useEffect(() => {
+    if (!isOpen) return;
+
+    // Focus Trap / Escape Listener for Dropdown
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsOpen(false);
+    };
+
+    // Click outside listener
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        menuRef.current &&
+        !menuRef.current.contains(e.target as Node) &&
+        buttonRef.current &&
+        !buttonRef.current.contains(e.target as Node)
+      ) {
+        setIsOpen(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('mousedown', handleClickOutside);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isOpen]);
+
+  // Restore focus to button when menu closes
+  useEffect(() => {
+    if (!isOpen && buttonRef.current) {
+      // Only focus if we aren't opening a modal
+      if (!showSettings && !showPassword && !showVersion) {
+        // Optional: restore focus
+      }
+    }
+  }, [isOpen, showSettings, showPassword, showVersion]);
+
+  const handleLogout = async () => {
+    await fetch('/api/logout', { method: 'POST' });
     window.location.href = '/';
   };
 
-  const handleAdminPanel = () => {
-    router.push('/admin');
-  };
-
-  const handleChangePassword = () => {
-    setIsOpen(false);
-    setIsChangePasswordOpen(true);
-    setCurrentPassword('');
-    setNewPassword('');
-    setConfirmPassword('');
-    setPasswordError('');
-  };
-
-  const handleCloseChangePassword = () => {
-    setIsChangePasswordOpen(false);
-    setCurrentPassword('');
-    setNewPassword('');
-    setConfirmPassword('');
-    setPasswordError('');
-  };
-
-  const handleSubmitChangePassword = async () => {
-    setPasswordError('');
-
-    // 验证密码
-    if (!newPassword) {
-      setPasswordError('新密码不得为空');
-      return;
-    }
-
-    if (newPassword !== confirmPassword) {
-      setPasswordError('两次输入的密码不一致');
-      return;
-    }
-
-    setPasswordLoading(true);
-
-    try {
-      const response = await fetch('/api/change-password', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          currentPassword,
-          newPassword,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        setPasswordError(data.error || '修改密码失败');
-        return;
-      }
-
-      // 修改成功，关闭弹窗并登出
-      setIsChangePasswordOpen(false);
-      await handleLogout();
-    } catch (error) {
-      setPasswordError('网络错误，请稍后重试');
-    } finally {
-      setPasswordLoading(false);
-    }
-  };
-
-  const handleSettings = () => {
-    setIsOpen(false);
-    setIsSettingsOpen(true);
-  };
-
-  const handleCloseSettings = () => {
-    setIsSettingsOpen(false);
-  };
-
-  // 设置相关的处理函数
-  const handleAggregateToggle = (value: boolean) => {
-    setDefaultAggregateSearch(value);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('defaultAggregateSearch', JSON.stringify(value));
-    }
-  };
-
-  const handleDoubanProxyUrlChange = (value: string) => {
-    setDoubanProxyUrl(value);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('doubanProxyUrl', value);
-    }
-  };
-
-  const handleOptimizationToggle = (value: boolean) => {
-    setEnableOptimization(value);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('enableOptimization', JSON.stringify(value));
-    }
-  };
-
-  const handleFluidSearchToggle = (value: boolean) => {
-    setFluidSearch(value);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('fluidSearch', JSON.stringify(value));
-    }
-  };
-
-  const handleLiveDirectConnectToggle = (value: boolean) => {
-    setLiveDirectConnect(value);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('liveDirectConnect', JSON.stringify(value));
-    }
-  };
-
-  const handleDoubanDataSourceChange = (value: string) => {
-    setDoubanDataSource(value);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('doubanDataSource', value);
-    }
-  };
-
-  const handleDoubanImageProxyTypeChange = (value: string) => {
-    setDoubanImageProxyType(value);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('doubanImageProxyType', value);
-    }
-  };
-
-  const handleDoubanImageProxyUrlChange = (value: string) => {
-    setDoubanImageProxyUrl(value);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('doubanImageProxyUrl', value);
-    }
-  };
-
-
-
-  // 获取感谢信息
-  const getThanksInfo = (dataSource: string) => {
-    switch (dataSource) {
-      case 'cors-proxy-zwei':
-        return {
-          text: 'Thanks to @Zwei',
-          url: 'https://github.com/bestzwei',
-        };
-      case 'cmliussss-cdn-tencent':
-      case 'cmliussss-cdn-ali':
-        return {
-          text: 'Thanks to @CMLiussss',
-          url: 'https://github.com/cmliu',
-        };
-      default:
-        return null;
-    }
-  };
-
-  const handleResetSettings = () => {
-    const defaultDoubanProxyType =
-      (window as any).RUNTIME_CONFIG?.DOUBAN_PROXY_TYPE || 'cmliussss-cdn-tencent';
-    const defaultDoubanProxy =
-      (window as any).RUNTIME_CONFIG?.DOUBAN_PROXY || '';
-    const defaultDoubanImageProxyType =
-      (window as any).RUNTIME_CONFIG?.DOUBAN_IMAGE_PROXY_TYPE || 'cmliussss-cdn-tencent';
-    const defaultDoubanImageProxyUrl =
-      (window as any).RUNTIME_CONFIG?.DOUBAN_IMAGE_PROXY || '';
-    const defaultFluidSearch =
-      (window as any).RUNTIME_CONFIG?.FLUID_SEARCH !== false;
-
-    setDefaultAggregateSearch(true);
-    setEnableOptimization(true);
-    setFluidSearch(defaultFluidSearch);
-    setLiveDirectConnect(false);
-    setDoubanProxyUrl(defaultDoubanProxy);
-    setDoubanDataSource(defaultDoubanProxyType);
-    setDoubanImageProxyType(defaultDoubanImageProxyType);
-    setDoubanImageProxyUrl(defaultDoubanImageProxyUrl);
-
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('defaultAggregateSearch', JSON.stringify(true));
-      localStorage.setItem('enableOptimization', JSON.stringify(true));
-      localStorage.setItem('fluidSearch', JSON.stringify(defaultFluidSearch));
-      localStorage.setItem('liveDirectConnect', JSON.stringify(false));
-      localStorage.setItem('doubanProxyUrl', defaultDoubanProxy);
-      localStorage.setItem('doubanDataSource', defaultDoubanProxyType);
-      localStorage.setItem('doubanImageProxyType', defaultDoubanImageProxyType);
-      localStorage.setItem('doubanImageProxyUrl', defaultDoubanImageProxyUrl);
-    }
-  };
-
-  // 检查是否显示管理面板按钮
-  const showAdminPanel =
-    authInfo?.role === 'owner' || authInfo?.role === 'admin';
-
-  // 检查是否显示修改密码按钮
-  const showChangePassword =
-    authInfo?.role !== 'owner' && storageType !== 'localstorage';
-
-  // 角色中文映射
   const getRoleText = (role?: string) => {
-    switch (role) {
-      case 'owner':
-        return '站长';
-      case 'admin':
-        return '管理员';
-      case 'user':
-        return '用户';
-      default:
-        return '';
-    }
+    if (role === 'owner') return '站长';
+    if (role === 'admin') return '管理员';
+    return '用户';
   };
 
-  // 菜单面板内容
   const menuPanel = (
-    <>
-      {/* 背景遮罩 - 普通菜单无需模糊 */}
-      <div
-        className='fixed inset-0 bg-transparent z-1000'
-        onClick={handleCloseMenu}
-      />
-
-      {/* 菜单面板 */}
-      <div className='fixed top-14 right-4 w-56 bg-white dark:bg-gray-900 rounded-lg shadow-xl z-1001 border border-gray-200/50 dark:border-gray-700/50 overflow-hidden select-none'>
-        {/* 用户信息区域 */}
-        <div className='px-3 py-2.5 border-b border-gray-200 dark:border-gray-700 bg-linear-to-r from-gray-50 to-gray-100/50 dark:from-gray-800 dark:to-gray-800/50'>
-          <div className='space-y-1'>
-            <div className='flex items-center justify-between'>
-              <span className='text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider'>
-                当前用户
-              </span>
-              <span
-                className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium ${(authInfo?.role || 'user') === 'owner'
-                  ? 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300'
-                  : (authInfo?.role || 'user') === 'admin'
-                    ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300'
-                    : 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
-                  }`}
-              >
-                {getRoleText(authInfo?.role || 'user')}
-              </span>
-            </div>
-            <div className='flex items-center justify-between'>
-              <div className='font-semibold text-gray-900 dark:text-gray-100 text-sm truncate'>
-                {authInfo?.username || 'default'}
-              </div>
-              <div className='text-[10px] text-gray-400 dark:text-gray-500'>
-                数据存储：
-                {storageType === 'localstorage' ? '本地' : storageType}
-              </div>
-            </div>
-          </div>
+    <div
+      ref={menuRef}
+      className='fixed top-16 right-4 w-60 bg-white dark:bg-gray-900 rounded-xl shadow-xl z-999 border dark:border-gray-800 overflow-hidden animate-in fade-in zoom-in-95 duration-100'
+      role='menu'
+      aria-label='User menu'
+    >
+      <div className='p-4 bg-gray-50 dark:bg-gray-800/50 border-b dark:border-gray-800'>
+        <div className='flex justify-between items-start mb-1'>
+          <span className='text-xs font-bold text-gray-400 uppercase'>
+            当前用户
+          </span>
+          <span
+            className={`px-2 py-0.5 text-xs rounded-full font-medium ${
+              authInfo?.role === 'owner'
+                ? 'bg-purple-100 text-purple-700'
+                : 'bg-blue-100 text-blue-700'
+            }`}
+          >
+            {getRoleText(authInfo?.role)}
+          </span>
         </div>
+        <div className='font-semibold text-gray-900 dark:text-white truncate'>
+          {authInfo?.username || 'Guest'}
+        </div>
+        <div className='text-[10px] text-gray-400 mt-1'>
+          存储: {storageType}
+        </div>
+      </div>
 
-        {/* 菜单项 */}
-        <div className='py-1'>
-          {/* 设置按钮 */}
-          <button
-            onClick={handleSettings}
-            className='w-full px-3 py-2 text-left flex items-center gap-2.5 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-sm'
-          >
-            <Settings className='w-4 h-4 text-gray-500 dark:text-gray-400' />
-            <span className='font-medium'>设置</span>
-          </button>
+      <div className='p-1'>
+        <MenuItem
+          icon={Settings}
+          label='设置'
+          onClick={() => {
+            setIsOpen(false);
+            setShowSettings(true);
+          }}
+        />
 
-          {/* 管理面板按钮 */}
-          {showAdminPanel && (
-            <button
-              onClick={handleAdminPanel}
-              className='w-full px-3 py-2 text-left flex items-center gap-2.5 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-sm'
-            >
-              <Shield className='w-4 h-4 text-gray-500 dark:text-gray-400' />
-              <span className='font-medium'>管理面板</span>
-            </button>
-          )}
-
-          {/* 修改密码按钮 */}
-          {showChangePassword && (
-            <button
-              onClick={handleChangePassword}
-              className='w-full px-3 py-2 text-left flex items-center gap-2.5 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-sm'
-            >
-              <KeyRound className='w-4 h-4 text-gray-500 dark:text-gray-400' />
-              <span className='font-medium'>修改密码</span>
-            </button>
-          )}
-
-          {/* 分割线 */}
-          <div className='my-1 border-t border-gray-200 dark:border-gray-700'></div>
-
-          {/* 登出按钮 */}
-          <button
-            onClick={handleLogout}
-            className='w-full px-3 py-2 text-left flex items-center gap-2.5 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors text-sm'
-          >
-            <LogOut className='w-4 h-4' />
-            <span className='font-medium'>登出</span>
-          </button>
-
-          {/* 分割线 */}
-          <div className='my-1 border-t border-gray-200 dark:border-gray-700'></div>
-
-          {/* 版本信息 */}
-          <button
+        {(authInfo?.role === 'owner' || authInfo?.role === 'admin') && (
+          <MenuItem
+            icon={Shield}
+            label='管理面板'
             onClick={() => {
-              setIsVersionPanelOpen(true);
-              handleCloseMenu();
+              setIsOpen(false);
+              router.push('/admin');
             }}
-            className='w-full px-3 py-2 text-center flex items-center justify-center text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors text-xs'
-          >
-            <div className='flex items-center gap-1'>
-              <span className='font-mono'>v{CURRENT_VERSION}</span>
-              {!isChecking &&
-                updateStatus &&
-                updateStatus !== UpdateStatus.FETCH_FAILED && (
-                  <div
-                    className={`w-2 h-2 rounded-full -translate-y-2 ${updateStatus === UpdateStatus.HAS_UPDATE
-                      ? 'bg-yellow-500'
-                      : updateStatus === UpdateStatus.NO_UPDATE
-                        ? 'bg-green-400'
-                        : ''
-                      }`}
-                  ></div>
-                )}
-            </div>
-          </button>
-        </div>
-      </div>
-    </>
-  );
+          />
+        )}
 
-  // 设置面板内容
-  const settingsPanel = (
-    <>
-      {/* 背景遮罩 */}
-      <div
-        className='fixed inset-0 bg-black/50 backdrop-blur-sm z-1000'
-        onClick={handleCloseSettings}
-        onTouchMove={(e) => {
-          // 只阻止滚动，允许其他触摸事件
-          e.preventDefault();
-        }}
-        onWheel={(e) => {
-          // 阻止滚轮滚动
-          e.preventDefault();
-        }}
-        style={{
-          touchAction: 'none',
-        }}
-      />
+        {authInfo?.role !== 'owner' && storageType !== 'localstorage' && (
+          <MenuItem
+            icon={KeyRound}
+            label='修改密码'
+            onClick={() => {
+              setIsOpen(false);
+              setShowPassword(true);
+            }}
+          />
+        )}
 
-      {/* 设置面板 */}
-      <div
-        className='fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-xl max-h-[90vh] bg-white dark:bg-gray-900 rounded-xl shadow-xl z-1001 flex flex-col'
-      >
-        {/* 内容容器 - 独立的滚动区域 */}
-        <div
-          className='flex-1 p-6 overflow-y-auto'
-          data-panel-content
-          style={{
-            touchAction: 'pan-y', // 只允许垂直滚动
-            overscrollBehavior: 'contain', // 防止滚动冒泡
+        <div className='my-1 border-t dark:border-gray-800' role='separator' />
+
+        <MenuItem
+          icon={LogOut}
+          label='登出'
+          onClick={handleLogout}
+          className='text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20'
+        />
+
+        <div className='my-1 border-t dark:border-gray-800' role='separator' />
+
+        <button
+          onClick={() => {
+            setIsOpen(false);
+            setShowVersion(true);
           }}
+          className='w-full py-2 text-xs text-center text-gray-400 hover:text-gray-600 flex items-center justify-center gap-2 transition-colors'
+          role='menuitem'
         >
-          {/* 标题栏 */}
-          <div className='flex items-center justify-between mb-6'>
-            <div className='flex items-center gap-3'>
-              <h3 className='text-xl font-bold text-gray-800 dark:text-gray-200'>
-                本地设置
-              </h3>
-              <button
-                onClick={handleResetSettings}
-                className='px-2 py-1 text-xs text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 border border-red-200 hover:border-red-300 dark:border-red-800 dark:hover:border-red-700 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors'
-                title='重置为默认设置'
-              >
-                恢复默认
-              </button>
-            </div>
-            <button
-              onClick={handleCloseSettings}
-              className='w-8 h-8 p-1 rounded-full flex items-center justify-center text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors'
-              aria-label='Close'
-            >
-              <X className='w-full h-full' />
-            </button>
-          </div>
-
-          {/* 设置项 */}
-          <div className='space-y-6'>
-            {/* 主题设置 */}
-            <div className='space-y-3'>
-              <div>
-                <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-                  外观主题
-                </h4>
-                <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
-                  选择应用的显示主题
-                </p>
-              </div>
-              <div className='flex gap-2'>
-                {themeOptions.map((option) => {
-                  const Icon = option.icon;
-                  return (
-                    <button
-                      key={option.value}
-                      onClick={() => setTheme(option.value)}
-                      className={`flex-1 px-3 py-2.5 text-sm rounded-lg border transition-all duration-200 flex items-center justify-center gap-2 ${
-                        currentTheme === option.value
-                          ? 'border-green-500 bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400'
-                          : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:border-gray-400 dark:hover:border-gray-500'
-                      }`}
-                    >
-                      <Icon className='w-4 h-4' />
-                      <span>{option.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* 分割线 */}
-            <div className='border-t border-gray-200 dark:border-gray-700'></div>
-
-            {/* 豆瓣数据源选择 */}
-            <div className='space-y-3'>
-              <div>
-                <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-                  豆瓣数据代理
-                </h4>
-                <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
-                  选择获取豆瓣数据的方式
-                </p>
-              </div>
-              <div className='relative' data-dropdown='douban-datasource'>
-                {/* 自定义下拉选择框 */}
-                <button
-                  type='button'
-                  onClick={() => setIsDoubanDropdownOpen(!isDoubanDropdownOpen)}
-                  className='w-full px-3 py-2.5 pr-10 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all duration-200 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm hover:border-gray-400 dark:hover:border-gray-500 text-left'
-                >
-                  {
-                    doubanDataSourceOptions.find(
-                      (option) => option.value === doubanDataSource
-                    )?.label
-                  }
-                </button>
-
-                {/* 下拉箭头 */}
-                <div className='absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none'>
-                  <ChevronDown
-                    className={`w-4 h-4 text-gray-400 dark:text-gray-500 transition-transform duration-200 ${isDoubanDropdownOpen ? 'rotate-180' : ''
-                      }`}
-                  />
-                </div>
-
-                {/* 下拉选项列表 */}
-                {isDoubanDropdownOpen && (
-                  <div className='absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg shadow-lg max-h-60 overflow-auto'>
-                    {doubanDataSourceOptions.map((option) => (
-                      <button
-                        key={option.value}
-                        type='button'
-                        onClick={() => {
-                          handleDoubanDataSourceChange(option.value);
-                          setIsDoubanDropdownOpen(false);
-                        }}
-                        className={`w-full px-3 py-2.5 text-left text-sm transition-colors duration-150 flex items-center justify-between hover:bg-gray-100 dark:hover:bg-gray-700 ${doubanDataSource === option.value
-                          ? 'bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400'
-                          : 'text-gray-900 dark:text-gray-100'
-                          }`}
-                      >
-                        <span className='truncate'>{option.label}</span>
-                        {doubanDataSource === option.value && (
-                          <Check className='w-4 h-4 text-green-600 dark:text-green-400 shrink-0 ml-2' />
-                        )}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* 感谢信息 */}
-              {getThanksInfo(doubanDataSource) && (
-                <div className='mt-3'>
-                  <button
-                    type='button'
-                    onClick={() =>
-                      window.open(getThanksInfo(doubanDataSource)!.url, '_blank')
-                    }
-                    className='flex items-center justify-center gap-1.5 w-full px-3 text-xs text-gray-500 dark:text-gray-400 cursor-pointer'
-                  >
-                    <span className='font-medium'>
-                      {getThanksInfo(doubanDataSource)!.text}
-                    </span>
-                    <ExternalLink className='w-3.5 opacity-70' />
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* 豆瓣代理地址设置 - 仅在选择自定义代理时显示 */}
-            {doubanDataSource === 'custom' && (
-              <div className='space-y-3'>
-                <div>
-                  <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-                    豆瓣代理地址
-                  </h4>
-                  <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
-                    自定义代理服务器地址
-                  </p>
-                </div>
-                <input
-                  type='text'
-                  className='w-full px-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all duration-200 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 shadow-sm hover:border-gray-400 dark:hover:border-gray-500'
-                  placeholder='例如: https://proxy.example.com/fetch?url='
-                  value={doubanProxyUrl}
-                  onChange={(e) => handleDoubanProxyUrlChange(e.target.value)}
-                />
-              </div>
-            )}
-
-            {/* 分割线 */}
-            <div className='border-t border-gray-200 dark:border-gray-700'></div>
-
-            {/* 豆瓣图片代理设置 */}
-            <div className='space-y-3'>
-              <div>
-                <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-                  豆瓣图片代理
-                </h4>
-                <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
-                  选择获取豆瓣图片的方式
-                </p>
-              </div>
-              <div className='relative' data-dropdown='douban-image-proxy'>
-                {/* 自定义下拉选择框 */}
-                <button
-                  type='button'
-                  onClick={() =>
-                    setIsDoubanImageProxyDropdownOpen(
-                      !isDoubanImageProxyDropdownOpen
-                    )
-                  }
-                  className='w-full px-3 py-2.5 pr-10 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all duration-200 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm hover:border-gray-400 dark:hover:border-gray-500 text-left'
-                >
-                  {
-                    doubanImageProxyTypeOptions.find(
-                      (option) => option.value === doubanImageProxyType
-                    )?.label
-                  }
-                </button>
-
-                {/* 下拉箭头 */}
-                <div className='absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none'>
-                  <ChevronDown
-                    className={`w-4 h-4 text-gray-400 dark:text-gray-500 transition-transform duration-200 ${isDoubanDropdownOpen ? 'rotate-180' : ''
-                      }`}
-                  />
-                </div>
-
-                {/* 下拉选项列表 */}
-                {isDoubanImageProxyDropdownOpen && (
-                  <div className='absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg shadow-lg max-h-60 overflow-auto'>
-                    {doubanImageProxyTypeOptions.map((option) => (
-                      <button
-                        key={option.value}
-                        type='button'
-                        onClick={() => {
-                          handleDoubanImageProxyTypeChange(option.value);
-                          setIsDoubanImageProxyDropdownOpen(false);
-                        }}
-                        className={`w-full px-3 py-2.5 text-left text-sm transition-colors duration-150 flex items-center justify-between hover:bg-gray-100 dark:hover:bg-gray-700 ${doubanImageProxyType === option.value
-                          ? 'bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400'
-                          : 'text-gray-900 dark:text-gray-100'
-                          }`}
-                      >
-                        <span className='truncate'>{option.label}</span>
-                        {doubanImageProxyType === option.value && (
-                          <Check className='w-4 h-4 text-green-600 dark:text-green-400 shrink-0 ml-2' />
-                        )}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* 感谢信息 */}
-              {getThanksInfo(doubanImageProxyType) && (
-                <div className='mt-3'>
-                  <button
-                    type='button'
-                    onClick={() =>
-                      window.open(
-                        getThanksInfo(doubanImageProxyType)!.url,
-                        '_blank'
-                      )
-                    }
-                    className='flex items-center justify-center gap-1.5 w-full px-3 text-xs text-gray-500 dark:text-gray-400 cursor-pointer'
-                  >
-                    <span className='font-medium'>
-                      {getThanksInfo(doubanImageProxyType)!.text}
-                    </span>
-                    <ExternalLink className='w-3.5 opacity-70' />
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* 豆瓣图片代理地址设置 - 仅在选择自定义代理时显示 */}
-            {doubanImageProxyType === 'custom' && (
-              <div className='space-y-3'>
-                <div>
-                  <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-                    豆瓣图片代理地址
-                  </h4>
-                  <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
-                    自定义图片代理服务器地址
-                  </p>
-                </div>
-                <input
-                  type='text'
-                  className='w-full px-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all duration-200 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 shadow-sm hover:border-gray-400 dark:hover:border-gray-500'
-                  placeholder='例如: https://proxy.example.com/fetch?url='
-                  value={doubanImageProxyUrl}
-                  onChange={(e) =>
-                    handleDoubanImageProxyUrlChange(e.target.value)
-                  }
-                />
-              </div>
-            )}
-
-            {/* 分割线 */}
-            <div className='border-t border-gray-200 dark:border-gray-700'></div>
-
-            {/* 默认聚合搜索结果 */}
-            <div className='flex items-center justify-between'>
-              <div>
-                <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-                  默认聚合搜索结果
-                </h4>
-                <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
-                  搜索时默认按标题和年份聚合显示结果
-                </p>
-              </div>
-              <label className='flex items-center cursor-pointer'>
-                <div className='relative'>
-                  <input
-                    type='checkbox'
-                    className='sr-only peer'
-                    checked={defaultAggregateSearch}
-                    onChange={(e) => handleAggregateToggle(e.target.checked)}
-                  />
-                  <div className='w-11 h-6 bg-gray-300 rounded-full peer-checked:bg-green-500 transition-colors dark:bg-gray-600'></div>
-                  <div className='absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5'></div>
-                </div>
-              </label>
-            </div>
-
-            {/* 优选和测速 */}
-            <div className='flex items-center justify-between'>
-              <div>
-                <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-                  优选和测速
-                </h4>
-                <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
-                  如出现播放器劫持问题可关闭
-                </p>
-              </div>
-              <label className='flex items-center cursor-pointer'>
-                <div className='relative'>
-                  <input
-                    type='checkbox'
-                    className='sr-only peer'
-                    checked={enableOptimization}
-                    onChange={(e) => handleOptimizationToggle(e.target.checked)}
-                  />
-                  <div className='w-11 h-6 bg-gray-300 rounded-full peer-checked:bg-green-500 transition-colors dark:bg-gray-600'></div>
-                  <div className='absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5'></div>
-                </div>
-              </label>
-            </div>
-
-            {/* 流式搜索 */}
-            <div className='flex items-center justify-between'>
-              <div>
-                <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-                  流式搜索输出
-                </h4>
-                <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
-                  启用搜索结果实时流式输出，关闭后使用传统一次性搜索
-                </p>
-              </div>
-              <label className='flex items-center cursor-pointer'>
-                <div className='relative'>
-                  <input
-                    type='checkbox'
-                    className='sr-only peer'
-                    checked={fluidSearch}
-                    onChange={(e) => handleFluidSearchToggle(e.target.checked)}
-                  />
-                  <div className='w-11 h-6 bg-gray-300 rounded-full peer-checked:bg-green-500 transition-colors dark:bg-gray-600'></div>
-                  <div className='absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5'></div>
-                </div>
-              </label>
-            </div>
-
-            {/* 直播视频浏览器直连 */}
-            <div className='flex items-center justify-between'>
-              <div>
-                <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-                  IPTV 视频浏览器直连
-                </h4>
-                <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
-                  开启 IPTV 视频浏览器直连时，需要自备 Allow CORS 插件
-                </p>
-              </div>
-              <label className='flex items-center cursor-pointer'>
-                <div className='relative'>
-                  <input
-                    type='checkbox'
-                    className='sr-only peer'
-                    checked={liveDirectConnect}
-                    onChange={(e) => handleLiveDirectConnectToggle(e.target.checked)}
-                  />
-                  <div className='w-11 h-6 bg-gray-300 rounded-full peer-checked:bg-green-500 transition-colors dark:bg-gray-600'></div>
-                </div>
-              </label>
-            </div>
-
-          </div>
-
-          {/* 底部说明 */}
-          <div className='mt-6 pt-4 border-t border-gray-200 dark:border-gray-700'>
-            <p className='text-xs text-gray-500 dark:text-gray-400 text-center'>
-              这些设置保存在本地浏览器中
-            </p>
-          </div>
-        </div>
+          v{CURRENT_VERSION}
+          {updateStatus === UpdateStatus.HAS_UPDATE && (
+            <span className='w-2 h-2 rounded-full bg-yellow-500' />
+          )}
+        </button>
       </div>
-    </>
-  );
-
-  // 修改密码面板内容
-  const changePasswordPanel = (
-    <>
-      {/* 背景遮罩 */}
-      <div
-        className='fixed inset-0 bg-black/50 backdrop-blur-sm z-1000'
-        onClick={handleCloseChangePassword}
-        onTouchMove={(e) => {
-          // 只阻止滚动，允许其他触摸事件
-          e.preventDefault();
-        }}
-        onWheel={(e) => {
-          // 阻止滚轮滚动
-          e.preventDefault();
-        }}
-        style={{
-          touchAction: 'none',
-        }}
-      />
-
-      {/* 修改密码面板 */}
-      <div
-        className='fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md bg-white dark:bg-gray-900 rounded-xl shadow-xl z-1001 overflow-hidden'
-      >
-        {/* 内容容器 - 独立的滚动区域 */}
-        <div
-          className='h-full p-6'
-          data-panel-content
-          onTouchMove={(e) => {
-            // 阻止事件冒泡到遮罩层，但允许内部滚动
-            e.stopPropagation();
-          }}
-          style={{
-            touchAction: 'auto', // 允许所有触摸操作
-          }}
-        >
-          {/* 标题栏 */}
-          <div className='flex items-center justify-between mb-6'>
-            <h3 className='text-xl font-bold text-gray-800 dark:text-gray-200'>
-              修改密码
-            </h3>
-            <button
-              onClick={handleCloseChangePassword}
-              className='w-8 h-8 p-1 rounded-full flex items-center justify-center text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors'
-              aria-label='Close'
-            >
-              <X className='w-full h-full' />
-            </button>
-          </div>
-
-          {/* 表单 */}
-          <div className='space-y-4'>
-            {/* 当前密码输入 */}
-            <div>
-              <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
-                当前密码
-              </label>
-              <input
-                type='password'
-                className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent transition-colors bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400'
-                placeholder='请输入当前密码'
-                value={currentPassword}
-                onChange={(e) => setCurrentPassword(e.target.value)}
-                disabled={passwordLoading}
-              />
-            </div>
-            {/* 新密码输入 */}
-            <div>
-              <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
-                新密码
-              </label>
-              <input
-                type='password'
-                className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent transition-colors bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400'
-                placeholder='请输入新密码'
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                disabled={passwordLoading}
-              />
-            </div>
-
-            {/* 确认密码输入 */}
-            <div>
-              <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
-                确认密码
-              </label>
-              <input
-                type='password'
-                className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent transition-colors bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400'
-                placeholder='请再次输入新密码'
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                disabled={passwordLoading}
-              />
-            </div>
-
-            {/* 错误信息 */}
-            {passwordError && (
-              <div className='text-red-500 text-sm bg-red-50 dark:bg-red-900/20 p-3 rounded-md border border-red-200 dark:border-red-800'>
-                {passwordError}
-              </div>
-            )}
-          </div>
-
-          {/* 操作按钮 */}
-          <div className='flex gap-3 mt-6 pt-4 border-t border-gray-200 dark:border-gray-700'>
-            <button
-              onClick={handleCloseChangePassword}
-              className='flex-1 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-md transition-colors'
-              disabled={passwordLoading}
-            >
-              取消
-            </button>
-            <button
-              onClick={handleSubmitChangePassword}
-              className='flex-1 px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 dark:bg-green-700 dark:hover:bg-green-600 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
-              disabled={passwordLoading || !currentPassword || !newPassword || !confirmPassword}
-            >
-              {passwordLoading ? '修改中...' : '确认修改'}
-            </button>
-          </div>
-
-          {/* 底部说明 */}
-          <div className='mt-4 pt-4 border-t border-gray-200 dark:border-gray-700'>
-            <p className='text-xs text-gray-500 dark:text-gray-400 text-center'>
-              修改密码后需要重新登录
-            </p>
-          </div>
-        </div>
-      </div>
-    </>
+    </div>
   );
 
   return (
     <>
       <div className='relative'>
         <button
-          onClick={handleMenuClick}
-          className='w-10 h-10 p-2 rounded-full flex items-center justify-center text-gray-600 hover:bg-gray-200/50 dark:text-gray-300 dark:hover:bg-gray-700/50 transition-colors'
+          ref={buttonRef}
+          onClick={() => setIsOpen(!isOpen)}
+          className='w-10 h-10 rounded-full flex items-center justify-center hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors focus:outline-none focus:ring-2 focus:ring-gray-200 dark:focus:ring-gray-700'
+          aria-haspopup='menu'
+          aria-expanded={isOpen}
           aria-label='User Menu'
         >
-          <User className='w-full h-full' />
+          <User className='w-6 h-6 text-gray-600 dark:text-gray-300' />
+          {updateStatus === UpdateStatus.HAS_UPDATE && (
+            <span className='absolute top-0 right-0 w-2.5 h-2.5 bg-yellow-500 rounded-full border-2 border-white dark:border-black' />
+          )}
         </button>
-        {updateStatus === UpdateStatus.HAS_UPDATE && (
-          <div className='absolute top-[2px] right-[2px] w-2 h-2 bg-yellow-500 rounded-full'></div>
-        )}
       </div>
 
-      {/* 使用 Portal 将菜单面板渲染到 document.body */}
-      {isOpen && mounted && createPortal(menuPanel, document.body)}
+      {mounted && isOpen && createPortal(menuPanel, document.body)}
 
-      {/* 使用 Portal 将设置面板渲染到 document.body */}
-      {isSettingsOpen && mounted && createPortal(settingsPanel, document.body)}
+      {mounted && showSettings && (
+        <SettingsModal
+          isOpen={showSettings}
+          onClose={() => setShowSettings(false)}
+        />
+      )}
 
-      {/* 使用 Portal 将修改密码面板渲染到 document.body */}
-      {isChangePasswordOpen &&
-        mounted &&
-        createPortal(changePasswordPanel, document.body)}
+      {mounted && showPassword && (
+        <ChangePasswordModal
+          isOpen={showPassword}
+          onClose={() => setShowPassword(false)}
+          onLogout={handleLogout}
+        />
+      )}
 
-      {/* 版本面板 */}
-      <VersionPanel
-        isOpen={isVersionPanelOpen}
-        onClose={() => setIsVersionPanelOpen(false)}
-      />
+      {mounted && (
+        <VersionPanel
+          isOpen={showVersion}
+          onClose={() => setShowVersion(false)}
+        />
+      )}
     </>
   );
 };

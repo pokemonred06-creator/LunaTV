@@ -15,6 +15,12 @@ const config: Config = {
           raw: '(orientation: landscape) and (max-height: 700px)',
         },
       },
+      zIndex: {
+        '600': '600',
+        '999': '999',
+        '1000': '1000',
+        '9999': '9999',
+      },
       fontFamily: {
         primary: ['Inter', ...defaultTheme.fontFamily.sans],
       },
