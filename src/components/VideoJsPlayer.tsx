@@ -747,6 +747,43 @@ export default function VideoJsPlayer({
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
           if (configRef.current.autoPlay) tryPlayNow();
         });
+
+        // FIX: HLS Error Handling & Sound Recovery
+        hls.on(Hls.Events.ERROR, (_event, data) => {
+          if (data.fatal) {
+            switch (data.type) {
+              case Hls.ErrorTypes.NETWORK_ERROR:
+                console.warn(
+                  '[HLS] Fatal network error encountered, trying to recover',
+                );
+                hls.startLoad();
+                break;
+              case Hls.ErrorTypes.MEDIA_ERROR: {
+                console.warn(
+                  '[HLS] Fatal media error encountered, trying to recover',
+                );
+                hls.recoverMediaError();
+                // Force volume update to wake up audio engine
+                const p = playerRef.current;
+                if (p) {
+                  const vol = p.volume();
+                  p.volume(0);
+                  setTimeout(() => p.volume(vol), 50);
+                }
+                break;
+              }
+              default:
+                // Cannot recover, reloading source
+                console.error(
+                  '[HLS] Unrecoverable error, destroying HLS instance',
+                );
+                hls.destroy();
+                // Trigger re-init via effect dependency
+                initHls(videoEl, proxyUrl);
+                break;
+            }
+          }
+        });
       }
     },
     [
@@ -858,6 +895,14 @@ export default function VideoJsPlayer({
         if (pendingAutoplayRef.current) pendingAutoplayRef.current = false;
         clearSwitching();
         callbacksRef.current.onPlay?.();
+
+        // FIX: Audio Context Resumption
+        const AudioContext =
+          window.AudioContext || (window as any).webkitAudioContext;
+        if (AudioContext) {
+          const ctx = new AudioContext();
+          if (ctx.state === 'suspended') ctx.resume();
+        }
       }
     });
     player.on('pause', () => {
@@ -930,6 +975,44 @@ export default function VideoJsPlayer({
       );
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // FIX: Stall Detection & Recovery
+  useEffect(() => {
+    if (!playerReady || !playerRef.current) return;
+
+    let lastTime = 0;
+    let stallCount = 0;
+
+    const interval = setInterval(() => {
+      if (!mountedRef.current || !playerRef.current) return;
+      const p = playerRef.current;
+
+      // Only check if supposed to be playing
+      if (p.paused() || p.scrubbing()) {
+        stallCount = 0;
+        return;
+      }
+
+      const current = p.currentTime();
+      const delta = Math.abs(current - lastTime);
+
+      // If moved less than 0.1s in 2s (and not at end)
+      if (delta < 0.1 && p.remainingTime() > 2) {
+        stallCount++;
+        // If stalled for 6 seconds (3 intervals)
+        if (stallCount >= 3) {
+          console.warn('[Player] Stall detected, nudging forward...');
+          p.currentTime(current + 1); // Skip 1 second
+          stallCount = 0; // Reset
+        }
+      } else {
+        stallCount = 0;
+      }
+      lastTime = current;
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [playerReady]);
 
   const togglePlay = () => {
     if (playerRef.current?.paused())
