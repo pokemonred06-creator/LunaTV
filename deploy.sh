@@ -14,8 +14,7 @@ fi
 
 echo "--> Copying image to $REMOTE_DIR..."
 scp -O $IMAGE_TAR $TARGET:$REMOTE_DIR/
-echo "--> Copying docker-compose.yml to $REMOTE_DIR..."
-scp -O docker-compose.yml $TARGET:$REMOTE_DIR/docker-compose.yml
+
 
 echo "--> Deploying to Production at $REMOTE_DIR..."
 ssh $TARGET "mkdir -p $REMOTE_DIR/cache && \
