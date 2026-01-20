@@ -173,7 +173,9 @@ export async function POST(req: NextRequest) {
           expires,
           sameSite: 'lax',
           httpOnly: false,
-          secure: process.env.NODE_ENV === 'production',
+          secure:
+            process.env.NODE_ENV === 'production' &&
+            process.env.DISABLE_SECURE_COOKIES !== 'true',
         },
       );
 
@@ -242,7 +244,9 @@ export async function POST(req: NextRequest) {
           expires,
           sameSite: 'lax',
           httpOnly: false,
-          secure: process.env.NODE_ENV === 'production',
+          secure:
+            process.env.NODE_ENV === 'production' &&
+            process.env.DISABLE_SECURE_COOKIES !== 'true',
         },
       );
 
@@ -313,7 +317,9 @@ export async function POST(req: NextRequest) {
           expires,
           sameSite: 'lax',
           httpOnly: false,
-          secure: process.env.NODE_ENV === 'production',
+          secure:
+            process.env.NODE_ENV === 'production' &&
+            process.env.DISABLE_SECURE_COOKIES !== 'true',
         },
       );
 
