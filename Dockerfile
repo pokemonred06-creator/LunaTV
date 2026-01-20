@@ -2,7 +2,7 @@
 FROM node:20-alpine AS base
 
 # ===== Go Proxy Build Stage =====
-FROM golang:1.22-alpine AS go-builder
+FROM golang:alpine AS go-builder
 WORKDIR /go-app
 COPY scripts/proxy/go.mod .
 COPY scripts/proxy/server.go .
