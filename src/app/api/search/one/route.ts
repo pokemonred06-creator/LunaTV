@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { getAuthInfoFromCookie } from '@/lib/auth';
+import { getAuthInfoFromCookie } from '@/lib/auth/server';
 import { getAvailableApiSites, getConfig } from '@/lib/config'; // Modified import
 import { searchFromApi } from '@/lib/downstream';
 import { yellowWords } from '@/lib/yellow';
@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
           'Vercel-CDN-Cache-Control': `public, s-maxage=${cacheTime}`,
           'Netlify-Vary': 'query',
         },
-      }
+      },
     );
   }
 
@@ -46,7 +46,7 @@ export async function GET(request: NextRequest) {
           error: `未找到指定的视频源: ${resourceId}`,
           result: null,
         },
-        { status: 404 }
+        { status: 404 },
       );
     }
 
@@ -65,7 +65,7 @@ export async function GET(request: NextRequest) {
           error: '未找到结果',
           result: null,
         },
-        { status: 404 }
+        { status: 404 },
       );
     } else {
       return NextResponse.json(
@@ -77,7 +77,7 @@ export async function GET(request: NextRequest) {
             'Vercel-CDN-Cache-Control': `public, s-maxage=${cacheTime}`,
             'Netlify-Vary': 'query',
           },
-        }
+        },
       );
     }
   } catch (error) {
@@ -86,7 +86,7 @@ export async function GET(request: NextRequest) {
         error: '搜索失败',
         result: null,
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

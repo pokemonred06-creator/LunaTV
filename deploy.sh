@@ -12,6 +12,13 @@ if ! ssh -q $TARGET exit; then
     exit 1
 fi
 
+echo "--> Building Docker Image..."
+# Build for linux/amd64 since Synology is x86_64
+docker build --platform linux/amd64 -t lunatv:custom .
+
+echo "--> Saving Docker Image to tar..."
+docker save -o $IMAGE_TAR lunatv:custom
+
 echo "--> Copying image to $REMOTE_DIR..."
 scp -O $IMAGE_TAR $TARGET:$REMOTE_DIR/
 

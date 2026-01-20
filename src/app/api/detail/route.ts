@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { getAuthInfoFromCookie } from '@/lib/auth';
+import { getAuthInfoFromCookie } from '@/lib/auth/server';
 import { getAvailableApiSites, getConfig } from '@/lib/config'; // Modified import
 import { getDetailFromApi } from '@/lib/downstream';
 
@@ -36,7 +36,10 @@ export async function GET(request: NextRequest) {
 
     // 修复图片 Referrer 问题
     if (result.poster && result.poster.includes('doubanio.com')) {
-      result.poster = result.poster.replace(/img\d+\.doubanio\.com/g, 'img.doubanio.cmliussss.net');
+      result.poster = result.poster.replace(
+        /img\d+\.doubanio\.com/g,
+        'img.doubanio.cmliussss.net',
+      );
     }
 
     const config = await getConfig(); // Get full config
@@ -53,7 +56,7 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     return NextResponse.json(
       { error: (error as Error).message },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

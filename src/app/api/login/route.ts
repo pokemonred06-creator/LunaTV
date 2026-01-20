@@ -15,32 +15,7 @@ const STORAGE_TYPE =
     | 'kvrocks'
     | undefined) || 'localstorage';
 
-// 生成签名
-async function generateSignature(
-  data: string,
-  secret: string,
-): Promise<string> {
-  const encoder = new TextEncoder();
-  const keyData = encoder.encode(secret);
-  const messageData = encoder.encode(data);
-
-  // 导入密钥
-  const key = await crypto.subtle.importKey(
-    'raw',
-    keyData,
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign'],
-  );
-
-  // 生成签名
-  const signature = await crypto.subtle.sign('HMAC', key, messageData);
-
-  // 转换为十六进制字符串
-  return Array.from(new Uint8Array(signature))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
-}
+import { calculateSignature } from '@/lib/auth/server';
 
 // 生成认证Cookie（带签名）
 async function generateAuthCookie(
@@ -58,10 +33,13 @@ async function generateAuthCookie(
   authData.username = effectiveUsername;
 
   if (process.env.PASSWORD) {
-    // Sign the username + timestamp using the password as secret
+    // Sign the username + role + timestamp using the password as secret
     const timestamp = Date.now();
-    const dataToSign = `${effectiveUsername}:${timestamp}`;
-    const signature = await generateSignature(dataToSign, process.env.PASSWORD);
+    const signature = calculateSignature(
+      effectiveUsername,
+      authData.role,
+      timestamp,
+    );
 
     authData.signature = signature;
     authData.timestamp = timestamp;

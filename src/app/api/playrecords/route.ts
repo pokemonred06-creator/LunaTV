@@ -1,8 +1,6 @@
- 
-
 import { NextRequest, NextResponse } from 'next/server';
 
-import { getAuthInfoFromCookie } from '@/lib/auth';
+import { getAuthInfoFromCookie } from '@/lib/auth/server';
 import { getConfig } from '@/lib/config';
 import { db } from '@/lib/db';
 import { PlayRecord } from '@/lib/types';
@@ -21,7 +19,7 @@ export async function GET(request: NextRequest) {
     if (authInfo.username !== process.env.USERNAME) {
       // 非站长，检查用户存在或被封禁
       const user = config.UserConfig.Users.find(
-        (u) => u.username === authInfo.username
+        (u) => u.username === authInfo.username,
       );
       if (!user) {
         return NextResponse.json({ error: '用户不存在' }, { status: 401 });
@@ -36,22 +34,30 @@ export async function GET(request: NextRequest) {
     // 处理图片链接，适配第三方客户端（如 OrionTV）
     // 原始豆瓣链接在第三方App中会因 Referrer 限制无法加载
     // 这里统一替换为免 Referrer 的 CDN 镜像
-    const processedRecords = Object.entries(records).reduce((acc, [key, record]) => {
-      let cover = record.cover;
-      if (cover && cover.includes('doubanio.com')) {
-        cover = cover.replace(/img\d+\.doubanio\.com/g, 'img.doubanio.cmliussss.net');
-      }
-      // 添加 poster 字段作为 cover 的别名，适配 OrionTV 等可能使用 poster 字段的客户端
-      acc[key] = { ...record, cover, poster: cover } as PlayRecord & { poster: string };
-      return acc;
-    }, {} as Record<string, PlayRecord>);
+    const processedRecords = Object.entries(records).reduce(
+      (acc, [key, record]) => {
+        let cover = record.cover;
+        if (cover && cover.includes('doubanio.com')) {
+          cover = cover.replace(
+            /img\d+\.doubanio\.com/g,
+            'img.doubanio.cmliussss.net',
+          );
+        }
+        // 添加 poster 字段作为 cover 的别名，适配 OrionTV 等可能使用 poster 字段的客户端
+        acc[key] = { ...record, cover, poster: cover } as PlayRecord & {
+          poster: string;
+        };
+        return acc;
+      },
+      {} as Record<string, PlayRecord>,
+    );
 
     return NextResponse.json(processedRecords, { status: 200 });
   } catch (err) {
     console.error('获取播放记录失败', err);
     return NextResponse.json(
       { error: 'Internal Server Error' },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
@@ -68,7 +74,7 @@ export async function POST(request: NextRequest) {
     if (authInfo.username !== process.env.USERNAME) {
       // 非站长，检查用户存在或被封禁
       const user = config.UserConfig.Users.find(
-        (u) => u.username === authInfo.username
+        (u) => u.username === authInfo.username,
       );
       if (!user) {
         return NextResponse.json({ error: '用户不存在' }, { status: 401 });
@@ -84,7 +90,7 @@ export async function POST(request: NextRequest) {
     if (!key || !record) {
       return NextResponse.json(
         { error: 'Missing key or record' },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -92,7 +98,7 @@ export async function POST(request: NextRequest) {
     if (!record.title || !record.source_name || record.index < 1) {
       return NextResponse.json(
         { error: 'Invalid record data' },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -101,7 +107,7 @@ export async function POST(request: NextRequest) {
     if (!source || !id) {
       return NextResponse.json(
         { error: 'Invalid key format' },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -117,7 +123,7 @@ export async function POST(request: NextRequest) {
     console.error('保存播放记录失败', err);
     return NextResponse.json(
       { error: 'Internal Server Error' },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
@@ -134,7 +140,7 @@ export async function DELETE(request: NextRequest) {
     if (authInfo.username !== process.env.USERNAME) {
       // 非站长，检查用户存在或被封禁
       const user = config.UserConfig.Users.find(
-        (u) => u.username === authInfo.username
+        (u) => u.username === authInfo.username,
       );
       if (!user) {
         return NextResponse.json({ error: '用户不存在' }, { status: 401 });
@@ -154,7 +160,7 @@ export async function DELETE(request: NextRequest) {
       if (!source || !id) {
         return NextResponse.json(
           { error: 'Invalid key format' },
-          { status: 400 }
+          { status: 400 },
         );
       }
 
@@ -167,7 +173,7 @@ export async function DELETE(request: NextRequest) {
         Object.keys(all).map(async (k) => {
           const [s, i] = k.split('+');
           if (s && i) await db.deletePlayRecord(username, s, i);
-        })
+        }),
       );
     }
 
@@ -176,7 +182,7 @@ export async function DELETE(request: NextRequest) {
     console.error('删除播放记录失败', err);
     return NextResponse.json(
       { error: 'Internal Server Error' },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

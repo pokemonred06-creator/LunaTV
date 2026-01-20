@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { promisify } from 'util';
 import { gzip } from 'zlib';
 
-import { getAuthInfoFromCookie } from '@/lib/auth';
+import { getAuthInfoFromCookie } from '@/lib/auth/server';
 import { SimpleCrypto } from '@/lib/crypto';
 import { db } from '@/lib/db';
 import { CURRENT_VERSION } from '@/lib/version';
@@ -20,7 +20,7 @@ export async function POST(req: NextRequest) {
     if (storageType === 'localstorage') {
       return NextResponse.json(
         { error: '不支持本地存储进行数据迁移' },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -32,7 +32,10 @@ export async function POST(req: NextRequest) {
 
     // 检查用户权限（只有站长可以导出数据）
     if (authInfo.username !== process.env.USERNAME) {
-      return NextResponse.json({ error: '权限不足，只有站长可以导出数据' }, { status: 401 });
+      return NextResponse.json(
+        { error: '权限不足，只有站长可以导出数据' },
+        { status: 401 },
+      );
     }
 
     const config = await db.getAdminConfig();
@@ -54,8 +57,8 @@ export async function POST(req: NextRequest) {
         // 管理员配置
         adminConfig: config,
         // 所有用户数据
-        userData: {} as { [username: string]: any }
-      }
+        userData: {} as { [username: string]: any },
+      },
     };
 
     // 获取所有用户
@@ -76,14 +79,15 @@ export async function POST(req: NextRequest) {
         // 跳过片头片尾配置
         skipConfigs: await db.getAllSkipConfigs(username),
         // 用户密码（通过验证空密码来检查用户是否存在，然后获取密码）
-        password: await getUserPassword(username)
+        password: await getUserPassword(username),
       };
 
       exportData.data.userData[username] = userData;
     }
 
     // 覆盖站长密码
-    exportData.data.userData[process.env.USERNAME].password = process.env.PASSWORD;
+    exportData.data.userData[process.env.USERNAME].password =
+      process.env.PASSWORD;
 
     // 将数据转换为JSON字符串
     const jsonData = JSON.stringify(exportData);
@@ -92,7 +96,10 @@ export async function POST(req: NextRequest) {
     const compressedData = await gzipAsync(jsonData);
 
     // 使用提供的密码加密压缩后的数据
-    const encryptedData = SimpleCrypto.encrypt(compressedData.toString('base64'), password);
+    const encryptedData = SimpleCrypto.encrypt(
+      compressedData.toString('base64'),
+      password,
+    );
 
     // 生成文件名
     const now = new Date();
@@ -108,12 +115,11 @@ export async function POST(req: NextRequest) {
         'Content-Length': encryptedData.length.toString(),
       },
     });
-
   } catch (error) {
     console.error('数据导出失败:', error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : '导出失败' },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

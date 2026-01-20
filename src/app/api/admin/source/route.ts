@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { AdminConfig } from '@/lib/admin.types'; // Assuming types are here, adjust if needed
-import { getAuthInfoFromCookie } from '@/lib/auth';
+import { getAuthInfoFromCookie } from '@/lib/auth/server';
 import { getConfig } from '@/lib/config';
 import { db } from '@/lib/db';
 

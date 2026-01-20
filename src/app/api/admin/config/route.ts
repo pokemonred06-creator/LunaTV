@@ -1,16 +1,13 @@
- 
-
 import { NextRequest, NextResponse } from 'next/server';
 
 import { AdminConfigResult } from '@/lib/admin.types';
-import { getAuthInfoFromCookie } from '@/lib/auth';
+import { getAuthInfoFromCookie } from '@/lib/auth/server';
 import { getConfig } from '@/lib/config';
 
 export const runtime = 'nodejs';
 
 export async function GET(request: NextRequest) {
   const storageType = process.env.NEXT_PUBLIC_STORAGE_TYPE || 'localstorage';
-
 
   const authInfo = getAuthInfoFromCookie(request);
   if (!authInfo || !authInfo.username) {
@@ -28,7 +25,7 @@ export async function GET(request: NextRequest) {
     // In localstorage mode, username is hardcoded to 'admin' in login route.
     // So we should check if the authenticated username matches 'admin' or process.env.USERNAME
     if (result.Config.SiteConfig.SiteName && username === 'admin') {
-       result.Role = 'owner';
+      result.Role = 'owner';
     } else if (username === process.env.USERNAME) {
       result.Role = 'owner';
     } else {
@@ -40,7 +37,7 @@ export async function GET(request: NextRequest) {
       } else {
         return NextResponse.json(
           { error: '权限不足或用户不存在' },
-          { status: 401 }
+          { status: 401 },
         );
       }
     }
@@ -57,7 +54,7 @@ export async function GET(request: NextRequest) {
         error: '获取管理员配置失败',
         details: (error as Error).message,
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

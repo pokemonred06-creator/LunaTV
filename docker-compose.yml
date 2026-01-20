@@ -6,7 +6,7 @@ services:
     ports:
       - '8899:3000'
     volumes:
-      - ./cache:/app/data
+      - ./lunatv/cache:/app/data
     environment:
       - NODE_ENV=production
       - GO_PROXY_URL=http://127.0.0.1:8080
@@ -19,3 +19,11 @@ services:
       # Auth
       - USERNAME=admin
       - PASSWORD=admin_1234
+      - NEXT_PUBLIC_STORAGE_TYPE=redis
+      - REDIS_URL=redis://lunatv-redis:6379
+    networks:
+      - media-net
+
+networks:
+  media-net:
+    external: true

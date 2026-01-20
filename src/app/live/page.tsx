@@ -168,6 +168,8 @@ function useLiveCore() {
         const res = await fetch(`/api/live/channels?source=${source.key}`, {
           signal: controller.signal,
         });
+
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const result = await res.json();
 
         if (controller.signal.aborted)
@@ -227,6 +229,8 @@ function useLiveCore() {
         const res = await fetch('/api/live/sources', {
           signal: controller.signal,
         });
+
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const result = await res.json();
 
         if (controller.signal.aborted) return;
@@ -676,15 +680,19 @@ function LivePageClient() {
         Desktop: Flex-Row. Player+Info Left. List Right (Sidebar).
         No 'hidden' classes depending on state to ensure visibility.
       */}
+      {/* OUTER CONTAINER: Enforce full viewport height minus header */}
       <div className='flex flex-col lg:flex-row h-[calc(100vh-64px)] w-full overflow-hidden'>
-        {/* === SECTION 1: PLAYER & INFO (Mobile: Top, Desktop: Left) === */}
-        <div className='flex-1 flex flex-col min-w-0 bg-black relative lg:h-full overflow-y-auto lg:overflow-hidden'>
-          {/* PLAYER CONTAINER */}
-          {/* Mobile: Sticky top, defined aspect ratio. Desktop: Grow to fill space */}
+        {/* === LEFT PANE: PLAYER & INFO === 
+            Mobile: flex-none (take only natural height). 
+            Desktop: flex-1 (grow to fill width), h-full (fill height).
+            removed 'overflow-y-auto' so mobile doesn't scroll this container.
+        */}
+        <div className='flex-none lg:flex-1 flex flex-col min-w-0 bg-black relative lg:h-full overflow-hidden'>
+          {/* PLAYER WRAPPER: Removed sticky, just relative now */}
           <div
             ref={playerWrapperRef}
             className={`
-              sticky top-0 z-30 lg:relative
+              relative z-30
               w-full shrink-0
               aspect-video lg:aspect-auto lg:flex-1
               bg-black overflow-hidden
@@ -743,9 +751,9 @@ function LivePageClient() {
             )}
           </div>
 
-          {/* INFO & EPG BAR */}
-          {/* Mobile: Scrollable below player. Desktop: Fixed at bottom of player area */}
+          {/* INFO BAR: shrink-0 ensures it doesn't collapse if space is tight */}
           <div className='shrink-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 lg:border-t lg:border-b-0 p-4 relative z-20'>
+            {/* ... Info Content ... */}
             {currentChannel ? (
               <>
                 <div className='flex items-center justify-between mb-4 gap-4'>
@@ -809,19 +817,9 @@ function LivePageClient() {
           </div>
         </div>
 
-        {/* === SECTION 2: CHANNEL LIST (Mobile: Below Info, Desktop: Right Sidebar) === */}
-        {/* On Mobile, this just flows below the info because parent is flex-col & overflow-y-auto is on left pane wrapper? 
-            Wait, if parent is flex-col, and left pane is flex-1 overflow-y-auto, then this pane might be pushed off screen?
-            Correct Logic:
-            Mobile: 
-              - Main container: flex-col, h-full.
-              - Player Section: shrink-0 (or flex-none).
-              - Info Section: shrink-0.
-              - List Section: flex-1, overflow-y-auto.
-            Desktop:
-              - Main container: flex-row.
-              - Left Pane: flex-1.
-              - Right Pane: w-80.
+        {/* === RIGHT PANE: CHANNEL LIST === 
+            Mobile: flex-1 (GROW to fill remaining vertical space).
+            Desktop: flex-none (Fixed width), h-full (Fill height).
         */}
         <div
           className='
@@ -861,6 +859,7 @@ function LivePageClient() {
                       key={g}
                       ref={(el) => {
                         if (el) groupButtonRefs.current.set(g, el);
+                        else groupButtonRefs.current.delete(g);
                       }}
                       onClick={() => handleGroupChange(g)}
                       className={`whitespace-nowrap px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${selectedGroup === g ? 'bg-blue-600 text-white shadow-md' : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'}`}
