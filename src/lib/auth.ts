@@ -42,9 +42,13 @@ export function getAuthInfoFromBrowserCookie(): AuthInfo | null {
 
   try {
     const val = JSON.parse(decodeURIComponent(match[1]));
-    if (!val?.username || !val?.role) return null;
+    if (!val?.username || !val?.role) {
+      console.warn('[Auth] Cookie found but missing username/role:', val);
+      return null;
+    }
     return val as AuthInfo;
-  } catch {
+  } catch (e) {
+    console.error('[Auth] Failed to parse auth-user cookie:', e);
     return null;
   }
 }
