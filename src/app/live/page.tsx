@@ -559,14 +559,19 @@ function LivePageClient() {
       responsive: true,
       fluid: false,
       liveui: true,
-      html5: { vhs: { lowLatencyMode: true, overrideNative: !isIOS } },
+      html5: {
+        hls: { overrideNative: false },
+        nativeVideoTracks: false,
+        nativeAudioTracks: false,
+        nativeTextTracks: false,
+      },
       techOrder: ['html5', 'flvjs'],
       controlBar: { pictureInPictureToggle: false },
       flvjs: {
         mediaDataSource: { isLive: true, cors: true, withCredentials: false },
       },
     }),
-    [isIOS],
+    [],
   );
 
   const scrollToChannel = useCallback((id: string) => {
