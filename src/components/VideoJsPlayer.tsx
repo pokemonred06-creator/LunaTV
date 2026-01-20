@@ -843,7 +843,13 @@ export default function VideoJsPlayer({
       type === 'application/x-mpegURL' || finalUrl.includes('.m3u8');
     const isFlv = finalUrl.includes('.flv');
 
-    if (isHls) {
+    // Only use manual HLS if we have a custom loader (e.g. P2P)
+    // Otherwise, rely on Video.js (VHS or Native) to handle it via player.src()
+    if (isHls && customHlsLoader) {
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      }
       (async () => {
         let v = getTechVideoEl();
         for (let i = 0; i < 10 && !v; i++) {
@@ -853,23 +859,42 @@ export default function VideoJsPlayer({
         if (v) initHls(v, finalUrl);
       })();
     } else {
+      // Standard Video.js handling (HLS, FLV, MP4)
       if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;
       }
+
       let src = finalUrl;
+      // Ensure FLV/Proxy params are injected if needed
       if (/^https?:\/\//i.test(finalUrl)) {
         const enc = encodeURIComponent(finalUrl);
         const srcParam = encodeURIComponent(seriesId || 'global');
-        src = isFlv
-          ? `/api/proxy/flv?url=${enc}&moontv-source=${srcParam}`
-          : `/api/proxy/key?url=${enc}&moontv-source=${srcParam}`;
+        // Only modify if not already proxied
+        if (!finalUrl.includes('/api/proxy/')) {
+          if (isFlv) {
+            src = `/api/proxy/flv?url=${enc}&moontv-source=${srcParam}`;
+          } else if (isHls) {
+            // Determine if we need to force proxy usage or if URL is direct
+            // For consistnecy with LivePageClient, we often use the passed proxied URL directly.
+            // But if raw URL passed, proxy it:
+            // src = `/api/proxy/m3u8?url=${enc}&moontv-source=${srcParam}`;
+          }
+        }
       }
+
+      const determinedType = isFlv
+        ? 'video/x-flv'
+        : isHls
+          ? 'application/x-mpegURL'
+          : type || 'video/mp4';
+
       playerRef.current.src({
         src,
-        type: isFlv ? 'video/x-flv' : type || 'video/mp4',
+        type: determinedType,
       });
-      playerRef.current.controls(false);
+
+      // Arm autoplay for standard handling
       armAutoplay();
     }
   }, [
@@ -881,6 +906,7 @@ export default function VideoJsPlayer({
     armAutoplay,
     clearNativeAutoplayListeners,
     seriesId,
+    customHlsLoader,
   ]);
 
   useEffect(() => {
