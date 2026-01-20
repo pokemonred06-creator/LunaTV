@@ -4,7 +4,7 @@ services:
     container_name: lunatv
     restart: unless-stopped
     ports:
-      - '3000:3000'
+      - '8899:3000'
     volumes:
       - ./cache:/app/data
     environment:
