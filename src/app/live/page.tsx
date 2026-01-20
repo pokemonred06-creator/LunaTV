@@ -11,7 +11,7 @@ import {
   useState,
 } from 'react';
 import type Player from 'video.js/dist/types/player';
-import 'videojs-flvjs'; // Ensure installed
+import 'videojs-flvjs';
 
 import {
   deleteFavorite,
@@ -26,7 +26,7 @@ import EpgScrollableRow from '@/components/EpgScrollableRow';
 import PageLayout from '@/components/PageLayout';
 import VideoJsPlayer from '@/components/VideoJsPlayer';
 
-// --- Types ---
+// --- Interfaces ---
 
 interface ChannelApiResponse {
   id: string;
@@ -79,14 +79,6 @@ interface ProcessedProgram extends EpgProgram {
 
 // --- Utils ---
 
-/**
- * PRODUCTION EPG CLEANER
- * Strategy: "Trim Previous"
- * 1. Filter for Today
- * 2. Sort by Start Time
- * 3. If overlap detected: Trim the END of the previous show to match the START of the current show.
- * This ensures continuous timeline without dropping shows (unless they are fully swallowed).
- */
 const cleanEpgData = (programs: EpgProgram[]) => {
   if (!programs || programs.length === 0) return programs;
 
@@ -98,7 +90,6 @@ const cleanEpgData = (programs: EpgProgram[]) => {
   ).getTime();
   const endOfDay = startOfDay + 86400000;
 
-  // 1. Parse & Filter (Single Pass)
   const validPrograms: ProcessedProgram[] = [];
   for (const p of programs) {
     const s = parseCustomTimeFormat(p.start).getTime();
@@ -108,34 +99,23 @@ const cleanEpgData = (programs: EpgProgram[]) => {
     }
   }
 
-  // 2. Sort
   validPrograms.sort((a, b) => a.startTime - b.startTime);
 
-  // 3. Trim Overlaps
   const result: ProcessedProgram[] = [];
-
   for (const current of validPrograms) {
     if (result.length === 0) {
       result.push(current);
       continue;
     }
-
     const prev = result[result.length - 1];
-
-    // If current starts before prev ends, we have an overlap
     if (current.startTime < prev.endTime) {
-      // Trim prev to end when current starts
       prev.endTime = current.startTime;
-
-      // If trimming made prev invalid (start >= end), remove it (it was fully swallowed)
       if (prev.startTime >= prev.endTime) {
         result.pop();
       }
     }
-
     result.push(current);
   }
-
   return result.map(({ startTime, endTime, ...rest }) => rest);
 };
 
@@ -154,7 +134,7 @@ function useDebounce<T>(value: T, delay: number): T {
   return debouncedValue;
 }
 
-// --- Custom Hooks ---
+// --- Logic Hooks ---
 
 function useLiveCore() {
   const searchParams = useSearchParams();
@@ -171,18 +151,13 @@ function useLiveCore() {
   const [isChannelLoading, setIsChannelLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Use AbortController ref for channel fetching
   const channelsAbortRef = useRef<AbortController | null>(null);
 
-  // Cleanup on unmount
   useEffect(() => () => channelsAbortRef.current?.abort(), []);
 
   const fetchChannels = useCallback(
     async (source: LiveSource, targetChannelId?: string) => {
-      // 1. Abort previous in-flight request
       channelsAbortRef.current?.abort();
-
-      // 2. Create new controller
       const controller = new AbortController();
       channelsAbortRef.current = controller;
 
@@ -193,7 +168,6 @@ function useLiveCore() {
         const res = await fetch(`/api/live/channels?source=${source.key}`, {
           signal: controller.signal,
         });
-
         const result = await res.json();
 
         if (controller.signal.aborted)
@@ -230,7 +204,6 @@ function useLiveCore() {
         setCurrentChannel(initialChannel);
         return { channels: parsedChannels, initialChannel };
       } catch (err: unknown) {
-        // Only handle error if NOT aborted
         if (!controller.signal.aborted) {
           console.error(err);
           setChannels([]);
@@ -246,10 +219,8 @@ function useLiveCore() {
     [],
   );
 
-  // Initialization Logic
   useEffect(() => {
     const controller = new AbortController();
-
     const init = async () => {
       try {
         setLoadingStage('fetching');
@@ -287,7 +258,6 @@ function useLiveCore() {
         }
       }
     };
-
     init();
     return () => controller.abort();
   }, [searchParams, fetchChannels]);
@@ -345,7 +315,6 @@ function usePlayerState(videoUrl: string, sourceKey?: string) {
         const data = await res.json();
 
         if (controller.signal.aborted) return;
-
         let detected = data.type;
         if (!detected || detected === 'unknown')
           detected = guessType(debouncedUrl);
@@ -386,7 +355,6 @@ function usePlayerState(videoUrl: string, sourceKey?: string) {
 function useEpg(sourceKey?: string, tvgId?: string) {
   const debouncedKey = useDebounce(sourceKey, 1000);
   const debouncedId = useDebounce(tvgId, 1000);
-
   const [epgData, setEpgData] = useState<{ programs: EpgProgram[] } | null>(
     null,
   );
@@ -397,10 +365,8 @@ function useEpg(sourceKey?: string, tvgId?: string) {
       setEpgData(null);
       return;
     }
-
     const controller = new AbortController();
     setIsLoading(true);
-
     fetch(`/api/live/epg?source=${debouncedKey}&tvgId=${debouncedId}`, {
       signal: controller.signal,
     })
@@ -415,7 +381,6 @@ function useEpg(sourceKey?: string, tvgId?: string) {
       .finally(() => {
         if (!controller.signal.aborted) setIsLoading(false);
       });
-
     return () => controller.abort();
   }, [debouncedKey, debouncedId]);
 
@@ -437,12 +402,9 @@ function useFavorites(
       setIsFavorite(false);
       return;
     }
-
     const sid = `live_${source.key}`;
     const cid = `live_${channel.id}`;
-
     checkIsFavorited(sid, cid).then(setIsFavorite);
-
     return subscribeToDataUpdates('favoritesUpdated', (favs: FavoriteData) => {
       const key = generateStorageKey(sid, cid);
       setIsFavorite(!!favs[key]);
@@ -454,9 +416,7 @@ function useFavorites(
     const sid = `live_${source.key}`;
     const cid = `live_${channel.id}`;
     const newVal = !isFavorite;
-
     setIsFavorite(newVal);
-
     try {
       if (newVal) {
         await saveFavorite(sid, cid, {
@@ -475,11 +435,10 @@ function useFavorites(
       setIsFavorite(!newVal);
     }
   };
-
   return { isFavorite, toggle };
 }
 
-// --- Main Component ---
+// --- Component ---
 
 function LivePageClient() {
   const {
@@ -511,12 +470,11 @@ function LivePageClient() {
     'channels',
   );
   const [selectedGroup, setSelectedGroup] = useState<string>('');
-  const [isChannelListCollapsed, setIsChannelListCollapsed] = useState(false);
-  const [isSwitchingSource, setIsSwitchingSource] = useState(false);
   const [playerFocused, setPlayerFocused] = useState(false);
+  const [isSwitchingSource, setIsSwitchingSource] = useState(false);
 
   const playerRef = useRef<Player | null>(null);
-  const playerContainerRef = useRef<HTMLDivElement>(null);
+  const playerWrapperRef = useRef<HTMLDivElement>(null);
   const channelListRef = useRef<HTMLDivElement>(null);
   const groupButtonRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
   const sourceRef = useRef<LiveSource | null>(null);
@@ -549,7 +507,7 @@ function LivePageClient() {
       autoplay: true,
       controls: true,
       responsive: true,
-      fluid: false,
+      fluid: false, // We control sizing via CSS
       liveui: true,
       html5: {
         hls: { overrideNative: false },
@@ -557,8 +515,8 @@ function LivePageClient() {
         nativeAudioTracks: false,
         nativeTextTracks: false,
       },
-      techOrder: ['html5', 'flvjs'],
       controlBar: { pictureInPictureToggle: false },
+      techOrder: ['html5', 'flvjs'],
       flvjs: {
         mediaDataSource: { isLive: true, cors: true, withCredentials: false },
       },
@@ -574,6 +532,7 @@ function LivePageClient() {
     el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
   }, []);
 
+  // Sync group
   useEffect(() => {
     if (
       channels.length > 0 &&
@@ -589,10 +548,8 @@ function LivePageClient() {
     setIsSwitchingSource(true);
     setSelectedGroup('');
     setCurrentSource(s);
-
     const { initialChannel } = await fetchChannels(s);
     if (initialChannel) setSelectedGroup(initialChannel.group || '其他');
-
     setIsSwitchingSource(false);
     setActiveTab('channels');
   };
@@ -635,7 +592,7 @@ function LivePageClient() {
             options.uri = u.toString();
           }
         } catch {
-          /* safely ignore */
+          /* ignore */
         }
         return options;
       };
@@ -645,7 +602,6 @@ function LivePageClient() {
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (!playerRef.current) return;
     const p = playerRef.current;
-
     switch (e.key) {
       case 'ArrowUp':
         e.preventDefault();
@@ -658,11 +614,8 @@ function LivePageClient() {
       case ' ':
       case 'k':
         e.preventDefault();
-        if (p.paused()) {
-          p.play();
-        } else {
-          p.pause();
-        }
+        if (p.paused()) p.play();
+        else p.pause();
         break;
       case 'm':
         e.preventDefault();
@@ -717,298 +670,276 @@ function LivePageClient() {
 
   return (
     <PageLayout activePath='/live'>
-      <div className='flex flex-col h-[calc(100vh-64px)] overflow-hidden bg-black lg:bg-gray-50 lg:dark:bg-black'>
-        <div className='flex flex-1 min-h-0'>
-          {/* LEFT COLUMN: Player + Info + EPG */}
-          <div className='flex-1 flex flex-col min-w-0 bg-black relative'>
-            {/* 1. PLAYER AREA (Top, grow to fill available space) */}
-            <div
-              ref={playerContainerRef}
-              // Tailwind Arbitrary Variants for Video.js overrides
-              className={`
-                relative flex-1 bg-black overflow-hidden outline-none transition-ring duration-200 
-                ${playerFocused ? 'ring-2 ring-blue-500/50 z-10' : ''}
-                [&_.video-js]:w-full [&_.video-js]:h-full [&_.video-js]:overflow-hidden
-                [&_.vjs-tech]:object-contain
-                [&_.vjs-control-bar]:flex [&_.vjs-control-bar]:bg-linear-to-t [&_.vjs-control-bar]:from-black/80 [&_.vjs-control-bar]:to-transparent
-                [&_.vjs-big-play-button]:top-1/2 [&_.vjs-big-play-button]:left-1/2 [&_.vjs-big-play-button]:-translate-x-1/2 [&_.vjs-big-play-button]:-translate-y-1/2 [&_.vjs-big-play-button]:rounded-full [&_.vjs-big-play-button]:bg-black/60 [&_.vjs-big-play-button]:border-none
-              `}
-              tabIndex={0}
-              onKeyDown={handleKeyDown}
-              onFocus={() => setPlayerFocused(true)}
-              onBlur={() => setPlayerFocused(false)}
-              onMouseDown={() => {
-                setPlayerFocused(true);
-                playerContainerRef.current?.focus();
-              }}
-            >
-              {proxiedUrl && !unsupportedType ? (
-                <VideoJsPlayer
-                  key={proxiedUrl}
-                  url={proxiedUrl}
-                  poster={getProxiedLogoUrl(
-                    currentChannel?.logo || '',
-                    currentSource?.key,
-                  )}
-                  type={
-                    streamType === 'flv'
-                      ? 'video/x-flv'
-                      : 'application/x-mpegURL'
-                  }
-                  autoPlay={true}
-                  onReady={handlePlayerReady}
-                  className='w-full h-full'
-                  isLive={true}
-                  videoJsOptions={videoOptions}
-                />
-              ) : (
-                <div className='absolute inset-0 flex items-center justify-center text-gray-500'>
-                  {unsupportedType ? (
-                    <div className='text-center text-red-400'>
-                      <AlertTriangle className='w-10 h-10 mx-auto mb-2' />
-                      <p>Format Not Supported: {unsupportedType}</p>
-                    </div>
-                  ) : (
-                    <p>No Signal</p>
-                  )}
-                </div>
-              )}
-
-              {isStreamLoading && (
-                <div className='absolute inset-0 flex items-center justify-center bg-black/60 backdrop-blur-sm text-white z-20 pointer-events-none'>
-                  <div className='flex flex-col items-center gap-2'>
-                    <Loader2 className='w-8 h-8 animate-spin' />
-                    <span className='text-sm font-medium'>Connecting...</span>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* 2. INFO BAR & EPG (Bottom) */}
-            <div className='shrink-0 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-800 z-10'>
-              {currentChannel && (
-                <div className='p-4'>
-                  {/* Channel Info Row */}
-                  <div className='flex items-center justify-between mb-4 gap-4'>
-                    <div className='flex items-center gap-3 overflow-hidden min-w-0'>
-                      <div className='w-10 h-10 sm:w-12 sm:h-12 bg-gray-50 dark:bg-gray-800 rounded-lg shrink-0 flex items-center justify-center p-1 border border-gray-100 dark:border-gray-700'>
-                        {currentChannel.logo ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={getProxiedLogoUrl(
-                              currentChannel.logo,
-                              currentSource?.key,
-                            )}
-                            className='w-full h-full object-contain'
-                            alt={currentChannel.name}
-                            loading='lazy'
-                          />
-                        ) : (
-                          <Tv className='w-6 h-6 opacity-30' />
-                        )}
-                      </div>
-                      <div className='min-w-0 flex-1'>
-                        <h2 className='text-base sm:text-lg font-bold truncate text-gray-900 dark:text-gray-100 leading-tight'>
-                          {currentChannel.name}
-                        </h2>
-                        <div className='flex items-center gap-2 text-xs text-gray-500 mt-0.5'>
-                          <span className='px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 rounded'>
-                            {currentSource?.name}
-                          </span>
-                          <span className='truncate opacity-70'>
-                            {currentChannel.group}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className='flex items-center gap-2 shrink-0'>
-                      <button
-                        onClick={() =>
-                          setIsChannelListCollapsed(!isChannelListCollapsed)
-                        }
-                        className='hidden lg:flex items-center gap-2 px-3 py-2 text-sm font-medium bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors'
-                      >
-                        {isChannelListCollapsed ? 'Show List' : 'Expand Player'}
-                      </button>
-                      <button
-                        onClick={toggleFavorite}
-                        className={`p-2.5 rounded-full transition-colors active:scale-95 ${
-                          isFavorite
-                            ? 'bg-red-50 dark:bg-red-900/20 text-red-500'
-                            : 'bg-gray-100 dark:bg-gray-800 text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
-                        }`}
-                        title='Toggle Favorite'
-                      >
-                        <Heart
-                          className={`w-5 h-5 ${isFavorite ? 'fill-current' : ''}`}
-                        />
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* EPG Row */}
-                  <EpgScrollableRow
-                    programs={programs}
-                    currentTime={new Date()}
-                    isLoading={isEpgLoading}
-                  />
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* RIGHT COLUMN: Channel List */}
+      {/* 
+        LAYOUT STRATEGY (Attempt #3 - Robust Fix):
+        Mobile: Flex-Col. Player Top (Sticky). Info Middle. List Bottom (fills rest).
+        Desktop: Flex-Row. Player+Info Left. List Right (Sidebar).
+        No 'hidden' classes depending on state to ensure visibility.
+      */}
+      <div className='flex flex-col lg:flex-row h-[calc(100vh-64px)] w-full overflow-hidden'>
+        {/* === SECTION 1: PLAYER & INFO (Mobile: Top, Desktop: Left) === */}
+        <div className='flex-1 flex flex-col min-w-0 bg-black relative lg:h-full overflow-y-auto lg:overflow-hidden'>
+          {/* PLAYER CONTAINER */}
+          {/* Mobile: Sticky top, defined aspect ratio. Desktop: Grow to fill space */}
           <div
+            ref={playerWrapperRef}
             className={`
-              flex flex-col border-l border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 transition-all duration-300 ease-in-out
-              ${
-                isChannelListCollapsed
-                  ? 'w-0 opacity-0 overflow-hidden'
-                  : 'w-full lg:w-80 opacity-100'
-              }
-              lg:relative z-20 absolute inset-0 lg:inset-auto
-              ${!isChannelListCollapsed && 'lg:flex hidden'} 
-              ${
-                /* Mobile: If not collapsed (meaning active), we might want to overlay? 
-                 Actually, let's keep it simpler for now: Collapsed by default on mobile. 
-                 User can toggle it via some valid button if we had one. 
-                 Wait, I removed the top toggle button.
-                 I need to add a toggle button in the INFO BAR for mobile too.
-               */ ''
-              }
+              sticky top-0 z-30 lg:relative
+              w-full shrink-0
+              aspect-video lg:aspect-auto lg:flex-1
+              bg-black overflow-hidden
+              transition-ring duration-200
+              ${playerFocused ? 'ring-2 ring-blue-500/50' : ''}
+              [&_.video-js]:w-full [&_.video-js]:h-full
+              [&_.vjs-tech]:object-contain
             `}
+            tabIndex={0}
+            onKeyDown={handleKeyDown}
+            onFocus={() => setPlayerFocused(true)}
+            onBlur={() => setPlayerFocused(false)}
+            onMouseDown={() => {
+              setPlayerFocused(true);
+              playerWrapperRef.current?.focus();
+            }}
           >
-            {/* If mobile and collapsed=false, this div should show up. 
-               We just made it 'hidden lg:flex' if valid? 
-               Fixing logic:
-               Desktop: Collapsed -> w-0. Expanded -> w-80.
-               Mobile: Collapsed -> Hidden. Expanded -> Overlay or Stack? 
-               Let's make it an overlay on mobile.
-            */}
-            <div className='flex lg:hidden absolute top-2 right-2 z-50'>
-              <button
-                onClick={() => setIsChannelListCollapsed(true)}
-                className='p-2 bg-black/50 text-white rounded-full'
-              >
-                Close
-              </button>
-            </div>
-            <div className='flex border-b border-gray-200 dark:border-gray-800 shrink-0'>
-              <button
-                onClick={() => setActiveTab('channels')}
-                className={`flex-1 py-3 text-sm font-medium transition-colors ${activeTab === 'channels' ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50/50 dark:bg-blue-900/10' : 'text-gray-500 hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
-              >
-                Channels
-              </button>
-              <button
-                onClick={() => setActiveTab('sources')}
-                className={`flex-1 py-3 text-sm font-medium transition-colors ${activeTab === 'sources' ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50/50 dark:bg-blue-900/10' : 'text-gray-500 hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
-              >
-                Sources
-              </button>
-            </div>
-
-            {activeTab === 'channels' ? (
-              <>
-                <div className='overflow-x-auto p-2 border-b border-gray-100 dark:border-gray-800 scrollbar-hide shrink-0'>
-                  <div className='flex gap-2'>
-                    {groupKeys.map((g) => (
-                      <button
-                        key={g}
-                        ref={(el) => {
-                          if (el) groupButtonRefs.current.set(g, el);
-                        }}
-                        onClick={() => handleGroupChange(g)}
-                        className={`whitespace-nowrap px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${selectedGroup === g ? 'bg-blue-600 text-white shadow-md' : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'}`}
-                      >
-                        {g}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div
-                  className='flex-1 overflow-y-auto p-2 scrollbar-thin scrollbar-thumb-gray-200 dark:scrollbar-thumb-gray-700'
-                  ref={channelListRef}
-                >
-                  {isChannelLoading ? (
-                    <div className='flex flex-col items-center justify-center h-32 text-gray-400'>
-                      <Loader2 className='w-6 h-6 animate-spin mb-2' />
-                      <span className='text-xs'>Loading List...</span>
-                    </div>
-                  ) : filteredChannels.length === 0 ? (
-                    <div className='p-4 text-center text-sm text-gray-500'>
-                      No channels in this group.
-                    </div>
-                  ) : (
-                    <div className='space-y-1'>
-                      {filteredChannels.map((c) => (
-                        <button
-                          key={c.id}
-                          data-channel-id={c.id}
-                          onClick={() => handleChannelChange(c)}
-                          className={`w-full text-left p-2 rounded-lg flex items-center gap-3 transition-all ${c.id === currentChannel?.id ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 ring-1 ring-blue-200 dark:ring-blue-800' : 'hover:bg-gray-50 dark:hover:bg-gray-800'}`}
-                        >
-                          <div className='w-8 h-8 bg-gray-100 dark:bg-gray-800 rounded-md overflow-hidden shrink-0 flex items-center justify-center'>
-                            {c.logo ? (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img
-                                src={getProxiedLogoUrl(
-                                  c.logo,
-                                  currentSource?.key,
-                                )}
-                                className='w-full h-full object-contain'
-                                loading='lazy'
-                                alt={c.name}
-                              />
-                            ) : (
-                              <Tv className='w-4 h-4 opacity-30' />
-                            )}
-                          </div>
-                          <span className='text-sm font-medium truncate'>
-                            {c.name}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </>
+            {proxiedUrl && !unsupportedType ? (
+              <VideoJsPlayer
+                key={proxiedUrl}
+                url={proxiedUrl}
+                poster={getProxiedLogoUrl(
+                  currentChannel?.logo || '',
+                  currentSource?.key,
+                )}
+                type={
+                  streamType === 'flv' ? 'video/x-flv' : 'application/x-mpegURL'
+                }
+                autoPlay={true}
+                onReady={handlePlayerReady}
+                className='w-full h-full'
+                isLive={true}
+                videoJsOptions={videoOptions}
+              />
             ) : (
-              <div className='flex-1 overflow-y-auto p-2 space-y-2 scrollbar-thin scrollbar-thumb-gray-200 dark:scrollbar-thumb-gray-700'>
-                {sources.map((s) => (
-                  <button
-                    key={s.key}
-                    onClick={() => handleSourceChange(s)}
-                    className={`w-full text-left p-3 rounded-xl flex items-center gap-3 border transition-all ${currentSource?.key === s.key ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 shadow-sm' : 'border-transparent bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700'}`}
-                  >
-                    <div
-                      className={`p-2 rounded-full ${currentSource?.key === s.key ? 'bg-blue-100 text-blue-600' : 'bg-gray-200 dark:bg-gray-700 text-gray-500'}`}
-                    >
-                      <Radio className='w-5 h-5' />
-                    </div>
-                    <div>
-                      <div className='font-semibold text-sm'>{s.name}</div>
-                      <div className='text-xs text-gray-500 mt-0.5'>
-                        {s.channelNumber ?? 0} channels
-                      </div>
-                    </div>
-                  </button>
-                ))}
+              <div className='absolute inset-0 flex items-center justify-center text-gray-500'>
+                {unsupportedType ? (
+                  <div className='text-center text-red-400'>
+                    <AlertTriangle className='w-10 h-10 mx-auto mb-2' />
+                    <p>Format Not Supported: {unsupportedType}</p>
+                  </div>
+                ) : (
+                  <p>No Signal</p>
+                )}
+              </div>
+            )}
+
+            {/* Overlay Loader */}
+            {isStreamLoading && (
+              <div className='absolute inset-0 flex items-center justify-center bg-black/60 backdrop-blur-sm text-white z-20 pointer-events-none'>
+                <div className='flex flex-col items-center gap-2'>
+                  <Loader2 className='w-8 h-8 animate-spin' />
+                  <span className='text-sm font-medium'>Connecting...</span>
+                </div>
               </div>
             )}
           </div>
 
-          {/* Mobile Channel List Toggle (Floating) - Only if collapsed */}
-          {isChannelListCollapsed && (
-            <div className='lg:hidden absolute bottom-20 right-4 z-40'>
-              <button
-                onClick={() => setIsChannelListCollapsed(false)}
-                className='w-12 h-12 bg-blue-600 text-white rounded-full flex items-center justify-center shadow-lg active:scale-95'
+          {/* INFO & EPG BAR */}
+          {/* Mobile: Scrollable below player. Desktop: Fixed at bottom of player area */}
+          <div className='shrink-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 lg:border-t lg:border-b-0 p-4 relative z-20'>
+            {currentChannel ? (
+              <>
+                <div className='flex items-center justify-between mb-4 gap-4'>
+                  <div className='flex items-center gap-3 overflow-hidden min-w-0'>
+                    <div className='w-10 h-10 sm:w-12 sm:h-12 bg-gray-50 dark:bg-gray-800 rounded-lg shrink-0 flex items-center justify-center p-1 border border-gray-100 dark:border-gray-700'>
+                      {currentChannel.logo ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={getProxiedLogoUrl(
+                            currentChannel.logo,
+                            currentSource?.key,
+                          )}
+                          className='w-full h-full object-contain'
+                          alt={currentChannel.name}
+                          loading='lazy'
+                        />
+                      ) : (
+                        <Tv className='w-6 h-6 opacity-30' />
+                      )}
+                    </div>
+                    <div className='min-w-0 flex-1'>
+                      <h2 className='text-base sm:text-lg font-bold truncate text-gray-900 dark:text-gray-100 leading-tight'>
+                        {currentChannel.name}
+                      </h2>
+                      <div className='flex items-center gap-2 text-xs text-gray-500 mt-0.5'>
+                        <span className='px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 rounded'>
+                          {currentSource?.name}
+                        </span>
+                        <span className='truncate opacity-70'>
+                          {currentChannel.group}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={toggleFavorite}
+                    className={`p-2.5 rounded-full transition-colors active:scale-95 ${
+                      isFavorite
+                        ? 'bg-red-50 dark:bg-red-900/20 text-red-500'
+                        : 'bg-gray-100 dark:bg-gray-800 text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
+                    }`}
+                    title='Toggle Favorite'
+                  >
+                    <Heart
+                      className={`w-5 h-5 ${isFavorite ? 'fill-current' : ''}`}
+                    />
+                  </button>
+                </div>
+                <EpgScrollableRow
+                  programs={programs}
+                  currentTime={new Date()}
+                  isLoading={isEpgLoading}
+                />
+              </>
+            ) : (
+              <div className='text-gray-500 text-center py-4'>
+                Select a channel
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* === SECTION 2: CHANNEL LIST (Mobile: Below Info, Desktop: Right Sidebar) === */}
+        {/* On Mobile, this just flows below the info because parent is flex-col & overflow-y-auto is on left pane wrapper? 
+            Wait, if parent is flex-col, and left pane is flex-1 overflow-y-auto, then this pane might be pushed off screen?
+            Correct Logic:
+            Mobile: 
+              - Main container: flex-col, h-full.
+              - Player Section: shrink-0 (or flex-none).
+              - Info Section: shrink-0.
+              - List Section: flex-1, overflow-y-auto.
+            Desktop:
+              - Main container: flex-row.
+              - Left Pane: flex-1.
+              - Right Pane: w-80.
+        */}
+        <div
+          className='
+            flex flex-col 
+            bg-white dark:bg-gray-900 
+            border-t lg:border-t-0 lg:border-l border-gray-200 dark:border-gray-800
+            w-full lg:w-80 lg:shrink-0
+            h-full lg:h-auto
+            overflow-hidden
+            flex-1 lg:flex-none
+          '
+        >
+          {/* TABS */}
+          <div className='flex border-b border-gray-200 dark:border-gray-800 shrink-0'>
+            <button
+              onClick={() => setActiveTab('channels')}
+              className={`flex-1 py-3 text-sm font-medium transition-colors ${activeTab === 'channels' ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50/50 dark:bg-blue-900/10' : 'text-gray-500 hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
+            >
+              Channels
+            </button>
+            <button
+              onClick={() => setActiveTab('sources')}
+              className={`flex-1 py-3 text-sm font-medium transition-colors ${activeTab === 'sources' ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50/50 dark:bg-blue-900/10' : 'text-gray-500 hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
+            >
+              Sources
+            </button>
+          </div>
+
+          {/* LIST CONTENT (Scrollable) */}
+          {activeTab === 'channels' ? (
+            <>
+              {/* Groups Sticky Header */}
+              <div className='overflow-x-auto p-2 border-b border-gray-100 dark:border-gray-800 scrollbar-hide shrink-0 bg-white dark:bg-gray-900'>
+                <div className='flex gap-2'>
+                  {groupKeys.map((g) => (
+                    <button
+                      key={g}
+                      ref={(el) => {
+                        if (el) groupButtonRefs.current.set(g, el);
+                      }}
+                      onClick={() => handleGroupChange(g)}
+                      className={`whitespace-nowrap px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${selectedGroup === g ? 'bg-blue-600 text-white shadow-md' : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'}`}
+                    >
+                      {g}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Channel Items */}
+              <div
+                className='flex-1 overflow-y-auto p-2 scrollbar-thin scrollbar-thumb-gray-200 dark:scrollbar-thumb-gray-700'
+                ref={channelListRef}
               >
-                <Tv className='w-6 h-6' />
-              </button>
+                {isChannelLoading ? (
+                  <div className='flex flex-col items-center justify-center h-32 text-gray-400'>
+                    <Loader2 className='w-6 h-6 animate-spin mb-2' />
+                    <span className='text-xs'>Loading List...</span>
+                  </div>
+                ) : filteredChannels.length === 0 ? (
+                  <div className='p-4 text-center text-sm text-gray-500'>
+                    No channels in this group.
+                  </div>
+                ) : (
+                  <div className='space-y-1 pb-safe'>
+                    {filteredChannels.map((c) => (
+                      <button
+                        key={c.id}
+                        data-channel-id={c.id}
+                        onClick={() => handleChannelChange(c)}
+                        className={`w-full text-left p-2 rounded-lg flex items-center gap-3 transition-all ${c.id === currentChannel?.id ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 ring-1 ring-blue-200 dark:ring-blue-800' : 'hover:bg-gray-50 dark:hover:bg-gray-800'}`}
+                      >
+                        <div className='w-8 h-8 bg-gray-100 dark:bg-gray-800 rounded-md overflow-hidden shrink-0 flex items-center justify-center'>
+                          {c.logo ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={getProxiedLogoUrl(
+                                c.logo,
+                                currentSource?.key,
+                              )}
+                              className='w-full h-full object-contain'
+                              loading='lazy'
+                              alt={c.name}
+                            />
+                          ) : (
+                            <Tv className='w-4 h-4 opacity-30' />
+                          )}
+                        </div>
+                        <span className='text-sm font-medium truncate'>
+                          {c.name}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
+          ) : (
+            <div className='flex-1 overflow-y-auto p-2 space-y-2 scrollbar-thin scrollbar-thumb-gray-200 dark:scrollbar-thumb-gray-700 pb-safe'>
+              {sources.map((s) => (
+                <button
+                  key={s.key}
+                  onClick={() => handleSourceChange(s)}
+                  className={`w-full text-left p-3 rounded-xl flex items-center gap-3 border transition-all ${currentSource?.key === s.key ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 shadow-sm' : 'border-transparent bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700'}`}
+                >
+                  <div
+                    className={`p-2 rounded-full ${currentSource?.key === s.key ? 'bg-blue-100 text-blue-600' : 'bg-gray-200 dark:bg-gray-700 text-gray-500'}`}
+                  >
+                    <Radio className='w-5 h-5' />
+                  </div>
+                  <div>
+                    <div className='font-semibold text-sm'>{s.name}</div>
+                    <div className='text-xs text-gray-500 mt-0.5'>
+                      {s.channelNumber ?? 0} channels
+                    </div>
+                  </div>
+                </button>
+              ))}
             </div>
           )}
         </div>
