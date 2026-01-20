@@ -18,7 +18,8 @@ echo "--> Copying docker-compose.yml to $REMOTE_DIR..."
 scp -O docker-compose.yml $TARGET:$REMOTE_DIR/docker-compose.yml
 
 echo "--> Deploying to Production at $REMOTE_DIR..."
-ssh $TARGET "echo 'Stopping container...' && \
+ssh $TARGET "mkdir -p $REMOTE_DIR/cache && \
+    echo 'Stopping container...' && \
     (/usr/local/bin/docker-compose -f $REMOTE_DIR/docker-compose.yml stop lunatv || true) && \
     echo 'Removing container...' && \
     (/usr/local/bin/docker-compose -f $REMOTE_DIR/docker-compose.yml rm -f lunatv || true) && \
