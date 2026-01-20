@@ -544,14 +544,6 @@ function LivePageClient() {
     [selectedGroup, groupedChannels, channels],
   );
 
-  const isIOS = useMemo(
-    () =>
-      typeof window !== 'undefined' &&
-      /iPad|iPhone|iPod/.test(navigator.userAgent) &&
-      !('MSStream' in window),
-    [],
-  );
-
   const videoOptions = useMemo(
     () => ({
       autoplay: true,
@@ -725,39 +717,17 @@ function LivePageClient() {
 
   return (
     <PageLayout activePath='/live'>
-      <div className='flex flex-col gap-3 py-4 px-4 sm:px-6 lg:px-8 xl:px-12 h-[calc(100vh-64px)]'>
-        <div className='flex items-center justify-between shrink-0'>
-          <h1 className='text-lg sm:text-xl font-semibold flex items-center gap-2 truncate'>
-            <Radio className='w-5 h-5 text-blue-500 shrink-0' />
-            <span className='truncate'>
-              {currentSource?.name}
-              {currentChannel && (
-                <span className='opacity-70 text-sm ml-2 font-normal'>
-                  / {currentChannel.name}
-                </span>
-              )}
-            </span>
-          </h1>
-          <button
-            onClick={() => setIsChannelListCollapsed(!isChannelListCollapsed)}
-            className='hidden lg:block text-xs px-3 py-1.5 bg-gray-100 dark:bg-gray-800 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors'
-          >
-            {isChannelListCollapsed ? 'Show List' : 'Hide List'}
-          </button>
-        </div>
-
-        <div
-          className={`grid gap-4 flex-1 min-h-0 transition-all duration-300 ${isChannelListCollapsed ? 'grid-cols-1' : 'grid-cols-1 lg:grid-cols-4'}`}
-        >
-          <div
-            className={`flex flex-col min-h-0 ${isChannelListCollapsed ? 'col-span-1' : 'lg:col-span-3'}`}
-          >
+      <div className='flex flex-col h-[calc(100vh-64px)] overflow-hidden bg-black lg:bg-gray-50 lg:dark:bg-black'>
+        <div className='flex flex-1 min-h-0'>
+          {/* LEFT COLUMN: Player + Info + EPG */}
+          <div className='flex-1 flex flex-col min-w-0 bg-black relative'>
+            {/* 1. PLAYER AREA (Top, grow to fill available space) */}
             <div
               ref={playerContainerRef}
               // Tailwind Arbitrary Variants for Video.js overrides
               className={`
-                relative flex-1 bg-black rounded-xl overflow-hidden outline-none shadow-lg transition-ring duration-200 
-                ${playerFocused ? 'ring-2 ring-blue-500/50' : ''}
+                relative flex-1 bg-black overflow-hidden outline-none transition-ring duration-200 
+                ${playerFocused ? 'ring-2 ring-blue-500/50 z-10' : ''}
                 [&_.video-js]:w-full [&_.video-js]:h-full [&_.video-js]:overflow-hidden
                 [&_.vjs-tech]:object-contain
                 [&_.vjs-control-bar]:flex [&_.vjs-control-bar]:bg-linear-to-t [&_.vjs-control-bar]:from-black/80 [&_.vjs-control-bar]:to-transparent
@@ -814,58 +784,117 @@ function LivePageClient() {
               )}
             </div>
 
-            {currentChannel && (
-              <div className='mt-3 shrink-0 bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm border border-gray-100 dark:border-gray-700'>
-                <div className='flex items-center justify-between mb-4'>
-                  <div className='flex items-center gap-3 overflow-hidden'>
-                    <div className='w-12 h-12 bg-gray-50 dark:bg-gray-700 rounded-lg shrink-0 flex items-center justify-center p-1'>
-                      {currentChannel.logo ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={getProxiedLogoUrl(
-                            currentChannel.logo,
-                            currentSource?.key,
-                          )}
-                          className='w-full h-full object-contain'
-                          alt={currentChannel.name}
-                          loading='lazy'
-                        />
-                      ) : (
-                        <Tv className='w-6 h-6 opacity-30' />
-                      )}
+            {/* 2. INFO BAR & EPG (Bottom) */}
+            <div className='shrink-0 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-800 z-10'>
+              {currentChannel && (
+                <div className='p-4'>
+                  {/* Channel Info Row */}
+                  <div className='flex items-center justify-between mb-4 gap-4'>
+                    <div className='flex items-center gap-3 overflow-hidden min-w-0'>
+                      <div className='w-10 h-10 sm:w-12 sm:h-12 bg-gray-50 dark:bg-gray-800 rounded-lg shrink-0 flex items-center justify-center p-1 border border-gray-100 dark:border-gray-700'>
+                        {currentChannel.logo ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={getProxiedLogoUrl(
+                              currentChannel.logo,
+                              currentSource?.key,
+                            )}
+                            className='w-full h-full object-contain'
+                            alt={currentChannel.name}
+                            loading='lazy'
+                          />
+                        ) : (
+                          <Tv className='w-6 h-6 opacity-30' />
+                        )}
+                      </div>
+                      <div className='min-w-0 flex-1'>
+                        <h2 className='text-base sm:text-lg font-bold truncate text-gray-900 dark:text-gray-100 leading-tight'>
+                          {currentChannel.name}
+                        </h2>
+                        <div className='flex items-center gap-2 text-xs text-gray-500 mt-0.5'>
+                          <span className='px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 rounded'>
+                            {currentSource?.name}
+                          </span>
+                          <span className='truncate opacity-70'>
+                            {currentChannel.group}
+                          </span>
+                        </div>
+                      </div>
                     </div>
-                    <div className='min-w-0'>
-                      <h2 className='text-lg font-bold truncate text-gray-900 dark:text-gray-100'>
-                        {currentChannel.name}
-                      </h2>
-                      <p className='text-xs text-gray-500 truncate'>
-                        {currentSource?.name}
-                      </p>
+
+                    <div className='flex items-center gap-2 shrink-0'>
+                      <button
+                        onClick={() =>
+                          setIsChannelListCollapsed(!isChannelListCollapsed)
+                        }
+                        className='hidden lg:flex items-center gap-2 px-3 py-2 text-sm font-medium bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors'
+                      >
+                        {isChannelListCollapsed ? 'Show List' : 'Expand Player'}
+                      </button>
+                      <button
+                        onClick={toggleFavorite}
+                        className={`p-2.5 rounded-full transition-colors active:scale-95 ${
+                          isFavorite
+                            ? 'bg-red-50 dark:bg-red-900/20 text-red-500'
+                            : 'bg-gray-100 dark:bg-gray-800 text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
+                        }`}
+                        title='Toggle Favorite'
+                      >
+                        <Heart
+                          className={`w-5 h-5 ${isFavorite ? 'fill-current' : ''}`}
+                        />
+                      </button>
                     </div>
                   </div>
-                  <button
-                    onClick={toggleFavorite}
-                    className='p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors active:scale-95'
-                    title='Toggle Favorite'
-                  >
-                    <Heart
-                      className={`w-6 h-6 ${isFavorite ? 'fill-red-500 text-red-500' : 'text-gray-400'}`}
-                    />
-                  </button>
+
+                  {/* EPG Row */}
+                  <EpgScrollableRow
+                    programs={programs}
+                    currentTime={new Date()}
+                    isLoading={isEpgLoading}
+                  />
                 </div>
-                <EpgScrollableRow
-                  programs={programs}
-                  currentTime={new Date()}
-                  isLoading={isEpgLoading}
-                />
-              </div>
-            )}
+              )}
+            </div>
           </div>
 
+          {/* RIGHT COLUMN: Channel List */}
           <div
-            className={`flex flex-col bg-white dark:bg-gray-800 rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700 shadow-sm ${isChannelListCollapsed ? 'hidden' : 'flex'}`}
+            className={`
+              flex flex-col border-l border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 transition-all duration-300 ease-in-out
+              ${
+                isChannelListCollapsed
+                  ? 'w-0 opacity-0 overflow-hidden'
+                  : 'w-full lg:w-80 opacity-100'
+              }
+              lg:relative z-20 absolute inset-0 lg:inset-auto
+              ${!isChannelListCollapsed && 'lg:flex hidden'} 
+              ${
+                /* Mobile: If not collapsed (meaning active), we might want to overlay? 
+                 Actually, let's keep it simpler for now: Collapsed by default on mobile. 
+                 User can toggle it via some valid button if we had one. 
+                 Wait, I removed the top toggle button.
+                 I need to add a toggle button in the INFO BAR for mobile too.
+               */ ''
+              }
+            `}
           >
-            <div className='flex border-b border-gray-200 dark:border-gray-700'>
+            {/* If mobile and collapsed=false, this div should show up. 
+               We just made it 'hidden lg:flex' if valid? 
+               Fixing logic:
+               Desktop: Collapsed -> w-0. Expanded -> w-80.
+               Mobile: Collapsed -> Hidden. Expanded -> Overlay or Stack? 
+               Let's make it an overlay on mobile.
+            */}
+            <div className='flex lg:hidden absolute top-2 right-2 z-50'>
+              <button
+                onClick={() => setIsChannelListCollapsed(true)}
+                className='p-2 bg-black/50 text-white rounded-full'
+              >
+                Close
+              </button>
+            </div>
+            <div className='flex border-b border-gray-200 dark:border-gray-800 shrink-0'>
               <button
                 onClick={() => setActiveTab('channels')}
                 className={`flex-1 py-3 text-sm font-medium transition-colors ${activeTab === 'channels' ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50/50 dark:bg-blue-900/10' : 'text-gray-500 hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
@@ -882,7 +911,7 @@ function LivePageClient() {
 
             {activeTab === 'channels' ? (
               <>
-                <div className='overflow-x-auto p-2 border-b border-gray-100 dark:border-gray-700 scrollbar-hide'>
+                <div className='overflow-x-auto p-2 border-b border-gray-100 dark:border-gray-800 scrollbar-hide shrink-0'>
                   <div className='flex gap-2'>
                     {groupKeys.map((g) => (
                       <button
@@ -891,7 +920,7 @@ function LivePageClient() {
                           if (el) groupButtonRefs.current.set(g, el);
                         }}
                         onClick={() => handleGroupChange(g)}
-                        className={`whitespace-nowrap px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${selectedGroup === g ? 'bg-blue-600 text-white shadow-md' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'}`}
+                        className={`whitespace-nowrap px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${selectedGroup === g ? 'bg-blue-600 text-white shadow-md' : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'}`}
                       >
                         {g}
                       </button>
@@ -900,7 +929,7 @@ function LivePageClient() {
                 </div>
 
                 <div
-                  className='flex-1 overflow-y-auto p-2'
+                  className='flex-1 overflow-y-auto p-2 scrollbar-thin scrollbar-thumb-gray-200 dark:scrollbar-thumb-gray-700'
                   ref={channelListRef}
                 >
                   {isChannelLoading ? (
@@ -919,9 +948,9 @@ function LivePageClient() {
                           key={c.id}
                           data-channel-id={c.id}
                           onClick={() => handleChannelChange(c)}
-                          className={`w-full text-left p-2 rounded-lg flex items-center gap-3 transition-all ${c.id === currentChannel?.id ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 ring-1 ring-blue-200 dark:ring-blue-800' : 'hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
+                          className={`w-full text-left p-2 rounded-lg flex items-center gap-3 transition-all ${c.id === currentChannel?.id ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 ring-1 ring-blue-200 dark:ring-blue-800' : 'hover:bg-gray-50 dark:hover:bg-gray-800'}`}
                         >
-                          <div className='w-8 h-8 bg-gray-100 dark:bg-gray-700 rounded-md overflow-hidden shrink-0 flex items-center justify-center'>
+                          <div className='w-8 h-8 bg-gray-100 dark:bg-gray-800 rounded-md overflow-hidden shrink-0 flex items-center justify-center'>
                             {c.logo ? (
                               // eslint-disable-next-line @next/next/no-img-element
                               <img
@@ -947,15 +976,15 @@ function LivePageClient() {
                 </div>
               </>
             ) : (
-              <div className='flex-1 overflow-y-auto p-2 space-y-2'>
+              <div className='flex-1 overflow-y-auto p-2 space-y-2 scrollbar-thin scrollbar-thumb-gray-200 dark:scrollbar-thumb-gray-700'>
                 {sources.map((s) => (
                   <button
                     key={s.key}
                     onClick={() => handleSourceChange(s)}
-                    className={`w-full text-left p-3 rounded-xl flex items-center gap-3 border transition-all ${currentSource?.key === s.key ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 shadow-sm' : 'border-transparent bg-gray-50 dark:bg-gray-700/30 hover:bg-gray-100 dark:hover:bg-gray-700'}`}
+                    className={`w-full text-left p-3 rounded-xl flex items-center gap-3 border transition-all ${currentSource?.key === s.key ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 shadow-sm' : 'border-transparent bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700'}`}
                   >
                     <div
-                      className={`p-2 rounded-full ${currentSource?.key === s.key ? 'bg-blue-100 text-blue-600' : 'bg-gray-200 text-gray-500'}`}
+                      className={`p-2 rounded-full ${currentSource?.key === s.key ? 'bg-blue-100 text-blue-600' : 'bg-gray-200 dark:bg-gray-700 text-gray-500'}`}
                     >
                       <Radio className='w-5 h-5' />
                     </div>
@@ -970,6 +999,18 @@ function LivePageClient() {
               </div>
             )}
           </div>
+
+          {/* Mobile Channel List Toggle (Floating) - Only if collapsed */}
+          {isChannelListCollapsed && (
+            <div className='lg:hidden absolute bottom-20 right-4 z-40'>
+              <button
+                onClick={() => setIsChannelListCollapsed(false)}
+                className='w-12 h-12 bg-blue-600 text-white rounded-full flex items-center justify-center shadow-lg active:scale-95'
+              >
+                <Tv className='w-6 h-6' />
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </PageLayout>
