@@ -226,6 +226,7 @@ const useStats = (
   const [stats, setStats] = useState({
     resolution: '0x0',
     connSpeed: '0 Mbps',
+    currentBitrate: '0 Mbps',
     bufferHealth: '0s',
     droppedFrames: 0,
   });
@@ -240,15 +241,21 @@ const useStats = (
       const res = `${v.videoWidth}x${v.videoHeight}`;
 
       let bw = 0;
+      let playingBitrate = 0;
       // Access Video.js VHS stats if available
       const tech = p.tech(true) as any;
-      if (tech && tech.vhs && tech.vhs.bandwidth) {
-        bw = tech.vhs.bandwidth;
+      if (tech && tech.vhs) {
+        if (tech.vhs.bandwidth) bw = tech.vhs.bandwidth;
+        const media = tech.vhs.playlists?.media?.();
+        if (media?.attributes?.BANDWIDTH)
+          playingBitrate = media.attributes.BANDWIDTH;
       } else if ((p as any).hls?.bandwidth) {
         bw = (p as any).hls.bandwidth;
+        // HLS.js might have levels
       }
 
       const speed = (bw / 1024 / 1024).toFixed(2) + ' Mbps';
+      const bitrate = (playingBitrate / 1024 / 1024).toFixed(2) + ' Mbps';
       const buf = v.buffered.length
         ? (v.buffered.end(v.buffered.length - 1) - v.currentTime).toFixed(2)
         : '0';
@@ -258,12 +265,13 @@ const useStats = (
       setStats({
         resolution: res,
         connSpeed: speed,
+        currentBitrate: bitrate,
         bufferHealth: buf + 's',
         droppedFrames: dropped,
       });
     }, 1000);
     return () => clearInterval(interval);
-  }, []);  
+  }, []);
   return stats;
 };
 
@@ -1309,7 +1317,7 @@ export default function VideoJsPlayer({
               background: 'rgba(0,0,0,0.8)',
               padding: 8,
               fontSize: 12,
-              color: '#4ade80',
+              color: '#d1d5db',
               fontFamily: 'monospace',
               pointerEvents: 'none',
               borderRadius: 4,
@@ -1319,7 +1327,8 @@ export default function VideoJsPlayer({
             }}
           >
             <div>RES: {stats.resolution}</div>
-            <div>BW: {stats.connSpeed}</div>
+            <div>NET: {stats.connSpeed}</div>
+            <div>BIT: {stats.currentBitrate}</div>
             <div>BUF: {stats.bufferHealth}</div>
             <div>DROP: {stats.droppedFrames}</div>
           </div>
@@ -1564,7 +1573,7 @@ const CSS = `
 .seek-overlay-container { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 30; pointer-events: none; animation: fadeIn 0.2s; }
 .seek-info-pill { background: rgba(0, 0, 0, 0.8); backdrop-filter: blur(8px); padding: 12px 24px; border-radius: 99px; display: flex; align-items: center; gap: 8px; border: 1px solid rgba(255,255,255,0.1); }
 .seek-time-large { color: #fff; font-size: 20px; font-weight: 700; }
-.settings-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.5); z-index: 50; animation: fadeIn 0.2s; }
+.settings-overlay { position: absolute; inset: 0; background: transparent; z-index: 50; animation: fadeIn 0.2s; }
 .settings-popup { position: absolute; right: 20px; bottom: 80px; width: 260px; background: rgba(28, 28, 28, 0.95); backdrop-filter: blur(20px); border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 4px 24px rgba(0,0,0,0.5); animation: slideUp 0.2s; }
 .settings-header { padding: 14px 16px; border-bottom: 1px solid rgba(255,255,255,0.1); font-weight: 600; font-size: 14px; color: #fff; }
 .setting-item { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; color: rgba(255,255,255,0.9); font-size: 14px; cursor: pointer; }
