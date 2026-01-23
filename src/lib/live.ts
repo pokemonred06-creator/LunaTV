@@ -71,7 +71,7 @@ export async function refreshLiveChannels(liveInfo: {
   url: string;
   ua?: string;
   epg?: string;
-  from: 'config' | 'custom';
+  from?: 'config' | 'custom';
   channelNumber?: number;
   disabled?: boolean;
 }): Promise<number> {

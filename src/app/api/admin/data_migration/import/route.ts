@@ -6,7 +6,7 @@ import { gunzip } from 'zlib';
 
 import { getAuthInfoFromCookie } from '@/lib/auth/server';
 import { configSelfCheck, setCachedConfig } from '@/lib/config';
-import { SimpleCrypto } from '@/lib/crypto';
+import { ServerCrypto } from '@/lib/crypto';
 import { db } from '@/lib/db';
 
 export const runtime = 'nodejs';
@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 验证身份和权限
-    const authInfo = getAuthInfoFromCookie(req);
+    const authInfo = await getAuthInfoFromCookie(req);
     if (!authInfo || !authInfo.username) {
       return NextResponse.json({ error: '未登录' }, { status: 401 });
     }
@@ -57,7 +57,12 @@ export async function POST(req: NextRequest) {
     // 解密数据
     let decryptedData: string;
     try {
-      decryptedData = SimpleCrypto.decrypt(encryptedData, password);
+      const result = await ServerCrypto.decrypt<string>(
+        encryptedData,
+        password,
+      );
+      if (!result) throw new Error('Decryption returned null');
+      decryptedData = result;
     } catch (error) {
       return NextResponse.json(
         { error: '解密失败，请检查密码是否正确' },

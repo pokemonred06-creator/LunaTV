@@ -7,7 +7,7 @@ export const runtime = 'nodejs';
 
 // OrionTV 兼容接口
 export async function GET(request: NextRequest) {
-  const authInfo = getAuthInfoFromCookie(request);
+  const authInfo = await getAuthInfoFromCookie(request);
   if (!authInfo || !authInfo.username) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }

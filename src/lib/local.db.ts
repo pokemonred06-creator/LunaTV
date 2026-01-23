@@ -3,7 +3,15 @@ import fs from 'fs';
 import path from 'path';
 
 import { AdminConfig } from './admin.types';
-import { Favorite, IStorage, PlayRecord, SkipConfig } from './types';
+import {
+  Favorite,
+  IAdminStorage,
+  ICacheStorage,
+  ISkipStorage,
+  IStorage,
+  PlayRecord,
+  SkipConfig,
+} from './types';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
@@ -13,7 +21,9 @@ if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
-export class FileStorage implements IStorage {
+export class FileStorage
+  implements IStorage, IAdminStorage<AdminConfig>, ISkipStorage, ICacheStorage
+{
   private data: Record<string, any> = {};
   private loaded = false;
 
@@ -56,17 +66,26 @@ export class FileStorage implements IStorage {
     return `u:${user}:pr:${key}`;
   }
 
-  async getPlayRecord(userName: string, key: string): Promise<PlayRecord | null> {
+  async getPlayRecord(
+    userName: string,
+    key: string,
+  ): Promise<PlayRecord | null> {
     const val = this.data[this.prKey(userName, key)];
     return val ? (val as PlayRecord) : null;
   }
 
-  async setPlayRecord(userName: string, key: string, record: PlayRecord): Promise<void> {
+  async setPlayRecord(
+    userName: string,
+    key: string,
+    record: PlayRecord,
+  ): Promise<void> {
     this.data[this.prKey(userName, key)] = record;
     this.save();
   }
 
-  async getAllPlayRecords(userName: string): Promise<{ [key: string]: PlayRecord }> {
+  async getAllPlayRecords(
+    userName: string,
+  ): Promise<{ [key: string]: PlayRecord }> {
     const prefix = `u:${userName}:pr:`;
     const result: Record<string, PlayRecord> = {};
     Object.keys(this.data).forEach((k) => {
@@ -93,12 +112,18 @@ export class FileStorage implements IStorage {
     return val ? (val as Favorite) : null;
   }
 
-  async setFavorite(userName: string, key: string, favorite: Favorite): Promise<void> {
+  async setFavorite(
+    userName: string,
+    key: string,
+    favorite: Favorite,
+  ): Promise<void> {
     this.data[this.favKey(userName, key)] = favorite;
     this.save();
   }
 
-  async getAllFavorites(userName: string): Promise<{ [key: string]: Favorite }> {
+  async getAllFavorites(
+    userName: string,
+  ): Promise<{ [key: string]: Favorite }> {
     const prefix = `u:${userName}:fav:`;
     const result: Record<string, Favorite> = {};
     Object.keys(this.data).forEach((k) => {
@@ -142,7 +167,9 @@ export class FileStorage implements IStorage {
   async deleteUser(userName: string): Promise<void> {
     // Delete all keys starting with u:userName:
     const prefix = `u:${userName}:`;
-    const keysToDelete = Object.keys(this.data).filter((k) => k.startsWith(prefix));
+    const keysToDelete = Object.keys(this.data).filter((k) =>
+      k.startsWith(prefix),
+    );
     keysToDelete.forEach((k) => delete this.data[k]);
     this.save();
   }
@@ -215,7 +242,7 @@ export class FileStorage implements IStorage {
   async getSkipConfig(
     userName: string,
     source: string,
-    id: string
+    id: string,
   ): Promise<SkipConfig | null> {
     const val = this.data[this.skipConfigKey(userName, source, id)];
     return val ? (val as SkipConfig) : null;
@@ -225,7 +252,7 @@ export class FileStorage implements IStorage {
     userName: string,
     source: string,
     id: string,
-    config: SkipConfig
+    config: SkipConfig,
   ): Promise<void> {
     this.data[this.skipConfigKey(userName, source, id)] = config;
     this.save();
@@ -234,14 +261,14 @@ export class FileStorage implements IStorage {
   async deleteSkipConfig(
     userName: string,
     source: string,
-    id: string
+    id: string,
   ): Promise<void> {
     delete this.data[this.skipConfigKey(userName, source, id)];
     this.save();
   }
 
   async getAllSkipConfigs(
-    userName: string
+    userName: string,
   ): Promise<{ [key: string]: SkipConfig }> {
     const prefix = `u:${userName}:skip:`;
     const result: Record<string, SkipConfig> = {};

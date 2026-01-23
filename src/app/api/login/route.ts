@@ -35,7 +35,7 @@ async function generateAuthCookie(
   if (process.env.PASSWORD) {
     // Sign the username + role + timestamp using the password as secret
     const timestamp = Date.now();
-    const signature = calculateSignature(
+    const signature = await calculateSignature(
       effectiveUsername,
       authData.role,
       timestamp,

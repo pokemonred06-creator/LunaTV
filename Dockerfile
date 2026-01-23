@@ -34,6 +34,9 @@ RUN rm -rf .next
 
 # 禁用 Next.js 遥测
 ENV NEXT_TELEMETRY_DISABLED=1
+# Add dummy env vars for build pass
+ENV USERNAME=admin
+ENV PASSWORD=admin
 
 # 构建
 RUN npm run build

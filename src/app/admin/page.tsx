@@ -872,10 +872,7 @@ function SourceManagement({
                 className='hover:bg-gray-50 dark:hover:bg-gray-700/50'
               >
                 <td className='p-3 font-medium'>{s.name}</td>
-                <td
-                  className='p-3 text-sm text-gray-500 truncate max-w-xs'
-                  title={s.api}
-                >
+                <td className='p-3 text-sm text-gray-500 break-all min-w-[200px]'>
                   {s.api}
                 </td>
                 <td className='p-3'>
@@ -907,15 +904,13 @@ function SourceManagement({
                     }
                     title={s.disabled ? convert('启用') : convert('禁用')}
                   />
-                  {s.from === 'custom' && (
-                    <ActionButton
-                      icon={Trash2}
-                      color='red'
-                      loading={!!processingMap[`source-delete-${s.key}`]}
-                      onClick={() => onAction('delete', { key: s.key }, s.key)}
-                      title={convert('删除')}
-                    />
-                  )}
+                  <ActionButton
+                    icon={Trash2}
+                    color='red'
+                    loading={!!processingMap[`source-delete-${s.key}`]}
+                    onClick={() => onAction('delete', { key: s.key }, s.key)}
+                    title={convert('删除')}
+                  />
                 </td>
               </tr>
             ))}

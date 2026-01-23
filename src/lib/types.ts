@@ -27,69 +27,6 @@ export interface Favorite {
   origin?: 'vod' | 'live';
 }
 
-// 存储接口
-export interface IStorage {
-  // 播放记录相关
-  getPlayRecord(userName: string, key: string): Promise<PlayRecord | null>;
-  setPlayRecord(
-    userName: string,
-    key: string,
-    record: PlayRecord
-  ): Promise<void>;
-  getAllPlayRecords(userName: string): Promise<{ [key: string]: PlayRecord }>;
-  deletePlayRecord(userName: string, key: string): Promise<void>;
-
-  // 收藏相关
-  getFavorite(userName: string, key: string): Promise<Favorite | null>;
-  setFavorite(userName: string, key: string, favorite: Favorite): Promise<void>;
-  getAllFavorites(userName: string): Promise<{ [key: string]: Favorite }>;
-  deleteFavorite(userName: string, key: string): Promise<void>;
-
-  // 用户相关
-  registerUser(userName: string, password: string): Promise<void>;
-  verifyUser(userName: string, password: string): Promise<boolean>;
-  // 检查用户是否存在（无需密码）
-  checkUserExist(userName: string): Promise<boolean>;
-  // 修改用户密码
-  changePassword(userName: string, newPassword: string): Promise<void>;
-  // 删除用户（包括密码、搜索历史、播放记录、收藏夹）
-  deleteUser(userName: string): Promise<void>;
-
-  // 搜索历史相关
-  getSearchHistory(userName: string): Promise<string[]>;
-  addSearchHistory(userName: string, keyword: string): Promise<void>;
-  deleteSearchHistory(userName: string, keyword?: string): Promise<void>;
-
-  // 用户列表
-  getAllUsers(): Promise<string[]>;
-
-  // 管理员配置相关
-  getAdminConfig(): Promise<AdminConfig | null>;
-  setAdminConfig(config: AdminConfig): Promise<void>;
-
-  // 跳过片头片尾配置相关
-  getSkipConfig(
-    userName: string,
-    source: string,
-    id: string
-  ): Promise<SkipConfig | null>;
-  setSkipConfig(
-    userName: string,
-    source: string,
-    id: string,
-    config: SkipConfig
-  ): Promise<void>;
-  deleteSkipConfig(userName: string, source: string, id: string): Promise<void>;
-  getAllSkipConfigs(userName: string): Promise<{ [key: string]: SkipConfig }>;
-
-  // 数据清理相关
-  clearAllData(): Promise<void>;
-
-  // 通用缓存
-  get(key: string): Promise<unknown>;
-  set(key: string, value: unknown, ttl?: number): Promise<void>;
-}
-
 // 搜索结果数据结构
 export interface SearchResult {
   id: string;
@@ -127,3 +64,89 @@ export interface SkipConfig {
   intro_time: number; // 片头时间（秒）
   outro_time: number; // 片尾时间（秒）
 }
+
+// --- Storage Interfaces ---
+
+/**
+ * Base Storage Interface
+ * Contains core user data: Play Records, Favorites, User Auth, Search History.
+ * Must be implemented by all storage adapters.
+ */
+export interface IStorage {
+  // 播放记录
+  getPlayRecord(userName: string, key: string): Promise<PlayRecord | null>;
+  setPlayRecord(
+    userName: string,
+    key: string,
+    record: PlayRecord,
+  ): Promise<void>;
+  getAllPlayRecords(userName: string): Promise<{ [key: string]: PlayRecord }>;
+  deletePlayRecord(userName: string, key: string): Promise<void>;
+
+  // 收藏
+  getFavorite(userName: string, key: string): Promise<Favorite | null>;
+  setFavorite(userName: string, key: string, favorite: Favorite): Promise<void>;
+  getAllFavorites(userName: string): Promise<{ [key: string]: Favorite }>;
+  deleteFavorite(userName: string, key: string): Promise<void>;
+
+  // 用户认证 (Basic Auth)
+  registerUser(userName: string, password: string): Promise<void>;
+  verifyUser(userName: string, password: string): Promise<boolean>;
+  checkUserExist(userName: string): Promise<boolean>;
+  changePassword(userName: string, newPassword: string): Promise<void>;
+  deleteUser(userName: string): Promise<void>;
+
+  // 搜索历史
+  getSearchHistory(userName: string): Promise<string[]>;
+  addSearchHistory(userName: string, keyword: string): Promise<void>;
+  deleteSearchHistory(userName: string, keyword?: string): Promise<void>;
+}
+
+/**
+ * Admin Storage Interface
+ * Contains Admin Configuration and User List management.
+ */
+export interface IAdminStorage<T = AdminConfig> {
+  getAdminConfig(): Promise<T | null>;
+  setAdminConfig(config: T): Promise<void>;
+  getAllUsers(): Promise<string[]>;
+}
+
+/**
+ * Skip Config Storage Interface
+ * Manages intro/outro skip settings.
+ */
+export interface ISkipStorage {
+  getSkipConfig(
+    userName: string,
+    source: string,
+    id: string,
+  ): Promise<SkipConfig | null>;
+  setSkipConfig(
+    userName: string,
+    source: string,
+    id: string,
+    config: SkipConfig,
+  ): Promise<void>;
+  deleteSkipConfig(userName: string, source: string, id: string): Promise<void>;
+  getAllSkipConfigs(userName: string): Promise<{ [key: string]: SkipConfig }>;
+}
+
+/**
+ * Cache Storage Interface
+ * General purpose cache and data clearing.
+ */
+export interface ICacheStorage {
+  clearAllData(): Promise<void>;
+  get(key: string): Promise<unknown>;
+  set(key: string, value: unknown, ttl?: number): Promise<void>;
+}
+
+/**
+ * Compound Interface for Storage Adapters
+ * Allows an adapter to implement some or all optional capabilities.
+ */
+export type WithCapabilities<T> = IStorage &
+  Partial<IAdminStorage<T>> &
+  Partial<ISkipStorage> &
+  Partial<ICacheStorage>;

@@ -7,7 +7,7 @@ export const runtime = 'nodejs';
 
 export async function GET(request: NextRequest) {
   // Auth Check
-  const auth = getAuthInfoFromCookie(request);
+  const auth = await getAuthInfoFromCookie(request);
   if (!auth?.username) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }

@@ -9,7 +9,7 @@ export const runtime = 'nodejs';
 export async function GET(request: NextRequest) {
   const storageType = process.env.NEXT_PUBLIC_STORAGE_TYPE || 'localstorage';
 
-  const authInfo = getAuthInfoFromCookie(request);
+  const authInfo = await getAuthInfoFromCookie(request);
   if (!authInfo || !authInfo.username) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }

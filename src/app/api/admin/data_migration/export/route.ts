@@ -5,7 +5,7 @@ import { promisify } from 'util';
 import { gzip } from 'zlib';
 
 import { getAuthInfoFromCookie } from '@/lib/auth/server';
-import { SimpleCrypto } from '@/lib/crypto';
+import { ServerCrypto } from '@/lib/crypto';
 import { db } from '@/lib/db';
 import { CURRENT_VERSION } from '@/lib/version';
 
@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 验证身份和权限
-    const authInfo = getAuthInfoFromCookie(req);
+    const authInfo = await getAuthInfoFromCookie(req);
     if (!authInfo || !authInfo.username) {
       return NextResponse.json({ error: '未登录' }, { status: 401 });
     }
@@ -96,9 +96,11 @@ export async function POST(req: NextRequest) {
     const compressedData = await gzipAsync(jsonData);
 
     // 使用提供的密码加密压缩后的数据
-    const encryptedData = SimpleCrypto.encrypt(
+    // 使用提供的密码加密压缩后的数据
+    const encryptedData = await ServerCrypto.encrypt(
       compressedData.toString('base64'),
       password,
+      0, // No expiry for backups
     );
 
     // 生成文件名

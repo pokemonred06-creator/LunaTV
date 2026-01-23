@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 2. Auth Check
-    const auth = getAuthInfoFromCookie(req);
+    const auth = await getAuthInfoFromCookie(req);
 
     // 401: Identity not established
     if (!auth?.username) {
@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
       if (!isAllowedTag(tag)) {
         return NextResponse.json({ error: 'Invalid Tag' }, { status: 400 });
       }
-      revalidateTag(tag);
+      revalidateTag(tag, { expire: 0 });
       results.tag = tag;
     }
 

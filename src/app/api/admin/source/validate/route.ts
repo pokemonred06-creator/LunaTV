@@ -9,7 +9,7 @@ import { API_CONFIG } from '@/lib/config';
 export const runtime = 'nodejs';
 
 export async function GET(request: NextRequest) {
-  const authInfo = getAuthInfoFromCookie(request);
+  const authInfo = await getAuthInfoFromCookie(request);
   if (!authInfo || !authInfo.username) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }

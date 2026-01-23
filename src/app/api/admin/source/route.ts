@@ -66,7 +66,7 @@ export async function POST(request: NextRequest) {
     const { action } = body;
 
     // 1. Authentication
-    const authInfo = getAuthInfoFromCookie(request);
+    const authInfo = await getAuthInfoFromCookie(request);
     if (!authInfo || !authInfo.username) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
@@ -147,14 +147,6 @@ export async function POST(request: NextRequest) {
             { status: 404 },
           );
 
-        const target = config.SourceConfig[idx];
-        if (target.from === 'config') {
-          return NextResponse.json(
-            { error: '系统内置源不可删除' },
-            { status: 403 },
-          );
-        }
-
         // Delete and Clean permissions
         config.SourceConfig.splice(idx, 1);
         removeSourcePermissions(config, body.key);
@@ -186,15 +178,14 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        // Filter out built-in sources safely
-        const deletableKeys = body.keys.filter((key) => {
-          const target = config.SourceConfig.find((s) => s.key === key);
-          return target && target.from !== 'config';
-        });
+        // Allow deleting all sources
+        const deletableKeys = body.keys.filter((key) =>
+          config.SourceConfig.some((s) => s.key === key),
+        );
 
         if (deletableKeys.length === 0) {
           return NextResponse.json(
-            { error: '没有可删除的自定义源' },
+            { error: '没有可删除的源' },
             { status: 400 },
           );
         }

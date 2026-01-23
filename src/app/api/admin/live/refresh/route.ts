@@ -10,7 +10,7 @@ export const runtime = 'nodejs';
 export async function POST(request: NextRequest) {
   try {
     // 权限检查
-    const authInfo = getAuthInfoFromCookie(request);
+    const authInfo = await getAuthInfoFromCookie(request);
     const username = authInfo?.username;
     const config = await getConfig();
     if (username !== process.env.USERNAME) {
