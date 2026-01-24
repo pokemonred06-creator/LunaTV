@@ -1,5 +1,5 @@
 # 使用官方 Node.js 镜像作为基础镜像
-FROM node:20-alpine AS base
+FROM node:25-alpine AS base
 
 # ===== Go Proxy Build Stage =====
 FROM golang:alpine AS go-builder
@@ -13,7 +13,7 @@ FROM base AS deps
 WORKDIR /app
 
 # 复制 package.json 和 lock 文件
-RUN npm install -g pnpm@10.14.0
+RUN npm install -g pnpm@latest
 COPY package.json pnpm-lock.yaml ./
 
 # Aggressively clean any pre-existing artifacts just in case
@@ -25,7 +25,7 @@ RUN pnpm install --no-frozen-lockfile
 # ===== Next.js Build Stage =====
 FROM base AS builder
 WORKDIR /app
-RUN npm install -g pnpm@10.14.0
+RUN npm install -g pnpm@latest
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
