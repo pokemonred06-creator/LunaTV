@@ -271,7 +271,7 @@ const useStats = (
       });
     }, 1000);
     return () => clearInterval(interval);
-  }, []);
+  }, [playerRef]);
   return stats;
 };
 
@@ -1140,7 +1140,7 @@ export default function VideoJsPlayer({
         handleFullscreenChange,
       );
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [playerRef]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // FIX: Stall Detection & Recovery
   useEffect(() => {
@@ -1193,44 +1193,37 @@ export default function VideoJsPlayer({
   const toggleFullscreen = async () => {
     const container = containerRef.current;
     const video = getTechVideoEl();
-    const p = playerRef.current;
 
-    // 1. Try Video.js API first (handles most desktop/android cases)
-    if (p && p.requestFullscreen) {
-      try {
-        if (p.isFullscreen()) await p.exitFullscreen();
-        else await p.requestFullscreen();
-        return;
-      } catch {
-        /* fallback */
-      }
-    }
-
-    // 2. IOS/Native Fallback
-    if (video && (video as any).webkitEnterFullscreen) {
-      if ((video as any).webkitDisplayingFullscreen)
-        (video as any).webkitExitFullscreen?.();
-      else (video as any).webkitEnterFullscreen();
-      return;
-    }
-
-    // 3. Manual Container Fallback
+    // 1. Container Fullscreen (Priority for UI visibility)
     if (
       document.fullscreenEnabled ||
       (document as any).webkitFullscreenEnabled
     ) {
-      if (
-        !document.fullscreenElement &&
-        !(document as any).webkitFullscreenElement
-      ) {
-        if (container?.requestFullscreen) await container.requestFullscreen();
-        else if ((container as any).webkitRequestFullscreen)
-          (container as any).webkitRequestFullscreen();
-      } else {
-        if (document.exitFullscreen) await document.exitFullscreen();
-        else if ((document as any).webkitExitFullscreen)
-          (document as any).webkitExitFullscreen();
+      if (!container) return;
+      try {
+        if (
+          document.fullscreenElement ||
+          (document as any).webkitFullscreenElement
+        ) {
+          if (document.exitFullscreen) await document.exitFullscreen();
+          else if ((document as any).webkitExitFullscreen)
+            await (document as any).webkitExitFullscreen();
+        } else {
+          if (container.requestFullscreen) await container.requestFullscreen();
+          else if ((container as any).webkitRequestFullscreen)
+            await (container as any).webkitRequestFullscreen();
+        }
+      } catch (e) {
+        console.warn('Fullscreen toggle failed:', e);
       }
+      return;
+    }
+
+    // 2. iOS Fallback
+    if (video && (video as any).webkitEnterFullscreen) {
+      if ((video as any).webkitDisplayingFullscreen)
+        (video as any).webkitExitFullscreen?.();
+      else (video as any).webkitEnterFullscreen();
     }
   };
 
@@ -1432,14 +1425,6 @@ export default function VideoJsPlayer({
             <div className='flex items-center gap-2'>
               <button
                 className='control-button'
-                onClick={() => setShowStats(!showStats)}
-                title='Stats for Nerds'
-              >
-                {Icons.Info()}
-              </button>
-
-              <button
-                className='control-button'
                 onClick={toggleRotatedFullscreen}
                 title='Page Fullscreen'
               >
@@ -1535,6 +1520,15 @@ export default function VideoJsPlayer({
                   <div
                     className={`toggle-switch ${casEnabled ? 'active' : ''}`}
                   >
+                    <div className='toggle-knob' />
+                  </div>
+                </div>
+                <div
+                  className='setting-item'
+                  onClick={() => setShowStats(!showStats)}
+                >
+                  <span>Stats for Nerds</span>
+                  <div className={`toggle-switch ${showStats ? 'active' : ''}`}>
                     <div className='toggle-knob' />
                   </div>
                 </div>
