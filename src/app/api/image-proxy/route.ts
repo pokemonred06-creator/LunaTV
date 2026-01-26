@@ -241,7 +241,10 @@ export async function GET(request: NextRequest) {
     // 7. Stream Response
     const headers = new Headers();
     headers.set('Content-Type', contentType);
-    headers.set('Cache-Control', 'public, max-age=31536000, immutable');
+    headers.set(
+      'Cache-Control',
+      'public, max-age=86400, stale-while-revalidate=86400',
+    );
     headers.set('Access-Control-Allow-Origin', '*');
 
     return new NextResponse(res.body, { status: 200, headers });

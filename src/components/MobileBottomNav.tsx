@@ -17,7 +17,10 @@ interface MobileBottomNavProps {
   forced?: boolean;
 }
 
-const MobileBottomNav = ({ activePath, forced = false }: MobileBottomNavProps) => {
+const MobileBottomNav = ({
+  activePath,
+  forced = false,
+}: MobileBottomNavProps) => {
   const { convert } = useLanguage();
   const pathname = usePathname();
 
@@ -83,13 +86,17 @@ const MobileBottomNav = ({ activePath, forced = false }: MobileBottomNavProps) =
 
   return (
     <nav
-      className={`${forced ? 'block' : 'md:hidden'} fixed left-0 right-0 z-600 bg-white/90 backdrop-blur-xl border-t border-gray-200/50 overflow-hidden dark:bg-gray-900/80 dark:border-gray-700/50`}
+      className={`${forced ? 'block' : 'md:hidden'} fixed left-0 right-0 z-600 bg-white/95 backdrop-blur-3xl border-t border-gray-200/50 overflow-hidden dark:bg-gray-900/90 dark:border-gray-700/50 isolation-isolate`}
       style={{
         /* 紧贴视口底部，同时在内部留出安全区高度 */
         bottom: 0,
         paddingBottom: 'env(safe-area-inset-bottom)',
         minHeight: 'calc(3.5rem + env(safe-area-inset-bottom))',
+        touchAction: 'pan-x', // Only allow horizontal scrolling
+        userSelect: 'none', // Prevent text selection
+        WebkitUserSelect: 'none',
       }}
+      onClick={(e) => e.stopPropagation()} // Stop any click propagation explicitly
     >
       <ul className='flex items-center overflow-x-auto scrollbar-hide'>
         {navItems.map((item) => {
@@ -105,10 +112,11 @@ const MobileBottomNav = ({ activePath, forced = false }: MobileBottomNavProps) =
                 className='flex flex-col items-center justify-center w-full h-14 gap-1 text-xs'
               >
                 <item.icon
-                  className={`h-6 w-6 ${active
-                    ? 'text-green-600 dark:text-green-400'
-                    : 'text-gray-500 dark:text-gray-400'
-                    }`}
+                  className={`h-6 w-6 ${
+                    active
+                      ? 'text-green-600 dark:text-green-400'
+                      : 'text-gray-500 dark:text-gray-400'
+                  }`}
                 />
                 <span
                   className={
