@@ -50,10 +50,10 @@ var (
 
 	hopByHopHeaders        = map[string]bool{"Connection": true, "Proxy-Connection": true, "Keep-Alive": true, "Proxy-Authenticate": true, "Proxy-Authorization": true, "Te": true, "Trailer": true, "Transfer-Encoding": true, "Upgrade": true}
 	forwardHeaderAllowlist = map[string]bool{"Accept": true, "Accept-Language": true, "Cache-Control": true, "Content-Type": true, "Dnt": true, "If-Match": true, "If-Modified-Since": true, "If-None-Match": true, "If-Range": true, "If-Unmodified-Since": true, "Origin": true, "Pragma": true, "Range": true, "Referer": true, "Sec-Fetch-Dest": true, "Sec-Fetch-Mode": true, "Sec-Fetch-Site": true, "Sec-Fetch-User": true, "X-Requested-With": true}
-	
+
 	// FIX: Removed Content-Encoding to prevent cache mismatches
-	cachedHeaderAllowlist  = map[string]bool{"Content-Type": true, "Cache-Control": true, "Accept-Ranges": true, "Content-Range": true, "ETag": true, "Last-Modified": true, "Expires": true}
-	
+	cachedHeaderAllowlist = map[string]bool{"Content-Type": true, "Cache-Control": true, "Accept-Ranges": true, "Content-Range": true, "ETag": true, "Last-Modified": true, "Expires": true}
+
 	skipHeaderPool  = sync.Pool{New: func() interface{} { return make(map[string]bool) }}
 	m3u8Tag         = []byte("#EXTM3U")
 	privateIPBlocks []*net.IPNet
@@ -90,18 +90,26 @@ const (
 // ===== HMAC Security (Strict V3) =====
 
 func verifySignature(r *http.Request) bool {
-	if devMode { return true }
-	if proxySecret == "" { return false }
+	if devMode {
+		return true
+	}
+	if proxySecret == "" {
+		return false
+	}
 
 	q := r.URL.Query()
 	providedHex := q.Get("sign")
 	expires := q.Get("expires")
 	targetURL := q.Get("url")
-	
-	if providedHex == "" || expires == "" || targetURL == "" { return false }
+
+	if providedHex == "" || expires == "" || targetURL == "" {
+		return false
+	}
 
 	expTime, err := strconv.ParseInt(expires, 10, 64)
-	if err != nil || time.Now().Unix() > expTime { return false }
+	if err != nil || time.Now().Unix() > expTime {
+		return false
+	}
 
 	rawAllow := q.Get("allowCORS")
 	allowStr := ""
@@ -112,7 +120,9 @@ func verifySignature(r *http.Request) bool {
 	}
 
 	provided, err := hex.DecodeString(providedHex)
-	if err != nil { return false }
+	if err != nil {
+		return false
+	}
 
 	mac := hmac.New(sha256.New, []byte(proxySecret))
 	mac.Write([]byte(r.URL.Path))
@@ -130,10 +140,15 @@ func verifySignature(r *http.Request) bool {
 }
 
 func signURLParams(endpointPath, targetURL, sourceKey string, allowCORS bool) string {
-	if devMode { return "" }
-	
+	if devMode {
+		return ""
+	}
+
 	expires := fmt.Sprintf("%d", time.Now().Add(24*time.Hour).Unix())
-	allowStr := ""; if allowCORS { allowStr = "true" }
+	allowStr := ""
+	if allowCORS {
+		allowStr = "true"
+	}
 
 	mac := hmac.New(sha256.New, []byte(proxySecret))
 	mac.Write([]byte(endpointPath))
@@ -146,7 +161,7 @@ func signURLParams(endpointPath, targetURL, sourceKey string, allowCORS bool) st
 	mac.Write([]byte("|"))
 	mac.Write([]byte(allowStr))
 	signature := hex.EncodeToString(mac.Sum(nil))
-	
+
 	return fmt.Sprintf("&expires=%s&sign=%s", expires, signature)
 }
 
@@ -158,7 +173,9 @@ func init() {
 		"0.0.0.0/8", "10.0.0.0/8", "127.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "198.18.0.0/15", "224.0.0.0/4", "240.0.0.0/4", "::/128", "::1/128", "fe80::/10", "fc00::/7", "ff00::/8",
 	} {
 		_, block, err := net.ParseCIDR(cidr)
-		if err == nil { privateIPBlocks = append(privateIPBlocks, block) }
+		if err == nil {
+			privateIPBlocks = append(privateIPBlocks, block)
+		}
 	}
 
 	dialer := &net.Dialer{Timeout: 15 * time.Second, KeepAlive: 30 * time.Second}
@@ -184,49 +201,73 @@ func init() {
 		Timeout:   0,
 		Jar:       nil,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= 3 { return errors.New("stopped after 3 redirects") }
+			if len(via) >= 3 {
+				return errors.New("stopped after 3 redirects")
+			}
 			return nil
 		},
 	}
 }
 
 func isPrivateIP(ip net.IP) bool {
-	if ip == nil { return false }
+	if ip == nil {
+		return false
+	}
 	for _, block := range privateIPBlocks {
-		if block.Contains(ip) { return true }
+		if block.Contains(ip) {
+			return true
+		}
 	}
 	return false
 }
 
 func isSafePublicIP(ip net.IP) bool {
-	if ip == nil { return false }
+	if ip == nil {
+		return false
+	}
 	ip = ip.To16()
-	if ip == nil || !ip.IsGlobalUnicast() || isPrivateIP(ip) { return false }
+	if ip == nil || !ip.IsGlobalUnicast() || isPrivateIP(ip) {
+		return false
+	}
 	return true
 }
 
 func resolveAndPickSafeIP(ctx context.Context, host string) (net.IP, error) {
 	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
-	if err != nil { return nil, err }
-	if len(ips) == 0 { return nil, errors.New("no resolved ip") }
+	if err != nil {
+		return nil, err
+	}
+	if len(ips) == 0 {
+		return nil, errors.New("no resolved ip")
+	}
 	safeIPs := make([]net.IP, 0, len(ips))
 	for _, ipa := range ips {
-		if isSafePublicIP(ipa.IP) { safeIPs = append(safeIPs, ipa.IP) }
+		if isSafePublicIP(ipa.IP) {
+			safeIPs = append(safeIPs, ipa.IP)
+		}
 	}
-	if len(safeIPs) == 0 { return nil, errors.New("ssrf blocked: no usable public ip") }
+	if len(safeIPs) == 0 {
+		return nil, errors.New("ssrf blocked: no usable public ip")
+	}
 	return safeIPs[rand.Intn(len(safeIPs))], nil
 }
 
 func guardedDialContext(d *net.Dialer) func(ctx context.Context, network, addr string) (net.Conn, error) {
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
 		host, port, err := net.SplitHostPort(addr)
-		if err != nil { return nil, err }
+		if err != nil {
+			return nil, err
+		}
 		if ip := net.ParseIP(host); ip != nil {
-			if !isSafePublicIP(ip) { return nil, errors.New("ssrf blocked: non-public ip") }
+			if !isSafePublicIP(ip) {
+				return nil, errors.New("ssrf blocked: non-public ip")
+			}
 			return d.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
 		}
 		ip, err := resolveAndPickSafeIP(ctx, host)
-		if err != nil { return nil, err }
+		if err != nil {
+			return nil, err
+		}
 		return d.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
 	}
 }
@@ -234,17 +275,25 @@ func guardedDialContext(d *net.Dialer) func(ctx context.Context, network, addr s
 func guardedDialTLSContext(d *net.Dialer, base *tls.Config) func(ctx context.Context, network, addr string) (net.Conn, error) {
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
 		host, port, err := net.SplitHostPort(addr)
-		if err != nil { return nil, err }
+		if err != nil {
+			return nil, err
+		}
 		var ip net.IP
 		if parsed := net.ParseIP(host); parsed != nil {
-			if !isSafePublicIP(parsed) { return nil, errors.New("ssrf blocked: non-public ip") }
+			if !isSafePublicIP(parsed) {
+				return nil, errors.New("ssrf blocked: non-public ip")
+			}
 			ip = parsed
 		} else {
 			ip, err = resolveAndPickSafeIP(ctx, host)
-			if err != nil { return nil, err }
+			if err != nil {
+				return nil, err
+			}
 		}
 		rawConn, err := d.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
-		if err != nil { return nil, err }
+		if err != nil {
+			return nil, err
+		}
 		tlsConfig := buildTLSConfig(base, host)
 		tlsConn := tls.Client(rawConn, tlsConfig)
 		if err := tlsConn.HandshakeContext(ctx); err != nil {
@@ -257,76 +306,147 @@ func guardedDialTLSContext(d *net.Dialer, base *tls.Config) func(ctx context.Con
 
 func buildTLSConfig(base *tls.Config, serverName string) *tls.Config {
 	var cfg *tls.Config
-	if base != nil { cfg = base.Clone() } else { cfg = &tls.Config{} }
+	if base != nil {
+		cfg = base.Clone()
+	} else {
+		cfg = &tls.Config{}
+	}
 	cfg.ServerName = serverName
-	if len(cfg.NextProtos) == 0 { cfg.NextProtos = []string{"h2", "http/1.1"} }
+	if len(cfg.NextProtos) == 0 {
+		cfg.NextProtos = []string{"h2", "http/1.1"}
+	}
 	return cfg
 }
 
 func validateTargetURL(rawURL string) error {
 	u, err := url.Parse(rawURL)
-	if err != nil { return err }
-	if u.Scheme != "http" && u.Scheme != "https" { return errors.New("invalid scheme") }
-	if u.Hostname() == "" { return errors.New("missing hostname") }
-	if u.User != nil { return errors.New("user info not allowed") }
+	if err != nil {
+		return err
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return errors.New("invalid scheme")
+	}
+	if u.Hostname() == "" {
+		return errors.New("missing hostname")
+	}
+	if u.User != nil {
+		return errors.New("user info not allowed")
+	}
 	port := u.Port()
-	if port != "" && port != "80" && port != "443" && port != "8080" { return errors.New("non-standard port") }
+	if port != "" && port != "80" && port != "443" && port != "8080" {
+		return errors.New("non-standard port")
+	}
 	return nil
 }
 
 // ===== Cache & Singleflight =====
 
 type CacheItem struct {
-	Key string; Data []byte; Headers http.Header; SizeBytes int64; ExpiresAt time.Time
+	Key       string
+	Data      []byte
+	Headers   http.Header
+	SizeBytes int64
+	ExpiresAt time.Time
 }
 type LRUCache struct {
-	sync.Mutex; capacity int; maxBytes int64; currentBytes int64
-	items map[string]*list.Element; evictList *list.List
+	sync.Mutex
+	capacity     int
+	maxBytes     int64
+	currentBytes int64
+	items        map[string]*list.Element
+	evictList    *list.List
 }
+
 func NewLRUCache(capacity int, maxBytes int64) *LRUCache {
 	return &LRUCache{capacity: capacity, maxBytes: maxBytes, items: make(map[string]*list.Element), evictList: list.New()}
 }
 func (c *LRUCache) Get(key string) ([]byte, http.Header, bool) {
-	c.Lock(); defer c.Unlock()
+	c.Lock()
+	defer c.Unlock()
 	if ent, ok := c.items[key]; ok {
 		item := ent.Value.(*CacheItem)
-		if time.Now().After(item.ExpiresAt) { c.removeElement(ent); return nil, nil, false }
-		c.evictList.MoveToFront(ent); return item.Data, item.Headers, true
+		if time.Now().After(item.ExpiresAt) {
+			c.removeElement(ent)
+			return nil, nil, false
+		}
+		c.evictList.MoveToFront(ent)
+		return item.Data, item.Headers, true
 	}
 	return nil, nil, false
 }
 func (c *LRUCache) Set(key string, data []byte, headers http.Header, ttl time.Duration) {
-	c.Lock(); defer c.Unlock()
+	c.Lock()
+	defer c.Unlock()
 	headerCopy, headerBytes := filterAndCopyHeaders(headers)
 	itemSize := int64(len(data)) + headerBytes
 	if ent, ok := c.items[key]; ok {
-		c.evictList.MoveToFront(ent); item := ent.Value.(*CacheItem)
-		c.currentBytes -= item.SizeBytes; item.Data = data; item.Headers = headerCopy
-		item.SizeBytes = itemSize; item.ExpiresAt = time.Now().Add(ttl)
-		c.currentBytes += itemSize; c.evict(); return
+		c.evictList.MoveToFront(ent)
+		item := ent.Value.(*CacheItem)
+		c.currentBytes -= item.SizeBytes
+		item.Data = data
+		item.Headers = headerCopy
+		item.SizeBytes = itemSize
+		item.ExpiresAt = time.Now().Add(ttl)
+		c.currentBytes += itemSize
+		c.evict()
+		return
 	}
 	item := &CacheItem{Key: key, Data: data, Headers: headerCopy, SizeBytes: itemSize, ExpiresAt: time.Now().Add(ttl)}
-	ent := c.evictList.PushFront(item); c.items[key] = ent; c.currentBytes += itemSize; c.evict()
+	ent := c.evictList.PushFront(item)
+	c.items[key] = ent
+	c.currentBytes += itemSize
+	c.evict()
 }
 func (c *LRUCache) removeElement(e *list.Element) {
-	c.evictList.Remove(e); kv := e.Value.(*CacheItem); delete(c.items, kv.Key); c.currentBytes -= kv.SizeBytes
+	c.evictList.Remove(e)
+	kv := e.Value.(*CacheItem)
+	delete(c.items, kv.Key)
+	c.currentBytes -= kv.SizeBytes
 }
 func (c *LRUCache) evict() {
-	for c.evictList.Len() > c.capacity { c.removeElement(c.evictList.Back()) }
-	for c.currentBytes > c.maxBytes && c.evictList.Len() > 0 { c.removeElement(c.evictList.Back()) }
+	for c.evictList.Len() > c.capacity {
+		c.removeElement(c.evictList.Back())
+	}
+	for c.currentBytes > c.maxBytes && c.evictList.Len() > 0 {
+		c.removeElement(c.evictList.Back())
+	}
 }
+
 var globalSegmentCache = NewLRUCache(MaxCacheItems, MaxCacheBytes)
 
-type call struct { wg sync.WaitGroup; val []byte; headers http.Header; err error }
-type Group struct { mu sync.Mutex; m map[string]*call }
+type call struct {
+	wg      sync.WaitGroup
+	val     []byte
+	headers http.Header
+	err     error
+}
+type Group struct {
+	mu sync.Mutex
+	m  map[string]*call
+}
+
 func (g *Group) Do(key string, fn func() ([]byte, http.Header, error)) ([]byte, http.Header, error) {
 	g.mu.Lock()
-	if g.m == nil { g.m = make(map[string]*call) }
-	if c, ok := g.m[key]; ok { g.mu.Unlock(); c.wg.Wait(); return c.val, c.headers, c.err }
-	c := new(call); c.wg.Add(1); g.m[key] = c; g.mu.Unlock()
-	c.val, c.headers, c.err = fn(); c.wg.Done()
-	g.mu.Lock(); delete(g.m, key); g.mu.Unlock(); return c.val, c.headers, c.err
+	if g.m == nil {
+		g.m = make(map[string]*call)
+	}
+	if c, ok := g.m[key]; ok {
+		g.mu.Unlock()
+		c.wg.Wait()
+		return c.val, c.headers, c.err
+	}
+	c := new(call)
+	c.wg.Add(1)
+	g.m[key] = c
+	g.mu.Unlock()
+	c.val, c.headers, c.err = fn()
+	c.wg.Done()
+	g.mu.Lock()
+	delete(g.m, key)
+	g.mu.Unlock()
+	return c.val, c.headers, c.err
 }
+
 var sfGroup Group
 
 // ===== Helper Functions =====
@@ -334,13 +454,19 @@ var sfGroup Group
 // FIX: Fail fast if config is invalid
 func loadConfig(path string) error {
 	data, err := os.ReadFile(path)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	return json.Unmarshal(data, &config)
 }
 
 func getUserAgent(sourceKey string) string {
 	for _, src := range config.LiveConfig {
-		if src.Key == sourceKey { if src.UA != "" { return src.UA } }
+		if src.Key == sourceKey {
+			if src.UA != "" {
+				return src.UA
+			}
+		}
 	}
 	return DefaultUserAgent
 }
@@ -348,34 +474,48 @@ func getUserAgent(sourceKey string) string {
 func forwardableHeaders(r *http.Request) map[string]string {
 	h := make(map[string]string)
 	for k, vv := range r.Header {
-		if len(vv) > 0 && forwardHeaderAllowlist[http.CanonicalHeaderKey(k)] { h[k] = vv[0] }
+		if len(vv) > 0 && forwardHeaderAllowlist[http.CanonicalHeaderKey(k)] {
+			h[k] = vv[0]
+		}
 	}
 	return h
 }
 
 func copyHeaders(dst, src http.Header) {
 	toSkip := skipHeaderPool.Get().(map[string]bool)
-	for k := range toSkip { delete(toSkip, k) }
-	for k := range hopByHopHeaders { toSkip[http.CanonicalHeaderKey(k)] = true }
+	for k := range toSkip {
+		delete(toSkip, k)
+	}
+	for k := range hopByHopHeaders {
+		toSkip[http.CanonicalHeaderKey(k)] = true
+	}
 	if conns := src["Connection"]; len(conns) > 0 {
 		for _, c := range conns {
 			for _, token := range strings.Split(c, ",") {
-				if t := strings.TrimSpace(token); t != "" { toSkip[http.CanonicalHeaderKey(t)] = true }
+				if t := strings.TrimSpace(token); t != "" {
+					toSkip[http.CanonicalHeaderKey(t)] = true
+				}
 			}
 		}
 	}
 	for k, vv := range src {
-		if !toSkip[http.CanonicalHeaderKey(k)] { dst[k] = append([]string(nil), vv...) }
+		if !toSkip[http.CanonicalHeaderKey(k)] {
+			dst[k] = append([]string(nil), vv...)
+		}
 	}
 	skipHeaderPool.Put(toSkip)
 }
 
 func filterAndCopyHeaders(src http.Header) (http.Header, int64) {
-	out := make(http.Header); var size int64
+	out := make(http.Header)
+	var size int64
 	for k, vv := range src {
 		if cachedHeaderAllowlist[http.CanonicalHeaderKey(k)] {
-			out[k] = append([]string(nil), vv...); size += int64(len(k))
-			for _, v := range vv { size += int64(len(v)) }
+			out[k] = append([]string(nil), vv...)
+			size += int64(len(k))
+			for _, v := range vv {
+				size += int64(len(v))
+			}
 		}
 	}
 	return out, size
@@ -401,15 +541,20 @@ func shouldReturn304FromCache(r *http.Request, cached http.Header) bool {
 		etag := cached.Get("ETag")
 		if etag != "" {
 			for _, p := range strings.Split(inm, ",") {
-				if strings.TrimSpace(p) == etag { return true }
+				if strings.TrimSpace(p) == etag {
+					return true
+				}
 			}
 		}
 		return false
 	}
 	if ims := r.Header.Get("If-Modified-Since"); ims != "" {
 		if lm := cached.Get("Last-Modified"); lm != "" {
-			t1, e1 := http.ParseTime(ims); t2, e2 := http.ParseTime(lm)
-			if e1 == nil && e2 == nil && !t2.After(t1) { return true }
+			t1, e1 := http.ParseTime(ims)
+			t2, e2 := http.ParseTime(lm)
+			if e1 == nil && e2 == nil && !t2.After(t1) {
+				return true
+			}
 		}
 	}
 	return false
@@ -421,33 +566,47 @@ func hasStrongPreconditions(r *http.Request) bool {
 }
 
 func acquireSemaphore(ctx context.Context) error {
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Second) 
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	select {
-	case globalSem <- struct{}{}: return nil
-	case <-ctx.Done(): return errors.New("server busy (queue timeout)")
+	case globalSem <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return errors.New("server busy (queue timeout)")
 	}
 }
 
 // ===== Fetch Logic =====
 
 func fetchWithRetry(ctx context.Context, method, targetURL, userAgent string, headers map[string]string) (*http.Response, error) {
-	var resp *http.Response; var err error
-	if method == "" { method = "GET" }
+	var resp *http.Response
+	var err error
+	if method == "" {
+		method = "GET"
+	}
 	for i := 0; i < MaxRetries; i++ {
 		req, e := http.NewRequestWithContext(ctx, method, targetURL, nil)
-		if e != nil { return nil, e }
+		if e != nil {
+			return nil, e
+		}
 		req.Header.Set("User-Agent", userAgent)
-		for k, v := range headers { req.Header.Set(k, v) }
-		
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
+
 		resp, err = client.Do(req)
 		if err == nil {
-			if resp.StatusCode < 500 && resp.StatusCode != 429 { return resp, nil }
+			if resp.StatusCode < 500 && resp.StatusCode != 429 {
+				return resp, nil
+			}
 			resp.Body.Close()
-		} else if ctx.Err() != nil { return nil, ctx.Err() }
-		
+		} else if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+
 		select {
-		case <-ctx.Done(): return nil, ctx.Err()
+		case <-ctx.Done():
+			return nil, ctx.Err()
 		case <-time.After(time.Duration(200*(1<<i)+rand.Intn(100)) * time.Millisecond):
 		}
 	}
@@ -455,9 +614,14 @@ func fetchWithRetry(ctx context.Context, method, targetURL, userAgent string, he
 }
 
 func handleHeadProxy(w http.ResponseWriter, r *http.Request, targetURL, ua string, reqHeaders map[string]string) bool {
-	if r.Method != http.MethodHead { return false }
+	if r.Method != http.MethodHead {
+		return false
+	}
 	resp, err := fetchWithRetry(r.Context(), "HEAD", targetURL, ua, reqHeaders)
-	if err != nil { http.Error(w, "HEAD error", 502); return true }
+	if err != nil {
+		http.Error(w, "HEAD error", 502)
+		return true
+	}
 	defer resp.Body.Close()
 	copyHeaders(w.Header(), resp.Header)
 	setCORSHeaders(w)
@@ -466,7 +630,9 @@ func handleHeadProxy(w http.ResponseWriter, r *http.Request, targetURL, ua strin
 }
 
 func resolveURL(baseURL, relativePath string) string {
-	if strings.HasPrefix(relativePath, "http") { return relativePath }
+	if strings.HasPrefix(relativePath, "http") {
+		return relativePath
+	}
 	base, _ := url.Parse(baseURL)
 	ref, _ := url.Parse(relativePath)
 	return base.ResolveReference(ref).String()
@@ -474,9 +640,13 @@ func resolveURL(baseURL, relativePath string) string {
 
 func getBaseURL(m3u8URL string) string {
 	u, _ := url.Parse(m3u8URL)
-	if strings.HasSuffix(u.Path, ".m3u8") { u.Path = path.Dir(u.Path) + "/" }
-	else if !strings.HasSuffix(u.Path, "/") { u.Path += "/" }
-	u.RawQuery = ""; u.Fragment = ""
+	if strings.HasSuffix(u.Path, ".m3u8") {
+		u.Path = path.Dir(u.Path) + "/"
+	} else if !strings.HasSuffix(u.Path, "/") {
+		u.Path += "/"
+	}
+	u.RawQuery = ""
+	u.Fragment = ""
 	return u.String()
 }
 
@@ -487,55 +657,71 @@ func rewriteM3U8(content, baseURL, proxyBase, sourceKey string, allowCORS bool) 
 
 	for i := 0; i < len(lines); i++ {
 		line := strings.TrimSpace(lines[i])
-		if line == "" { result = append(result, ""); continue }
+		if line == "" {
+			result = append(result, "")
+			continue
+		}
 
 		if !strings.HasPrefix(line, "#") {
 			resolved := resolveURL(baseURL, line)
-			
+
 			var endpoint, targetParam string
 			if pendingStreamInf {
 				if u, err := url.Parse(resolved); err == nil && !strings.HasSuffix(u.Path, ".m3u8") {
-					u.Path += ".m3u8"; resolved = u.String()
+					u.Path += ".m3u8"
+					resolved = u.String()
 				}
 				endpoint = "/m3u8"
 				pendingStreamInf = false
 			} else {
 				if u, err := url.Parse(resolved); err == nil && !strings.Contains(u.Path, ".") {
-					u.Path += ".ts"; resolved = u.String()
+					u.Path += ".ts"
+					resolved = u.String()
 				}
 				endpoint = "/segment"
 			}
 			targetParam = resolved
 
-			signedParams := signURLParams("/api/proxy" + endpoint, targetParam, sourceKey, allowCORS)
-			
-			proxyURL := fmt.Sprintf("%s%s?url=%s&moontv-source=%s%s", 
+			signedParams := signURLParams("/api/proxy"+endpoint, targetParam, sourceKey, allowCORS)
+
+			proxyURL := fmt.Sprintf("%s%s?url=%s&moontv-source=%s%s",
 				proxyBase, endpoint, url.QueryEscape(targetParam), url.QueryEscape(sourceKey), signedParams)
-			
-			if allowCORS { proxyURL += "&allowCORS=true" }
+
+			if allowCORS {
+				proxyURL += "&allowCORS=true"
+			}
 			result = append(result, proxyURL)
 			continue
 		}
 
-		if strings.HasPrefix(line, "#EXT-X-STREAM-INF:") { pendingStreamInf = true }
-		
+		if strings.HasPrefix(line, "#EXT-X-STREAM-INF:") {
+			pendingStreamInf = true
+		}
+
 		if strings.Contains(line, `URI="`) {
 			line = uriRegex.ReplaceAllStringFunc(line, func(match string) string {
 				sub := uriRegex.FindStringSubmatch(match)
-				if len(sub) < 2 { return match }
-				
+				if len(sub) < 2 {
+					return match
+				}
+
 				resolved := resolveURL(baseURL, sub[1])
-				
+
 				endpoint := "/segment"
-				if strings.HasSuffix(resolved, ".m3u8") { endpoint = "/m3u8" }
-				else if strings.HasSuffix(resolved, ".key") { endpoint = "/key" }
+				if strings.HasSuffix(resolved, ".m3u8") {
+					endpoint = "/m3u8"
+				} else if strings.HasSuffix(resolved, ".key") {
+					endpoint = "/key"
+				}
 
-				signedParams := signURLParams("/api/proxy" + endpoint, resolved, sourceKey, allowCORS)
+				signedParams := signURLParams("/api/proxy"+endpoint, resolved, sourceKey, allowCORS)
 
-				pURL := fmt.Sprintf("%s%s?url=%s&moontv-source=%s%s", 
+				pURL := fmt.Sprintf("%s%s?url=%s&moontv-source=%s%s",
 					proxyBase, endpoint, url.QueryEscape(resolved), url.QueryEscape(sourceKey), signedParams)
-				
-				if allowCORS { pURL += "&allowCORS=true" }
+
+				if allowCORS {
+					pURL += "&allowCORS=true"
+				}
 				return fmt.Sprintf(`URI="%s"`, pURL)
 			})
 		}
@@ -551,10 +737,14 @@ func handleImageProxy(w http.ResponseWriter, r *http.Request) {
 	r = r.WithContext(ctx)
 
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		http.Error(w, "Method Not Allowed", 405); return
+		http.Error(w, "Method Not Allowed", 405)
+		return
 	}
 	rawURL := r.URL.Query().Get("url")
-	if rawURL == "" { http.Error(w, "Missing url", 400); return }
+	if rawURL == "" {
+		http.Error(w, "Missing url", 400)
+		return
+	}
 
 	proxyURL := rawURL
 	headers := map[string]string{"Referer": ""}
@@ -579,10 +769,13 @@ func handleImageProxy(w http.ResponseWriter, r *http.Request) {
 
 	finalURL := proxyURL
 	if err := validateTargetURL(finalURL); err != nil {
-		http.Error(w, "Invalid target", 403); return
+		http.Error(w, "Invalid target", 403)
+		return
 	}
 
-	if handleHeadProxy(w, r, finalURL, DefaultUserAgent, headers) { return }
+	if handleHeadProxy(w, r, finalURL, DefaultUserAgent, headers) {
+		return
+	}
 
 	resp, err := fetchWithRetry(ctx, r.Method, finalURL, DefaultUserAgent, headers)
 	if err != nil {
@@ -590,31 +783,37 @@ func handleImageProxy(w http.ResponseWriter, r *http.Request) {
 			log.Printf("[Image Proxy Error] %s | Error: %v", finalURL, err)
 			http.Error(w, "Fetch error", 502)
 		}
-		return 
+		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusNotModified {
 		copyHeaders(w.Header(), resp.Header)
 		setCORSHeaders(w)
-		w.WriteHeader(http.StatusNotModified); return
+		w.WriteHeader(http.StatusNotModified)
+		return
 	}
 	if resp.StatusCode >= 300 {
-		http.Error(w, fmt.Sprintf("Upstream error %d", resp.StatusCode), resp.StatusCode); return
+		http.Error(w, fmt.Sprintf("Upstream error %d", resp.StatusCode), resp.StatusCode)
+		return
 	}
 
 	copyHeaders(w.Header(), resp.Header)
 	setCORSHeaders(w)
-	
+
 	ct := resp.Header.Get("Content-Type")
-	if ct == "" { ct = "image/jpeg" }
+	if ct == "" {
+		ct = "image/jpeg"
+	}
 	w.Header().Set("Content-Type", ct)
-	
+
 	cacheTTL := config.SiteConfig.ImageCacheTTL
-	if cacheTTL <= 0 { cacheTTL = 30 }
+	if cacheTTL <= 0 {
+		cacheTTL = 30
+	}
 	// Relaxed Cache Control (The Fix)
 	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d, stale-while-revalidate=%d", cacheTTL*86400, cacheTTL*86400))
-	
+
 	w.WriteHeader(resp.StatusCode)
 	io.Copy(w, resp.Body)
 }
@@ -622,10 +821,20 @@ func handleImageProxy(w http.ResponseWriter, r *http.Request) {
 // ===== Handlers =====
 
 func commonHandler(w http.ResponseWriter, r *http.Request, handlerType string) {
-	if r.Method == "OPTIONS" { setCORSHeaders(w); w.WriteHeader(204); return }
+	if r.Method == "OPTIONS" {
+		setCORSHeaders(w)
+		w.WriteHeader(204)
+		return
+	}
 
-	if !verifySignature(r) { http.Error(w, "Forbidden: Invalid Signature", 403); return }
-	if err := acquireSemaphore(r.Context()); err != nil { http.Error(w, err.Error(), 503); return }
+	if !verifySignature(r) {
+		http.Error(w, "Forbidden: Invalid Signature", 403)
+		return
+	}
+	if err := acquireSemaphore(r.Context()); err != nil {
+		http.Error(w, err.Error(), 503)
+		return
+	}
 	defer func() { <-globalSem }()
 
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
@@ -633,28 +842,44 @@ func commonHandler(w http.ResponseWriter, r *http.Request, handlerType string) {
 	r = r.WithContext(ctx)
 
 	targetURL := r.URL.Query().Get("url")
-	if targetURL == "" { http.Error(w, "Missing url", 400); return }
-	if err := validateTargetURL(targetURL); err != nil { http.Error(w, "Invalid target", 400); return }
+	if targetURL == "" {
+		http.Error(w, "Missing url", 400)
+		return
+	}
+	if err := validateTargetURL(targetURL); err != nil {
+		http.Error(w, "Invalid target", 400)
+		return
+	}
 
 	sourceKey := r.URL.Query().Get("moontv-source")
 	allowCORS := r.URL.Query().Get("allowCORS") == "true"
 	ua := getUserAgent(sourceKey)
 	reqHeaders := forwardableHeaders(r)
 
-	if strings.Contains(targetURL, "huya") { reqHeaders["Referer"] = "https://www.huya.com/" }
+	if strings.Contains(targetURL, "huya") {
+		reqHeaders["Referer"] = "https://www.huya.com/"
+	}
 
-	if handleHeadProxy(w, r, targetURL, ua, reqHeaders) { return }
+	if handleHeadProxy(w, r, targetURL, ua, reqHeaders) {
+		return
+	}
 
 	// M3U8 Logic
 	if handlerType == "m3u8" {
 		reqHeaders["Accept-Encoding"] = "identity"
 
 		resp, err := fetchWithRetry(ctx, "GET", targetURL, ua, reqHeaders)
-		if err != nil { http.Error(w, "Fetch error", 502); return }
+		if err != nil {
+			http.Error(w, "Fetch error", 502)
+			return
+		}
 		defer resp.Body.Close()
-		
+
 		body, err := io.ReadAll(io.LimitReader(resp.Body, 2*1024*1024))
-		if err != nil { http.Error(w, "Read error", 502); return }
+		if err != nil {
+			http.Error(w, "Read error", 502)
+			return
+		}
 
 		if bytes.Contains(body, m3u8Tag) || strings.Contains(resp.Header.Get("Content-Type"), "mpegurl") {
 			scheme := "http"
@@ -666,20 +891,20 @@ func commonHandler(w http.ResponseWriter, r *http.Request, handlerType string) {
 				host = fh
 			}
 			proxyBase := fmt.Sprintf("%s://%s/api/proxy", scheme, host)
-			
+
 			baseURL := getBaseURL(resp.Request.URL.String())
 			rewritten := rewriteM3U8(string(body), baseURL, proxyBase, sourceKey, allowCORS)
-			
+
 			copyHeaders(w.Header(), resp.Header)
 			setCORSHeaders(w)
-			
+
 			w.Header().Del("Content-Length")
 			w.Header().Del("Content-Encoding")
 			w.Header().Del("ETag")
 			w.Header().Del("Last-Modified")
 			w.Header().Set("Cache-Control", "no-cache")
 			w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
-			
+
 			w.WriteHeader(resp.StatusCode)
 			w.Write([]byte(rewritten))
 			return
@@ -697,14 +922,19 @@ func commonHandler(w http.ResponseWriter, r *http.Request, handlerType string) {
 		bypassCache := r.Header.Get("Range") != "" || hasStrongPreconditions(r)
 
 		if bypassCache {
-			if r.Header.Get("Range") != "" { reqHeaders["Range"] = r.Header.Get("Range") }
+			if r.Header.Get("Range") != "" {
+				reqHeaders["Range"] = r.Header.Get("Range")
+			}
 			// Preconditions are already in reqHeaders via forwardableHeaders
-			
+
 			// Force identity to avoid gzip mismatch if we are bypassing cache but upstream sends gzip
 			reqHeaders["Accept-Encoding"] = "identity"
 
 			resp, err := fetchWithRetry(ctx, r.Method, targetURL, ua, reqHeaders)
-			if err != nil { http.Error(w, "Fetch error", 502); return }
+			if err != nil {
+				http.Error(w, "Fetch error", 502)
+				return
+			}
 			defer resp.Body.Close()
 			copyHeaders(w.Header(), resp.Header)
 			setCORSHeaders(w)
@@ -716,12 +946,12 @@ func commonHandler(w http.ResponseWriter, r *http.Request, handlerType string) {
 
 		cacheKey := sourceKey + "|" + targetURL
 		if data, h, ok := globalSegmentCache.Get(cacheKey); ok {
-			if shouldReturn304FromCache(r, h) { 
+			if shouldReturn304FromCache(r, h) {
 				copyHeaders(w.Header(), h)
 				setCORSHeaders(w)
 				w.Header().Set("X-Cache", "HIT-304")
 				w.WriteHeader(304)
-				return 
+				return
 			}
 			copyHeaders(w.Header(), h)
 			setCORSHeaders(w)
@@ -730,27 +960,36 @@ func commonHandler(w http.ResponseWriter, r *http.Request, handlerType string) {
 			w.Write(data)
 			return
 		}
-		
+
 		data, h, err := sfGroup.Do(cacheKey, func() ([]byte, http.Header, error) {
 			localHeaders := cloneHeadersMap(reqHeaders)
-			localHeaders["Accept-Encoding"] = "identity" 
+			localHeaders["Accept-Encoding"] = "identity"
 
 			resp, err := fetchWithRetry(r.Context(), "GET", targetURL, ua, localHeaders)
-			if err != nil { return nil, nil, err }
+			if err != nil {
+				return nil, nil, err
+			}
 			defer resp.Body.Close()
-			if resp.StatusCode != 200 { return nil, nil, fmt.Errorf("status %d", resp.StatusCode) }
+			if resp.StatusCode != 200 {
+				return nil, nil, fmt.Errorf("status %d", resp.StatusCode)
+			}
 			d, err := io.ReadAll(io.LimitReader(resp.Body, int64(ReadLimit)))
-			if len(d) > MaxSegmentSize { return nil, nil, errors.New("too large") }
+			if len(d) > MaxSegmentSize {
+				return nil, nil, errors.New("too large")
+			}
 			return d, resp.Header, err
 		})
-		
-		if err != nil { http.Error(w, "Segment error", 502); return }
-		
+
+		if err != nil {
+			http.Error(w, "Segment error", 502)
+			return
+		}
+
 		ct := h.Get("Content-Type")
 		if !strings.Contains(ct, "html") && !strings.Contains(ct, "json") {
 			globalSegmentCache.Set(cacheKey, data, h, SegmentTTL)
 		}
-		
+
 		copyHeaders(w.Header(), h)
 		setCORSHeaders(w)
 		w.Header().Set("X-Cache", "MISS")
@@ -759,9 +998,14 @@ func commonHandler(w http.ResponseWriter, r *http.Request, handlerType string) {
 	}
 
 	// Passthrough
-	if r.Header.Get("Range") != "" { reqHeaders["Range"] = r.Header.Get("Range") }
+	if r.Header.Get("Range") != "" {
+		reqHeaders["Range"] = r.Header.Get("Range")
+	}
 	resp, err := fetchWithRetry(ctx, r.Method, targetURL, ua, reqHeaders)
-	if err != nil { http.Error(w, "Fetch error", 502); return }
+	if err != nil {
+		http.Error(w, "Fetch error", 502)
+		return
+	}
 	defer resp.Body.Close()
 	copyHeaders(w.Header(), resp.Header)
 	setCORSHeaders(w)
@@ -783,10 +1027,18 @@ type statusWriter struct {
 	status int
 	length int
 }
-func (w *statusWriter) WriteHeader(status int) { w.status = status; w.ResponseWriter.WriteHeader(status) }
+
+func (w *statusWriter) WriteHeader(status int) {
+	w.status = status
+	w.ResponseWriter.WriteHeader(status)
+}
 func (w *statusWriter) Write(b []byte) (int, error) {
-	if w.status == 0 { w.status = 200 }
-	n, err := w.ResponseWriter.Write(b); w.length += n; return n, err
+	if w.status == 0 {
+		w.status = 200
+	}
+	n, err := w.ResponseWriter.Write(b)
+	w.length += n
+	return n, err
 }
 
 func logRequest(next http.Handler) http.Handler {
@@ -805,32 +1057,36 @@ func main() {
 	devFlag := flag.Bool("dev", false, "Enable dev mode (no auth)")
 	flag.Parse()
 
-	if *configFlag != "" { 
-		configPath = *configFlag; 
+	if *configFlag != "" {
+		configPath = *configFlag
 		if err := loadConfig(configPath); err != nil {
 			log.Fatalf("Config load error: %v", err)
 		}
 	}
-	
+
 	proxySecret = os.Getenv("PROXY_SECRET")
-	if *secretFlag != "" { proxySecret = *secretFlag }
+	if *secretFlag != "" {
+		proxySecret = *secretFlag
+	}
 	devMode = *devFlag
 
 	if proxySecret == "" && !devMode {
 		log.Fatal("🚨 FATAL: PROXY_SECRET not set. Use -secret or set env var. Use -dev to bypass.")
 	}
-	if devMode { log.Println("⚠️  DEV MODE: Authentication disabled.") }
+	if devMode {
+		log.Println("⚠️  DEV MODE: Authentication disabled.")
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/proxy/m3u8", func(w http.ResponseWriter, r *http.Request) { commonHandler(w, r, "m3u8") })
 	mux.HandleFunc("/api/proxy/segment", func(w http.ResponseWriter, r *http.Request) { commonHandler(w, r, "segment") })
-	mux.HandleFunc("/api/proxy/ts", func(w http.ResponseWriter, r *http.Request) { commonHandler(w, r, "segment") }) 
+	mux.HandleFunc("/api/proxy/ts", func(w http.ResponseWriter, r *http.Request) { commonHandler(w, r, "segment") })
 	mux.HandleFunc("/api/proxy/key", func(w http.ResponseWriter, r *http.Request) { commonHandler(w, r, "key") })
 	mux.HandleFunc("/api/proxy/flv", func(w http.ResponseWriter, r *http.Request) { commonHandler(w, r, "flv") })
 	mux.HandleFunc("/api/image-proxy", handleImageProxy)
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("OK")) })
 
-	handler := logRequest(mux) 
+	handler := logRequest(mux)
 
 	server := &http.Server{
 		Addr:              *addr,
@@ -840,7 +1096,7 @@ func main() {
 	}
 
 	log.Printf("🚀 LunaTV Golden Master Proxy (V6.6.1) starting on %s", *addr)
-	
+
 	go func() {
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("listen: %v", err)
