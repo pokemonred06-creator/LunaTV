@@ -3,7 +3,7 @@
 
 # Start Go proxy in background on port 8080
 echo "Starting Go proxy on :8080..."
-/app/goproxy -addr :8080 -config /app/data/db.json &
+/app/goproxy -addr :8080 -config /app/data/db.json -dev &
 GOPROXY_PID=$!
 
 # Give Go proxy time to start

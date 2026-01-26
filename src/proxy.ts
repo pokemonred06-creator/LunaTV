@@ -21,6 +21,8 @@ function shouldSkipAuth(pathname: string): boolean {
     '/api/cron',
     '/api/server-config',
     '/api/auth/verify', // Allow magic link verification
+    '/api/proxy',
+    '/api/image-proxy',
   ];
 
   return skipPaths.some((path) => pathname.startsWith(path));
