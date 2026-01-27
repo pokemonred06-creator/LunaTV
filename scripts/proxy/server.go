@@ -651,6 +651,12 @@ func getBaseURL(m3u8URL string) string {
 }
 
 func rewriteM3U8(content, baseURL, proxyBase, sourceKey string, allowCORS bool) string {
+	// [FORCE HTTPS]
+	// Ensure the proxy base itself is HTTPS to match the site origin
+	if strings.HasPrefix(proxyBase, "http://") {
+		proxyBase = strings.Replace(proxyBase, "http://", "https://", 1)
+	}
+
 	lines := strings.Split(content, "\n")
 	var result []string
 	pendingStreamInf := false
@@ -661,36 +667,35 @@ func rewriteM3U8(content, baseURL, proxyBase, sourceKey string, allowCORS bool) 
 			result = append(result, "")
 			continue
 		}
-
 		if !strings.HasPrefix(line, "#") {
+			// Resolve to absolute URL always
 			resolved := resolveURL(baseURL, line)
 
-			var endpoint, targetParam string
-			if pendingStreamInf {
-				if u, err := url.Parse(resolved); err == nil && !strings.HasSuffix(u.Path, ".m3u8") {
-					u.Path += ".m3u8"
-					resolved = u.String()
+			// [HTTPS UPGRADE]
+			// Upgrade direct upstream links to HTTPS to avoid Mixed Content blocking
+			if strings.HasPrefix(resolved, "http://") {
+				resolved = strings.Replace(resolved, "http://", "https://", 1)
+			}
+
+			// [DIRECT PLAY MODE]
+			// User requested segments to be played directly from the source to reduce CPU load.
+			// OR if it is a nested M3U8 playlist, we MUST proxy it to keep control.
+
+			if pendingStreamInf || strings.HasSuffix(resolved, ".m3u8") {
+				// It's a playlist (Adaptive Stream), proxy it!
+				endpoint := "/m3u8"
+				signedParams := signURLParams("/api/proxy"+endpoint, resolved, sourceKey, allowCORS)
+				proxyURL := fmt.Sprintf("%s%s?url=%s&moontv-source=%s%s", proxyBase, endpoint, url.QueryEscape(resolved), url.QueryEscape(sourceKey), signedParams)
+				if allowCORS {
+					proxyURL += "&allowCORS=true"
 				}
-				endpoint = "/m3u8"
+				result = append(result, proxyURL)
 				pendingStreamInf = false
-			} else {
-				if u, err := url.Parse(resolved); err == nil && !strings.Contains(u.Path, ".") {
-					u.Path += ".ts"
-					resolved = u.String()
-				}
-				endpoint = "/segment"
+				continue
 			}
-			targetParam = resolved
 
-			signedParams := signURLParams("/api/proxy"+endpoint, targetParam, sourceKey, allowCORS)
-
-			proxyURL := fmt.Sprintf("%s%s?url=%s&moontv-source=%s%s",
-				proxyBase, endpoint, url.QueryEscape(targetParam), url.QueryEscape(sourceKey), signedParams)
-
-			if allowCORS {
-				proxyURL += "&allowCORS=true"
-			}
-			result = append(result, proxyURL)
+			// Otherwise, it's a SEGMENT (TS, JS, etc). Leave it as absolute URL (Direct Play).
+			result = append(result, resolved)
 			continue
 		}
 
@@ -704,25 +709,25 @@ func rewriteM3U8(content, baseURL, proxyBase, sourceKey string, allowCORS bool) 
 				if len(sub) < 2 {
 					return match
 				}
-
 				resolved := resolveURL(baseURL, sub[1])
 
-				endpoint := "/segment"
+				// [HTTPS UPGRADE]
+				if strings.HasPrefix(resolved, "http://") {
+					resolved = strings.Replace(resolved, "http://", "https://", 1)
+				}
+
+				// Only proxy if it looks like a playlist, otherwise direct
 				if strings.HasSuffix(resolved, ".m3u8") {
-					endpoint = "/m3u8"
-				} else if strings.HasSuffix(resolved, ".key") {
-					endpoint = "/key"
+					endpoint := "/m3u8"
+					signedParams := signURLParams("/api/proxy"+endpoint, resolved, sourceKey, allowCORS)
+					pURL := fmt.Sprintf("%s%s?url=%s&moontv-source=%s%s", proxyBase, endpoint, url.QueryEscape(resolved), url.QueryEscape(sourceKey), signedParams)
+					if allowCORS {
+						pURL += "&allowCORS=true"
+					}
+					return fmt.Sprintf(`URI="%s"`, pURL)
 				}
 
-				signedParams := signURLParams("/api/proxy"+endpoint, resolved, sourceKey, allowCORS)
-
-				pURL := fmt.Sprintf("%s%s?url=%s&moontv-source=%s%s",
-					proxyBase, endpoint, url.QueryEscape(resolved), url.QueryEscape(sourceKey), signedParams)
-
-				if allowCORS {
-					pURL += "&allowCORS=true"
-				}
-				return fmt.Sprintf(`URI="%s"`, pURL)
+				return fmt.Sprintf(`URI="%s"`, resolved)
 			})
 		}
 		result = append(result, line)

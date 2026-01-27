@@ -19,24 +19,25 @@ docker build --platform linux/amd64 -t lunatv:custom .
 echo "--> Saving Docker Image to tar..."
 docker save -o $IMAGE_TAR lunatv:custom
 
-echo "--> Copying image to $REMOTE_DIR..."
+echo "--> Copying files to $REMOTE_DIR..."
+# Only copy the image, DO NOT overwrite config files as requested
 scp -O $IMAGE_TAR $TARGET:$REMOTE_DIR/
-
 
 echo "--> Deploying to Production at $REMOTE_DIR..."
 ssh $TARGET "mkdir -p $REMOTE_DIR/cache && \
-    echo 'Stopping container...' && \
-    (/usr/local/bin/docker-compose -f $REMOTE_DIR/docker-compose.yml stop lunatv || true) && \
-    echo 'Removing container...' && \
-    (/usr/local/bin/docker-compose -f $REMOTE_DIR/docker-compose.yml rm -f lunatv || true) && \
+    echo 'Ensuring PROXY_SECRET exists in .env...' && \
+    (grep -q 'PROXY_SECRET=' $REMOTE_DIR/.env || echo 'PROXY_SECRET=7d9a2b4c8e1f3g5h7j9k0l2m4n6p8q0r' >> $REMOTE_DIR/.env) && \
+    echo 'Stopping legacy container...' && \
+    (/usr/local/bin/docker stop lunatv || true) && \
+    (/usr/local/bin/docker rm lunatv || true) && \
     echo 'Removing old image...' && \
     (/usr/local/bin/docker rmi lunatv:custom || true) && \
     echo 'Loading Docker image...' && \
     /usr/local/bin/docker load -i $REMOTE_DIR/$IMAGE_TAR && \
     echo 'New Image ID:' && \
     /usr/local/bin/docker images lunatv:custom --format '{{.ID}}' && \
-    echo 'Recreating lunatv container using explicit compose file...' && \
-    /usr/local/bin/docker-compose -f $REMOTE_DIR/docker-compose.yml up -d --force-recreate lunatv && \
+    echo 'Recreating container...' && \
+    /usr/local/bin/docker-compose -f $REMOTE_DIR/docker-compose.yml --env-file $REMOTE_DIR/.env up -d --force-recreate lunatv && \
     echo 'Cleaning up...' && \
     rm $REMOTE_DIR/$IMAGE_TAR && \
     /usr/local/bin/docker image prune -f"
