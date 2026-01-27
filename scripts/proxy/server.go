@@ -671,11 +671,7 @@ func rewriteM3U8(content, baseURL, proxyBase, sourceKey string, allowCORS bool) 
 			// Resolve to absolute URL always
 			resolved := resolveURL(baseURL, line)
 
-			// [HTTPS UPGRADE]
-			// Upgrade direct upstream links to HTTPS to avoid Mixed Content blocking
-			if strings.HasPrefix(resolved, "http://") {
-				resolved = strings.Replace(resolved, "http://", "https://", 1)
-			}
+			// [HTTPS CHECK moved down]
 
 			// [DIRECT PLAY MODE]
 			// User requested segments to be played directly from the source to reduce CPU load.
@@ -695,6 +691,14 @@ func rewriteM3U8(content, baseURL, proxyBase, sourceKey string, allowCORS bool) 
 			}
 
 			// Otherwise, it's a SEGMENT (TS, JS, etc). Leave it as absolute URL (Direct Play).
+
+			// [HTTPS UPGRADE]
+			// Upgrade direct upstream links to HTTPS to avoid Mixed Content blocking.
+			// This is REQUIRED for Direct Play as the browser fetches these.
+			if strings.HasPrefix(resolved, "http://") {
+				resolved = strings.Replace(resolved, "http://", "https://", 1)
+			}
+
 			result = append(result, resolved)
 			continue
 		}
@@ -711,10 +715,7 @@ func rewriteM3U8(content, baseURL, proxyBase, sourceKey string, allowCORS bool) 
 				}
 				resolved := resolveURL(baseURL, sub[1])
 
-				// [HTTPS UPGRADE]
-				if strings.HasPrefix(resolved, "http://") {
-					resolved = strings.Replace(resolved, "http://", "https://", 1)
-				}
+				// [HTTPS CHECK moved down]
 
 				// Only proxy if it looks like a playlist, otherwise direct
 				if strings.HasSuffix(resolved, ".m3u8") {
@@ -727,6 +728,10 @@ func rewriteM3U8(content, baseURL, proxyBase, sourceKey string, allowCORS bool) 
 					return fmt.Sprintf(`URI="%s"`, pURL)
 				}
 
+				// Key/Other -> Direct Play (Upgrade to HTTPS)
+				if strings.HasPrefix(resolved, "http://") {
+					resolved = strings.Replace(resolved, "http://", "https://", 1)
+				}
 				return fmt.Sprintf(`URI="%s"`, resolved)
 			})
 		}
