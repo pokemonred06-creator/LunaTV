@@ -1,45 +1,49 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from 'next/server';
 
-import { AdminConfigResult } from '@/lib/admin.types';
-import { getAuthInfoFromCookie } from '@/lib/auth/server';
+import { getAuthSession } from '@/lib/auth/server';
 import { getConfig } from '@/lib/config';
 
-export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
-  const storageType = process.env.NEXT_PUBLIC_STORAGE_TYPE || 'localstorage';
-
-  const authInfo = await getAuthInfoFromCookie(request);
-  if (!authInfo || !authInfo.username) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-  const username = authInfo.username;
-
   try {
+    const authInfo = await getAuthSession();
+    const username = authInfo?.username;
+    console.log('[AdminConfig] AuthInfo:', JSON.stringify(authInfo));
+
     const config = await getConfig();
-    const result: AdminConfigResult = {
-      Role: 'user', // Default to 'user'
-      Config: config,
+
+    if (!authInfo || !authInfo.username) {
+      console.log('[AdminConfig] No AuthInfo or Username. Returning 401.');
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const result: any = {
+      ...config,
     };
 
-    // In localstorage mode, username is hardcoded to 'admin' in login route.
-    // So we should check if the authenticated username matches 'admin' or process.env.USERNAME
-    if (result.Config.SiteConfig.SiteName && username === 'admin') {
-      result.Role = 'owner';
-    } else if (username === process.env.USERNAME) {
-      result.Role = 'owner';
+    // Trust the signed cookie role
+    console.log('[AdminConfig] Trusting Cookie Role:', authInfo.role);
+    if (authInfo.role === 'owner' || authInfo.role === 'admin') {
+      result.Role = authInfo.role;
     } else {
-      const user = config.UserConfig.Users.find((u) => u.username === username);
-      if (user && user.role === 'owner' && !user.banned) {
-        result.Role = 'owner';
-      } else if (user && user.role === 'user' && !user.banned) {
-        result.Role = 'user';
-      } else {
-        return NextResponse.json(
-          { error: '权限不足或用户不存在' },
-          { status: 401 },
+      // Fallback to strict DB check if role is 'user' or missing
+      if (config.UserConfig.Users) {
+        const user = config.UserConfig.Users.find(
+          (u) => u.username === username,
         );
+        if (user && user.banned) {
+          console.log('[AdminConfig] User is BANNED:', username);
+          return NextResponse.json({ error: '用户被封禁' }, { status: 401 });
+        }
       }
+      result.Role = authInfo.role || 'user';
+    }
+
+    if (result.Role !== 'owner' && result.Role !== 'admin') {
+      console.log('[AdminConfig] Insufficient Role:', result.Role);
+      return NextResponse.json({ error: '权限不足' }, { status: 401 });
     }
 
     return NextResponse.json(result, {

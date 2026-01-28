@@ -49,6 +49,7 @@ export async function getAuthInfoFromCookie(
   req: NextRequest,
 ): Promise<AuthInfo | null> {
   const raw = req.cookies.get('auth')?.value;
+  if (!raw) console.log('[Auth] No "auth" cookie found in request.');
   return raw ? await parseAndVerifyAuthCookie(raw) : null;
 }
 
@@ -63,8 +64,10 @@ async function parseAndVerifyAuthCookie(
   rawCookie: string,
 ): Promise<AuthInfo | null> {
   try {
+    console.log('[Auth] Verifying cookie raw len:', rawCookie.length);
     const decoded = safeMaybeDoubleDecode(rawCookie);
     const val = JSON.parse(decoded);
+    console.log('[Auth] Decoded:', JSON.stringify(val));
 
     const username =
       typeof val?.username === 'string' ? val.username : undefined;
@@ -74,22 +77,32 @@ async function parseAndVerifyAuthCookie(
     const signature =
       typeof val?.signature === 'string' ? val.signature : undefined;
 
-    if (!username || !ROLE_SET.has(role)) return null;
+    if (!username || !ROLE_SET.has(role)) {
+      console.log('[Auth] Invalid structure or missing username/role', {
+        username,
+        role,
+      });
+      return null;
+    }
 
     // Strict Verification
     if (signature && timestamp) {
       const expected = await calculateSignature(username, role, timestamp);
       if (!safeCompare(signature, expected)) {
         console.warn('[Auth] Signature mismatch for user:', username);
+        console.log('[Auth] Expected:', expected, 'Got:', signature);
         return null;
       }
     } else {
       // Optional: Reject unsigned cookies in strict mode
       // return null;
+      console.log('[Auth] Unsigned cookie allowed (legacy?)');
     }
 
+    console.log('[Auth] Verification Success:', username);
     return { username, role, timestamp, signature };
-  } catch {
+  } catch (err) {
+    console.error('[Auth] Parse Error:', err);
     return null;
   }
 }

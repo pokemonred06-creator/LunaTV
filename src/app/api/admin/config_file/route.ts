@@ -47,8 +47,8 @@ export async function POST(request: NextRequest) {
     }
 
     adminConfig.ConfigFile = configFile;
-    if (!adminConfig.ConfigSubscribtion) {
-      adminConfig.ConfigSubscribtion = {
+    if (!adminConfig.ConfigSubscription) {
+      adminConfig.ConfigSubscription = {
         URL: '',
         AutoUpdate: false,
         LastCheck: '',
@@ -57,12 +57,12 @@ export async function POST(request: NextRequest) {
 
     // 更新订阅配置
     if (subscriptionUrl !== undefined) {
-      adminConfig.ConfigSubscribtion.URL = subscriptionUrl;
+      adminConfig.ConfigSubscription.URL = subscriptionUrl;
     }
     if (autoUpdate !== undefined) {
-      adminConfig.ConfigSubscribtion.AutoUpdate = autoUpdate;
+      adminConfig.ConfigSubscription.AutoUpdate = autoUpdate;
     }
-    adminConfig.ConfigSubscribtion.LastCheck = lastCheckTime || '';
+    adminConfig.ConfigSubscription.LastCheck = lastCheckTime || '';
 
     adminConfig = refineConfig(adminConfig);
     // 更新配置文件

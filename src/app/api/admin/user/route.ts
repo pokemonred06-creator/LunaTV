@@ -8,7 +8,11 @@ import { db } from '@/lib/db';
 
 export const runtime = 'nodejs';
 
-// 支持的操作类型
+// --- Constants & Policies ---
+
+const OWNER_USERNAME = process.env.USERNAME;
+
+// Supported actions
 const ACTIONS = [
   'add',
   'ban',
@@ -21,11 +25,98 @@ const ACTIONS = [
   'userGroup',
   'updateUserGroups',
   'batchUpdateUserGroups',
+  'updateUserAdultFilter',
 ] as const;
+
+// Actions that a user can perform on themselves
+const SELF_ALLOWED_ACTIONS = [
+  'changePassword',
+  'updateUserApis',
+  'updateUserGroups',
+  'updateUserAdultFilter',
+];
+
+// --- Helpers ---
+
+// Safe Type Coercion & Sanitization
+const asTrimmedString = (v: any): string =>
+  typeof v === 'string' ? v.trim() : '';
+
+const asStringArray = (v: any): string[] =>
+  Array.isArray(v)
+    ? v.map((x) => String(x).trim()).filter((x) => x.length > 0)
+    : [];
+
+const asBoolean = (v: any): boolean =>
+  v === true || v === 'true' || v === 1 || v === '1';
+
+// Validate Source Keys
+const validateSourceKeys = (keys: string[], config: any): string[] => {
+  if (keys.length === 0) return [];
+  const validKeys = new Set((config.SourceConfig || []).map((s: any) => s.key));
+  return keys.filter((k) => validKeys.has(k));
+};
+
+// Validate Group Tags
+const validateGroupTags = (tags: string[], config: any): string[] => {
+  if (tags.length === 0) return [];
+  const validTags = new Set(
+    (config.UserConfig.Tags || []).map((t: any) => t.name),
+  );
+  return tags.filter((t) => validTags.has(t));
+};
+
+// Check if a user object is privileged (Admin or Env-Owner)
+const isPrivilegedUser = (u: any): boolean => {
+  if (!u) return false;
+  return (
+    u.role === 'admin' || (!!OWNER_USERNAME && u.username === OWNER_USERNAME)
+  );
+};
+
+// --- Main Handler ---
+
+export async function GET(request: NextRequest) {
+  try {
+    const authInfo = await getAuthInfoFromCookie(request);
+    if (!authInfo || !authInfo.username) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const adminConfig = await getConfig();
+
+    // Determine operator role
+    let operatorRole = 'user';
+    if (OWNER_USERNAME && authInfo.username === OWNER_USERNAME) {
+      operatorRole = 'owner';
+    } else {
+      const userEntry = adminConfig.UserConfig.Users.find(
+        (u) => u.username === authInfo.username,
+      );
+      if (userEntry && !userEntry.banned) {
+        operatorRole = userEntry.role;
+      }
+    }
+
+    if (operatorRole !== 'owner' && operatorRole !== 'admin') {
+      return NextResponse.json({ error: '权限不足' }, { status: 403 });
+    }
+
+    // Return sensitive user data only to admins
+    return NextResponse.json(adminConfig.UserConfig.Users, {
+      headers: {
+        'Cache-Control': 'no-store',
+      },
+    });
+  } catch (error) {
+    console.error('List users failed:', error);
+    return NextResponse.json({ error: '获取用户列表失败' }, { status: 500 });
+  }
+}
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const rawBody = await request.json();
 
     const authInfo = await getAuthInfoFromCookie(request);
     if (!authInfo || !authInfo.username) {
@@ -33,21 +124,25 @@ export async function POST(request: NextRequest) {
     }
     const username = authInfo.username;
 
-    const {
-      targetUsername, // 目标用户名
-      targetPassword, // 目标用户密码（仅在添加用户时需要）
-      action,
-    } = body as {
-      targetUsername?: string;
-      targetPassword?: string;
-      action?: (typeof ACTIONS)[number];
-    };
+    // 1. Sanitize Inputs
+    const action = rawBody.action;
+    const targetUsername = asTrimmedString(rawBody.targetUsername);
+    const targetPassword = asTrimmedString(rawBody.targetPassword);
 
-    if (!action || !ACTIONS.includes(action)) {
+    // Payload extractions
+    const userGroup = asTrimmedString(rawBody.userGroup);
+    const groupAction = asTrimmedString(rawBody.groupAction);
+    const groupName = asTrimmedString(rawBody.groupName);
+    const enabledApis = asStringArray(rawBody.enabledApis);
+    const userGroups = asStringArray(rawBody.userGroups);
+    const usernames = asStringArray(rawBody.usernames);
+    const disableYellowFilter = asBoolean(rawBody.disableYellowFilter);
+
+    // 2. Basic Validation
+    if (!action || !ACTIONS.includes(action as any)) {
       return NextResponse.json({ error: '参数格式错误' }, { status: 400 });
     }
 
-    // 用户组操作和批量操作不需要targetUsername
     if (
       !targetUsername &&
       !['userGroup', 'batchUpdateUserGroups'].includes(action)
@@ -55,14 +150,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '缺少目标用户名' }, { status: 400 });
     }
 
+    // 3. Self-Action Guard
     if (
-      action !== 'changePassword' &&
-      action !== 'deleteUser' &&
-      action !== 'updateUserApis' &&
-      action !== 'userGroup' &&
-      action !== 'updateUserGroups' &&
-      action !== 'batchUpdateUserGroups' &&
-      username === targetUsername
+      username === targetUsername &&
+      !SELF_ALLOWED_ACTIONS.includes(action) &&
+      action !== 'deleteUser' // Handled specifically in deleteUser logic
     ) {
       return NextResponse.json(
         { error: '无法对自己进行此操作' },
@@ -70,456 +162,403 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 获取配置与存储
+    // 4. Load Config & Resolve Operator Role
     const adminConfig = await getConfig();
 
-    // 判定操作者角色
-    let operatorRole: 'owner' | 'admin' | 'user'; // Changed to include 'user'
-    if (username === process.env.USERNAME) {
+    let operatorRole: 'owner' | 'admin' | 'user';
+
+    // Strict Owner Check (Env Source of Truth)
+    if (OWNER_USERNAME && username === OWNER_USERNAME) {
       operatorRole = 'owner';
     } else {
       const userEntry = adminConfig.UserConfig.Users.find(
         (u) => u.username === username,
       );
-      if (
-        !userEntry ||
-        (userEntry.role !== 'admin' && userEntry.role !== 'owner') ||
-        userEntry.banned
-      ) {
-        // Check for admin or owner
-        return NextResponse.json({ error: '权限不足' }, { status: 401 });
+      // Ignore config 'owner' role. Only ENV determines owner.
+      if (!userEntry || userEntry.role !== 'admin' || userEntry.banned) {
+        return NextResponse.json({ error: '权限不足' }, { status: 403 });
       }
-      operatorRole = userEntry.role; // Assign actual role
+      operatorRole = userEntry.role;
     }
 
-    // 查找目标用户条目（用户组操作和批量操作不需要）
+    // 5. Resolve Target
     let targetEntry: any = null;
-    let isTargetAdmin = false; // Flag to indicate if target is an admin
+    let isTargetPrivileged = false; // "Privileged" = Admin or Real Owner
+    const isTargetOwner = !!OWNER_USERNAME && targetUsername === OWNER_USERNAME;
 
-    if (
-      !['userGroup', 'batchUpdateUserGroups'].includes(action) &&
-      targetUsername
-    ) {
+    if (targetUsername) {
       targetEntry = adminConfig.UserConfig.Users.find(
         (u) => u.username === targetUsername,
       );
 
-      if (
-        targetEntry &&
-        targetEntry.role === 'owner' &&
-        !['changePassword', 'updateUserApis', 'updateUserGroups'].includes(
-          action,
-        )
-      ) {
-        return NextResponse.json({ error: '无法操作站长' }, { status: 400 });
+      // Global Owner Protection (Immediate 403, even if Owner is not in config)
+      if (isTargetOwner && operatorRole !== 'owner') {
+        return NextResponse.json({ error: '无法操作站长' }, { status: 403 });
       }
 
-      // 权限校验逻辑
-      isTargetAdmin = targetEntry?.role === 'admin'; // Check if target is specifically 'admin'
+      // Check if target is privileged (Admin or Env-Owner)
+      if (isTargetOwner || (targetEntry && isPrivilegedUser(targetEntry))) {
+        isTargetPrivileged = true;
+      }
     }
+
+    let didSaveConfig = false;
+
+    // --- Action Logic ---
 
     switch (action) {
       case 'add': {
-        if (targetEntry) {
+        if (operatorRole !== 'owner' && operatorRole !== 'admin') {
+          return NextResponse.json({ error: '权限不足' }, { status: 403 });
+        }
+
+        // CRITICAL FIX: Prevent hijacking Owner account
+        if (isTargetOwner) {
+          return NextResponse.json(
+            { error: '禁止创建站长同名账户' },
+            { status: 403 },
+          );
+        }
+
+        if (targetEntry)
           return NextResponse.json({ error: '用户已存在' }, { status: 400 });
-        }
-        if (!targetPassword) {
+        if (!targetPassword || targetPassword.length < 8) {
           return NextResponse.json(
-            { error: '缺少目标用户密码' },
+            { error: '密码过短 (至少8位) 或缺失' },
             { status: 400 },
           );
         }
-        await db.registerUser(targetUsername!, targetPassword);
 
-        // 获取用户组信息
-        const { userGroup } = body as { userGroup?: string };
+        // 1. Auth DB Write
+        await db.registerUser(targetUsername, targetPassword);
 
-        // 更新配置
-        const newUser: any = {
-          username: targetUsername!,
-          role: 'user',
-        };
+        // 2. Config Update
+        const newUser: any = { username: targetUsername, role: 'user' };
 
-        // 如果指定了用户组，添加到tags中
-        if (userGroup && userGroup.trim()) {
-          newUser.tags = [userGroup];
+        if (userGroup) {
+          const validTags = validateGroupTags([userGroup], adminConfig);
+          if (validTags.length > 0) newUser.tags = validTags;
         }
 
-        adminConfig.UserConfig.Users.push(newUser);
-        targetEntry =
-          adminConfig.UserConfig.Users[adminConfig.UserConfig.Users.length - 1];
+        try {
+          adminConfig.UserConfig.Users.push(newUser);
+          await db.saveAdminConfig(adminConfig);
+          didSaveConfig = true;
+        } catch (e) {
+          // Compensating Transaction
+          console.error('Config save failed, rolling back Auth DB', e);
+          try {
+            await db.deleteUser(targetUsername);
+          } catch (delError) {
+            console.error('Rollback delete failed', delError);
+          }
+          throw e;
+        }
         break;
       }
-      case 'ban': {
-        if (!targetEntry) {
+
+      case 'deleteUser': {
+        // Safety: Check Owner Protection FIRST (before 404)
+        if (isTargetOwner)
+          return NextResponse.json(
+            { error: '无法删除站长账户' },
+            { status: 403 },
+          );
+
+        if (!targetEntry)
           return NextResponse.json(
             { error: '目标用户不存在' },
             { status: 404 },
           );
+        if (username === targetUsername)
+          return NextResponse.json({ error: '不能删除自己' }, { status: 400 });
+
+        if (isTargetPrivileged && operatorRole !== 'owner') {
+          return NextResponse.json(
+            { error: '仅站长可删除管理员' },
+            { status: 403 },
+          );
         }
-        if (targetEntry.role === 'admin') {
-          // Check target role here
-          // 目标是管理员
-          if (operatorRole !== 'owner') {
-            return NextResponse.json(
-              { error: '仅站长可封禁管理员' },
-              { status: 401 },
-            );
-          }
+
+        const idx = adminConfig.UserConfig.Users.findIndex(
+          (u) => u.username === targetUsername,
+        );
+        if (idx > -1) adminConfig.UserConfig.Users.splice(idx, 1);
+
+        await db.saveAdminConfig(adminConfig);
+        didSaveConfig = true;
+
+        try {
+          await db.deleteUser(targetUsername);
+        } catch (e) {
+          console.error('Auth delete failed after config update', e);
         }
-        targetEntry.banned = true;
         break;
       }
+
+      case 'changePassword': {
+        // Safety: Check Owner Protection FIRST
+        if (
+          isTargetOwner &&
+          operatorRole !== 'owner' &&
+          username !== targetUsername
+        ) {
+          return NextResponse.json({ error: '权限不足' }, { status: 403 });
+        }
+
+        // Pure Auth DB action
+        if (!targetEntry && !isTargetOwner) {
+          // Optional: Allow password reset for Owner even if not in config?
+          // For strict safety, we usually require targetEntry or allow Owner override.
+          // Here we keep strict requirement unless it's the Owner operating on themselves.
+          if (operatorRole !== 'owner')
+            return NextResponse.json({ error: '用户不存在' }, { status: 404 });
+        }
+
+        if (!targetPassword || targetPassword.length < 8) {
+          return NextResponse.json(
+            { error: '新密码过短 (至少8位)' },
+            { status: 400 },
+          );
+        }
+
+        if (
+          isTargetPrivileged &&
+          operatorRole !== 'owner' &&
+          username !== targetUsername
+        ) {
+          return NextResponse.json({ error: '权限不足' }, { status: 403 });
+        }
+
+        await db.changePassword(targetUsername, targetPassword);
+        return NextResponse.json(
+          { ok: true },
+          { headers: { 'Cache-Control': 'no-store' } },
+        );
+      }
+
+      case 'ban':
       case 'unban': {
-        if (!targetEntry) {
-          return NextResponse.json(
-            { error: '目标用户不存在' },
-            { status: 404 },
-          );
-        }
-        if (targetEntry.role === 'admin') {
-          // Check target role here
-          if (operatorRole !== 'owner') {
-            return NextResponse.json(
-              { error: '仅站长可操作管理员' },
-              { status: 401 },
-            );
-          }
-        }
-        targetEntry.banned = false;
+        if (isTargetOwner)
+          return NextResponse.json({ error: '无法封禁站长' }, { status: 403 });
+        if (!targetEntry)
+          return NextResponse.json({ error: '用户不存在' }, { status: 404 });
+
+        if (isTargetPrivileged && operatorRole !== 'owner')
+          return NextResponse.json({ error: '权限不足' }, { status: 403 });
+
+        targetEntry.banned = action === 'ban';
         break;
       }
+
       case 'setAdmin': {
-        if (!targetEntry) {
+        if (isTargetOwner)
           return NextResponse.json(
-            { error: '目标用户不存在' },
-            { status: 404 },
+            { error: '无法修改站长角色' },
+            { status: 403 },
           );
-        }
-        if (targetEntry.role === 'admin' || targetEntry.role === 'owner') {
-          // Already admin or owner
+        if (!targetEntry)
+          return NextResponse.json({ error: '用户不存在' }, { status: 404 });
+
+        if (operatorRole !== 'owner')
+          return NextResponse.json({ error: '仅站长可操作' }, { status: 403 });
+        if (targetEntry.banned)
           return NextResponse.json(
-            { error: '该用户已是管理员或站长' },
+            { error: '无法提升被封禁用户' },
             { status: 400 },
           );
-        }
-        if (operatorRole !== 'owner') {
+        if (targetEntry.role === 'admin')
           return NextResponse.json(
-            { error: '仅站长可设置管理员' },
-            { status: 401 },
+            { error: '该用户已是管理员' },
+            { status: 400 },
           );
-        }
+
         targetEntry.role = 'admin';
         break;
       }
+
       case 'cancelAdmin': {
-        if (!targetEntry) {
+        if (isTargetOwner)
           return NextResponse.json(
-            { error: '目标用户不存在' },
-            { status: 404 },
+            { error: '无法修改站长角色' },
+            { status: 403 },
           );
-        }
-        if (targetEntry.role !== 'admin') {
+        if (!targetEntry)
+          return NextResponse.json({ error: '用户不存在' }, { status: 404 });
+
+        if (operatorRole !== 'owner')
+          return NextResponse.json({ error: '仅站长可操作' }, { status: 403 });
+        if (targetEntry.role !== 'admin')
           return NextResponse.json(
-            { error: '目标用户不是管理员' },
+            { error: '目标不是管理员' },
             { status: 400 },
           );
-        }
-        if (operatorRole !== 'owner') {
-          return NextResponse.json(
-            { error: '仅站长可取消管理员' },
-            { status: 401 },
-          );
-        }
+
         targetEntry.role = 'user';
         break;
       }
-      case 'changePassword': {
-        if (!targetEntry) {
-          return NextResponse.json(
-            { error: '目标用户不存在' },
-            { status: 404 },
-          );
-        }
-        if (!targetPassword) {
-          return NextResponse.json({ error: '缺少新密码' }, { status: 400 });
-        }
 
-        // 权限检查：不允许修改站长密码
-        if (targetEntry.role === 'owner') {
-          return NextResponse.json(
-            { error: '无法修改站长密码' },
-            { status: 401 },
-          );
-        }
-
-        if (
-          isTargetAdmin && // Target is an admin
-          operatorRole !== 'owner' && // Operator is not owner
-          username !== targetUsername // And operator is not self
-        ) {
-          return NextResponse.json(
-            { error: '仅站长可修改其他管理员密码' },
-            { status: 401 },
-          );
-        }
-
-        await db.changePassword(targetUsername!, targetPassword);
-        break;
-      }
-      case 'deleteUser': {
-        if (!targetEntry) {
-          return NextResponse.json(
-            { error: '目标用户不存在' },
-            { status: 404 },
-          );
-        }
-
-        // 权限检查：站长可删除所有用户（除了自己），管理员可删除普通用户
-        if (username === targetUsername) {
-          return NextResponse.json({ error: '不能删除自己' }, { status: 400 });
-        }
-
-        if (targetEntry.role === 'admin' && operatorRole !== 'owner') {
-          // If target is admin, only owner can delete
-          return NextResponse.json(
-            { error: '仅站长可删除管理员' },
-            { status: 401 },
-          );
-        }
-
-        await db.deleteUser(targetUsername!);
-
-        // 从配置中移除用户
-        const userIndex = adminConfig.UserConfig.Users.findIndex(
-          (u) => u.username === targetUsername,
-        );
-        if (userIndex > -1) {
-          adminConfig.UserConfig.Users.splice(userIndex, 1);
-        }
-
-        break;
-      }
       case 'updateUserApis': {
-        if (!targetEntry) {
-          return NextResponse.json(
-            { error: '目标用户不存在' },
-            { status: 404 },
-          );
-        }
-
-        const { enabledApis } = body as { enabledApis?: string[] };
-
-        // 权限检查：站长可配置所有人的采集源，管理员可配置普通用户和自己的采集源
+        if (!targetEntry)
+          return NextResponse.json({ error: '用户不存在' }, { status: 404 });
         if (
-          isTargetAdmin && // Target is admin
-          operatorRole !== 'owner' && // Operator is not owner
-          username !== targetUsername // And operator is not self
+          isTargetPrivileged &&
+          operatorRole !== 'owner' &&
+          username !== targetUsername
         ) {
-          return NextResponse.json(
-            { error: '仅站长可配置其他管理员的采集源' },
-            { status: 401 },
-          );
+          return NextResponse.json({ error: '权限不足' }, { status: 403 });
         }
 
-        // 更新用户的采集源权限
-        if (enabledApis && enabledApis.length > 0) {
-          targetEntry.enabledApis = enabledApis;
-        } else {
-          // 如果为空数组或未提供，则删除该字段，表示无限制
-          delete targetEntry.enabledApis;
-        }
-
+        const safeApis = validateSourceKeys(enabledApis, adminConfig);
+        if (safeApis.length > 0) targetEntry.enabledApis = safeApis;
+        else delete targetEntry.enabledApis;
         break;
       }
+
       case 'userGroup': {
-        // 用户组管理操作
-        const { groupAction, groupName, enabledApis } = body as {
-          groupAction: 'add' | 'edit' | 'delete';
-          groupName: string;
-          enabledApis?: string[];
-        };
+        if (operatorRole !== 'owner')
+          return NextResponse.json(
+            { error: '仅站长可管理用户组' },
+            { status: 403 },
+          );
 
-        if (!adminConfig.UserConfig.Tags) {
-          adminConfig.UserConfig.Tags = [];
+        if (!['add', 'edit', 'delete'].includes(groupAction)) {
+          return NextResponse.json({ error: '无效操作' }, { status: 400 });
         }
+        if (!groupName)
+          return NextResponse.json({ error: '缺少组名' }, { status: 400 });
 
-        switch (groupAction) {
-          case 'add': {
-            // 检查用户组是否已存在
-            if (adminConfig.UserConfig.Tags.find((t) => t.name === groupName)) {
-              return NextResponse.json(
-                { error: '用户组已存在' },
-                { status: 400 },
-              );
-            }
-            adminConfig.UserConfig.Tags.push({
-              name: groupName,
-              enabledApis: enabledApis || [],
-            });
-            break;
-          }
-          case 'edit': {
-            const groupIndex = adminConfig.UserConfig.Tags.findIndex(
-              (t) => t.name === groupName,
-            );
-            if (groupIndex === -1) {
-              return NextResponse.json(
-                { error: '用户组不存在' },
-                { status: 404 },
-              );
-            }
-            adminConfig.UserConfig.Tags[groupIndex].enabledApis =
-              enabledApis || [];
-            break;
-          }
-          case 'delete': {
-            const groupIndex = adminConfig.UserConfig.Tags.findIndex(
-              (t) => t.name === groupName,
-            );
-            if (groupIndex === -1) {
-              return NextResponse.json(
-                { error: '用户组不存在' },
-                { status: 404 },
-              );
-            }
+        if (!adminConfig.UserConfig.Tags) adminConfig.UserConfig.Tags = [];
+        const tags = adminConfig.UserConfig.Tags;
 
-            // 查找使用该用户组的所有用户
-            const affectedUsers: string[] = [];
-            adminConfig.UserConfig.Users.forEach((user) => {
-              if (user.tags && user.tags.includes(groupName)) {
-                affectedUsers.push(user.username);
-                // 从用户的tags中移除该用户组
-                user.tags = user.tags.filter((tag) => tag !== groupName);
-                // 如果用户没有其他标签了，删除tags字段
-                if (user.tags.length === 0) {
-                  delete user.tags;
-                }
-              }
-            });
-
-            // 删除用户组
-            adminConfig.UserConfig.Tags.splice(groupIndex, 1);
-
-            // 记录删除操作的影响
-            console.log(
-              `删除用户组 "${groupName}"，影响用户: ${affectedUsers.length > 0 ? affectedUsers.join(', ') : '无'}`,
-            );
-
-            break;
-          }
-          default:
+        if (groupAction === 'add') {
+          if (tags.find((t) => t.name === groupName))
             return NextResponse.json(
-              { error: '未知的用户组操作' },
+              { error: '用户组已存在' },
               { status: 400 },
             );
+          tags.push({
+            name: groupName,
+            enabledApis: validateSourceKeys(enabledApis, adminConfig),
+          });
+        } else if (groupAction === 'edit') {
+          const t = tags.find((t) => t.name === groupName);
+          if (!t)
+            return NextResponse.json(
+              { error: '用户组不存在' },
+              { status: 404 },
+            );
+          t.enabledApis = validateSourceKeys(enabledApis, adminConfig);
+        } else if (groupAction === 'delete') {
+          const idx = tags.findIndex((t) => t.name === groupName);
+          if (idx === -1)
+            return NextResponse.json(
+              { error: '用户组不存在' },
+              { status: 404 },
+            );
+
+          adminConfig.UserConfig.Users.forEach((u) => {
+            if (u.tags?.includes(groupName)) {
+              u.tags = u.tags.filter((t: string) => t !== groupName);
+              if (u.tags.length === 0) delete u.tags;
+            }
+          });
+          tags.splice(idx, 1);
         }
         break;
       }
+
       case 'updateUserGroups': {
-        if (!targetEntry) {
-          return NextResponse.json(
-            { error: '目标用户不存在' },
-            { status: 404 },
-          );
-        }
-
-        const { userGroups } = body as { userGroups: string[] };
-
-        // 权限检查：站长可配置所有人的用户组，管理员可配置普通用户和自己的用户组
+        if (!targetEntry)
+          return NextResponse.json({ error: '用户不存在' }, { status: 404 });
         if (
-          isTargetAdmin && // Target is admin
-          operatorRole !== 'owner' && // Operator is not owner
-          username !== targetUsername // And operator is not self
+          isTargetPrivileged &&
+          operatorRole !== 'owner' &&
+          username !== targetUsername
         ) {
-          return NextResponse.json(
-            { error: '仅站长可配置其他管理员的用户组' },
-            { status: 400 },
-          );
+          return NextResponse.json({ error: '权限不足' }, { status: 403 });
         }
 
-        // 更新用户的用户组
-        if (userGroups && userGroups.length > 0) {
-          targetEntry.tags = userGroups;
-        } else {
-          // 如果为空数组或未提供，则删除该字段，表示无用户组
-          delete targetEntry.tags;
-        }
-
+        const safeTags = validateGroupTags(userGroups, adminConfig);
+        if (safeTags.length > 0) targetEntry.tags = safeTags;
+        else delete targetEntry.tags;
         break;
       }
-      case 'batchUpdateUserGroups': {
-        const { usernames, userGroups } = body as {
-          usernames: string[];
-          userGroups: string[];
-        };
 
-        if (!usernames || !Array.isArray(usernames) || usernames.length === 0) {
+      case 'batchUpdateUserGroups': {
+        if (usernames.length === 0)
           return NextResponse.json(
             { error: '缺少用户名列表' },
             { status: 400 },
           );
-        }
 
-        // 权限检查：站长可批量配置所有人的用户组，管理员只能批量配置普通用户
-        if (operatorRole !== 'owner') {
-          for (const targetUsername of usernames) {
-            const targetUser = adminConfig.UserConfig.Users.find(
-              (u) => u.username === targetUsername,
-            );
-            if (
-              targetUser &&
-              targetUser.role === 'admin' &&
-              targetUsername !== username
-            ) {
-              // Check target role
-              return NextResponse.json(
-                { error: `管理员无法操作其他管理员 ${targetUsername}` },
-                { status: 400 },
-              );
-            }
-          }
-        }
+        const targetSet = new Set(usernames);
 
-        // 批量更新用户组
-        for (const targetUsername of usernames) {
-          const targetUser = adminConfig.UserConfig.Users.find(
-            (u) => u.username === targetUsername,
+        // 1. Block Owner from being a target
+        if (OWNER_USERNAME && targetSet.has(OWNER_USERNAME)) {
+          return NextResponse.json(
+            { error: '无法批量操作站长' },
+            { status: 403 },
           );
-          if (targetUser) {
-            if (userGroups && userGroups.length > 0) {
-              targetUser.tags = userGroups;
-            } else {
-              // 如果为空数组或未提供，则删除该字段，表示无用户组
-              delete targetUser.tags;
-            }
-          }
         }
 
+        // 2. Block Non-Owners from modifying Privileged Users
+        if (operatorRole !== 'owner') {
+          const hasPrivilegedTarget = adminConfig.UserConfig.Users.some(
+            (u) =>
+              targetSet.has(u.username) &&
+              isPrivilegedUser(u) &&
+              u.username !== username,
+          );
+          if (hasPrivilegedTarget)
+            return NextResponse.json(
+              { error: '无法批量操作包含管理员/站长的列表' },
+              { status: 403 },
+            );
+        }
+
+        const safeTags = validateGroupTags(userGroups, adminConfig);
+
+        adminConfig.UserConfig.Users.forEach((u) => {
+          if (targetSet.has(u.username)) {
+            if (safeTags.length > 0) u.tags = safeTags;
+            else delete u.tags;
+          }
+        });
         break;
       }
+
+      case 'updateUserAdultFilter': {
+        if (!targetEntry)
+          return NextResponse.json({ error: '用户不存在' }, { status: 404 });
+        if (
+          isTargetPrivileged &&
+          operatorRole !== 'owner' &&
+          username !== targetUsername
+        ) {
+          return NextResponse.json({ error: '权限不足' }, { status: 403 });
+        }
+        targetEntry.disableYellowFilter = disableYellowFilter;
+        break;
+      }
+
       default:
         return NextResponse.json({ error: '未知操作' }, { status: 400 });
     }
 
-    // 将更新后的配置写入数据库
-    await db.saveAdminConfig(adminConfig);
+    // 6. Final Save
+    if (!didSaveConfig && action !== 'changePassword') {
+      await db.saveAdminConfig(adminConfig);
+    }
 
     return NextResponse.json(
       { ok: true },
-      {
-        headers: {
-          'Cache-Control': 'no-store', // 管理员配置不缓存
-        },
-      },
+      { headers: { 'Cache-Control': 'no-store' } },
     );
   } catch (error) {
-    console.error('用户管理操作失败:', error);
+    console.error('User management operation failed:', error);
     return NextResponse.json(
-      {
-        error: '用户管理操作失败',
-        details: (error as Error).message,
-      },
+      { error: '操作失败', details: (error as Error).message },
       { status: 500 },
     );
   }

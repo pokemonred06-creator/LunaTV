@@ -40,7 +40,7 @@ function handleAuthFailure(request: NextRequest): NextResponse {
   return NextResponse.redirect(loginUrl);
 }
 
-export async function proxy(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // 1. Skip Auth for public paths
@@ -55,24 +55,41 @@ export async function proxy(request: NextRequest) {
 
   // 3. Authenticate User (Check for generic 'auth' cookie from server.ts)
   const authInfo = await getAuthInfoFromCookie(request);
+
+  // DEBUG HELPER - Always log (Reduced verbosity)
+  /*
+  console.log('[Middleware] Request:', request.nextUrl.pathname);
+  const authCookie = request.cookies.get('auth');
+  console.log('[Middleware] Cookie Present:', !!authCookie);
+  if (authCookie) {
+     console.log('[Middleware] Cookie Val Len:', authCookie.value.length);
+  }
+  console.log('[Middleware] Auth Info Result:', JSON.stringify(authInfo));
+  console.log('[Middleware] Env Password Len:', process.env.PASSWORD?.length);
+  */
+
   if (!authInfo) {
+    console.log(
+      '[Proxy] Auth Failed in Middleware for:',
+      request.nextUrl.pathname,
+    );
     return handleAuthFailure(request);
   }
 
-  // 4. Session Check for Protected Areas (Dashboard/Admin) - The new architecture
+  // 4. Session Check for Protected Areas (Dashboard/Admin)
   const isProtectedRoute =
     pathname.startsWith('/dashboard') || pathname.startsWith('/admin');
 
   if (isProtectedRoute) {
-    // For now, if we are already authenticated via global auth (authInfo),
-    // we might consider that enough, OR we enforce the new session_id.
-    // The user request implied moving to session_id for these areas.
-    // Let's check session_id as well if strict.
+    // If we have valid authInfo (Legacy/Standard Auth), allow access.
+    // Only enforce session_id if authInfo is missing (which is handled above) or strict mode is enabled in future.
+    if (authInfo) {
+      return NextResponse.next();
+    }
+
+    // Fallback: If no authInfo, definitely redirect (though handled by block 3)
     const sessionCookie = request.cookies.get('session_id');
     if (!sessionCookie) {
-      // If they have global auth but no session, maybe we generate one?
-      // Or just redirect to login?
-      // For now, let's strictly redirect if session is missing for dashboard
       return NextResponse.redirect(new URL('/login', request.url));
     }
   }

@@ -31,10 +31,6 @@
           "username": "server",
           "role": "user",
           "banned": false
-        },
-        {
-          "role": "user",
-          "banned": false
         }
       ]
     },

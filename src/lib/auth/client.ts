@@ -32,6 +32,10 @@ export function getAuthInfoFromBrowserCookie(): AuthInfo | null {
       username,
       role,
       timestamp: typeof val?.timestamp === 'number' ? val.timestamp : undefined,
+      disableYellowFilter:
+        typeof val?.disableYellowFilter === 'boolean'
+          ? val.disableYellowFilter
+          : undefined,
     };
   } catch {
     return null;

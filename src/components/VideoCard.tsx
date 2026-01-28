@@ -224,9 +224,11 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
 
     // Handlers
     const handleToggleFavorite = useCallback(
-      async (e: React.MouseEvent) => {
-        e.preventDefault();
-        e.stopPropagation();
+      async (e?: React.MouseEvent) => {
+        if (e) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
         if (from === 'douban' || !source || !id) return;
 
         // Ensure we have latest state before toggling
@@ -269,9 +271,11 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
     );
 
     const handleDeleteRecord = useCallback(
-      async (e: React.MouseEvent) => {
-        e.preventDefault();
-        e.stopPropagation();
+      async (e?: React.MouseEvent) => {
+        if (e) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
         if (from !== 'playrecord' || !source || !id) return;
         try {
           await deletePlayRecord(source, id);
@@ -398,7 +402,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
             />
           ),
           onClick: (e?: any) => {
-            if (!loading && e) handleToggleFavorite(e);
+            if (!loading) handleToggleFavorite(e);
           },
           color: (favorited ? 'danger' : 'default') as 'danger' | 'default',
           disabled: loading,
@@ -411,7 +415,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
           label: '删除记录',
           icon: <Trash2 size={20} />,
           onClick: (e?: any) => {
-            if (e) handleDeleteRecord(e);
+            handleDeleteRecord(e);
           },
           color: 'danger' as const,
         });

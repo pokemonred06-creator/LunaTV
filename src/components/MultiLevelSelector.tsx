@@ -3,6 +3,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
+import { getAuthInfoFromBrowserCookie } from '@/lib/auth/client';
+import { yellowWords } from '@/lib/yellow';
+
 interface MultiLevelOption {
   label: string;
   value: string;
@@ -33,6 +36,27 @@ const MultiLevelSelector: React.FC<MultiLevelSelectorProps> = ({
   const [values, setValues] = useState<Record<string, string>>({});
   const categoryRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const [disableYellowFilter, setDisableYellowFilter] = useState(false);
+
+  useEffect(() => {
+    const auth = getAuthInfoFromBrowserCookie();
+    // Enable adult content if: owner/admin OR user has disableYellowFilter=true
+    if (
+      auth?.role === 'owner' ||
+      auth?.role === 'admin' ||
+      auth?.disableYellowFilter
+    ) {
+      setDisableYellowFilter(true);
+    }
+  }, []);
+
+  const filterOptions = (options: MultiLevelOption[]) => {
+    if (disableYellowFilter) return options;
+    return options.filter(
+      (opt) => !yellowWords.some((w) => opt.label.includes(w)),
+    );
+  };
 
   // 根据内容类型获取对应的类型选项
   const getTypeOptions = (
@@ -266,14 +290,14 @@ const MultiLevelSelector: React.FC<MultiLevelSelectorProps> = ({
           {
             key: 'type',
             label: '类型',
-            options: getTypeOptions(contentType),
+            options: filterOptions(getTypeOptions(contentType)),
           },
         ]
       : [
           {
             key: 'label',
             label: '类型',
-            options: getLabelOptions(contentType),
+            options: filterOptions(getLabelOptions(contentType)),
           },
         ]),
     {

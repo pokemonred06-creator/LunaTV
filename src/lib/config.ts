@@ -223,7 +223,7 @@ async function getInitConfig(
 
   const adminConfig: AdminConfig = {
     ConfigFile: configFile,
-    ConfigSubscribtion: subConfig,
+    ConfigSubscription: subConfig,
     SiteConfig: {
       SiteName: process.env.NEXT_PUBLIC_SITE_NAME || 'MoonTV',
       Announcement: process.env.ANNOUNCEMENT || '',
@@ -418,7 +418,7 @@ export async function resetConfig() {
 
   let adminConfig = await getInitConfig(
     originConfig.ConfigFile,
-    originConfig.ConfigSubscribtion,
+    originConfig.ConfigSubscription,
   );
 
   // Immediate Normalization

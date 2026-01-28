@@ -58,6 +58,7 @@ export async function POST(req: NextRequest) {
       passwordLen: process.env.PASSWORD?.length,
       username: process.env.USERNAME || '(default: admin)',
       next_public_storage_type: process.env.NEXT_PUBLIC_STORAGE_TYPE,
+      disable_secure_cookies: process.env.DISABLE_SECURE_COOKIES,
     });
 
     // 本地 / localStorage 模式——仅校验固定密码
@@ -127,14 +128,17 @@ export async function POST(req: NextRequest) {
       const expires = new Date();
       expires.setDate(expires.getDate() + 7); // 7天过期
 
+      const isSecure =
+        process.env.NODE_ENV === 'production' &&
+        process.env.DISABLE_SECURE_COOKIES !== 'true';
+      console.log('[Login] Cookie Options - Secure:', isSecure);
+
       response.cookies.set('auth', cookieValue, {
         path: '/',
         expires,
         sameSite: 'lax',
         httpOnly: false, // PWA compabitility
-        secure:
-          process.env.NODE_ENV === 'production' &&
-          process.env.DISABLE_SECURE_COOKIES !== 'true',
+        secure: isSecure,
       });
 
       // Set public UI cookie
@@ -198,14 +202,16 @@ export async function POST(req: NextRequest) {
       const expires = new Date();
       expires.setDate(expires.getDate() + 7); // 7天过期
 
+      const isSecure =
+        process.env.NODE_ENV === 'production' &&
+        process.env.DISABLE_SECURE_COOKIES !== 'true';
+
       response.cookies.set('auth', cookieValue, {
         path: '/',
         expires,
         sameSite: 'lax',
         httpOnly: false,
-        secure:
-          process.env.NODE_ENV === 'production' &&
-          process.env.DISABLE_SECURE_COOKIES !== 'true',
+        secure: isSecure,
       });
 
       // Set public UI cookie
@@ -222,9 +228,7 @@ export async function POST(req: NextRequest) {
           expires,
           sameSite: 'lax',
           httpOnly: false,
-          secure:
-            process.env.NODE_ENV === 'production' &&
-            process.env.DISABLE_SECURE_COOKIES !== 'true',
+          secure: isSecure,
         },
       );
 
@@ -288,6 +292,7 @@ export async function POST(req: NextRequest) {
           JSON.stringify({
             username: lowerUsername,
             role: user?.role || 'user',
+            disableYellowFilter: user?.disableYellowFilter,
           }),
         ),
         {

@@ -32,6 +32,7 @@ export interface User {
   enabledApis?: string[]; // Array of ApiSite keys
   enabledLives?: string[]; // Array of LiveCfg keys (NEW)
   tags?: string[]; // Array of Tag names
+  disableYellowFilter?: boolean; // NEW: Per-user yellow filter override
 }
 
 export interface SiteConfig {
@@ -79,7 +80,7 @@ export interface CustomCategory {
 
 export interface AdminConfig {
   ConfigFile: string; // The raw JSON string from file/env
-  ConfigSubscribtion: {
+  ConfigSubscription: {
     URL: string;
     AutoUpdate: boolean;
     LastCheck: string;

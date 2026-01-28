@@ -64,10 +64,26 @@ export async function GET(request: NextRequest) {
       .filter((result) => result.status === 'fulfilled')
       .map((result) => (result as PromiseFulfilledResult<any>).value);
     let flattenedResults = successResults.flat();
-    if (!config.SiteConfig.DisableYellowFilter) {
+    let applyFilter = !config.SiteConfig.DisableYellowFilter;
+
+    // Check user-specific override
+    if (applyFilter && authInfo.username) {
+      const user = config.UserConfig.Users.find(
+        (u) => u.username === authInfo.username,
+      );
+      if (user?.disableYellowFilter) {
+        applyFilter = false;
+      }
+    }
+
+    if (applyFilter) {
       flattenedResults = flattenedResults.filter((result) => {
         const typeName = result.type_name || '';
-        return !yellowWords.some((word: string) => typeName.includes(word));
+        const name = result.name || '';
+        return (
+          !yellowWords.some((word: string) => typeName.includes(word)) &&
+          !yellowWords.some((word: string) => name.includes(word))
+        );
       });
     }
 

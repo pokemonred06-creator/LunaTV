@@ -15,6 +15,43 @@ interface BaseBody {
   action?: Action;
 }
 
+export async function GET(request: NextRequest) {
+  try {
+    const authInfo = await getAuthInfoFromCookie(request);
+    if (!authInfo || !authInfo.username) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const config = await getConfig();
+
+    let isAuthorized = false;
+    if (authInfo.username === process.env.USERNAME) {
+      isAuthorized = true;
+    } else {
+      const user = config.UserConfig.Users.find(
+        (u) => u.username === authInfo.username,
+      );
+      if (
+        user &&
+        (user.role === 'owner' || user.role === 'admin') &&
+        !user.banned
+      ) {
+        isAuthorized = true;
+      }
+    }
+
+    if (!isAuthorized) {
+      return NextResponse.json({ error: '权限不足' }, { status: 403 });
+    }
+
+    return NextResponse.json(config.CustomCategories || [], {
+      headers: { 'Cache-Control': 'no-store' },
+    });
+  } catch (error) {
+    return NextResponse.json({ error: '获取分类失败' }, { status: 500 });
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as BaseBody & Record<string, any>;

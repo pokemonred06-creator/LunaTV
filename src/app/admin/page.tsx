@@ -22,7 +22,7 @@ import {
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { Dispatch, ElementType, SetStateAction } from 'react';
-import { useCallback, useEffect, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
 import {
@@ -53,10 +53,19 @@ interface ApiErrorShape {
   error?: string;
 }
 
+// --- Helpers ---
+
 // Type guard
 function isApiErrorShape(x: unknown): x is ApiErrorShape {
   return typeof x === 'object' && x !== null && 'error' in x;
 }
+
+// Safe numeric input converter
+const toSafeNumber = (v: string): number => {
+  if (v.trim() === '') return 0;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+};
 
 // --- Main Component ---
 
@@ -64,39 +73,80 @@ export default function AdminPage() {
   const router = useRouter();
   const { convert } = useLanguage();
 
+  // Safety ref to prevent state updates on unmounted component
+  const isMounted = useRef(true);
+
   const [config, setConfig] = useState<AdminConfig | null>(null);
   const [role, setRole] = useState<'owner' | 'admin' | 'user' | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TabType>('base');
 
-  // Granular processing map: stores 'true' for specific action keys (e.g., 'user-ban-username')
   const [processingMap, setProcessingMap] = useState<Record<string, boolean>>(
     {},
   );
 
-  const setProcessingKey = (key: string, val: boolean) =>
+  const setProcessingKey = useCallback((key: string, val: boolean) => {
     setProcessingMap((m) => ({ ...m, [key]: val }));
+  }, []);
 
-  // --- API Helper ---
+  // --- Central Config Fetcher ---
+  // Returns true on success, false on error/abort
+  const fetchConfigData = useCallback(
+    async (signal?: AbortSignal) => {
+      try {
+        const res = await fetch('/api/admin/config', {
+          signal,
+        });
 
-  const fetchConfig = useCallback(async () => {
-    try {
-      const res = await fetch('/api/admin/config');
-      if (res.status === 401) {
-        router.push('/login');
-        return;
+        if (!isMounted.current) return false;
+
+        if (res.status === 401) {
+          router.push('/login');
+          return false;
+        }
+
+        if (!res.ok) {
+          toast.error('Failed to load configuration');
+          return false;
+        }
+
+        const data = await res.json();
+        if (isMounted.current) {
+          setConfig(data);
+          setRole(data.Role);
+        }
+        return true;
+      } catch (error: unknown) {
+        if (error instanceof Error && error.name === 'AbortError') return false;
+        console.error('Fetch config error:', error);
+        // Only toast if it's a real network error, not an abort
+        if (isMounted.current)
+          toast.error('Network error while loading config');
+        return false;
       }
-      const data = await res.json();
-      setConfig(data.Config);
-      setRole(data.Role);
-    } catch (error) {
-      console.error(error);
-      toast.error('Failed to load configuration');
-    } finally {
-      setLoading(false);
-    }
-  }, [router]);
+    },
+    [router],
+  );
 
+  // --- Initial Data Fetch ---
+  useEffect(() => {
+    isMounted.current = true;
+    const controller = new AbortController();
+
+    const init = async () => {
+      await fetchConfigData(controller.signal);
+      if (isMounted.current) setLoading(false);
+    };
+
+    init();
+
+    return () => {
+      isMounted.current = false;
+      controller.abort();
+    };
+  }, [fetchConfigData]);
+
+  // --- Generic Generic Request Handler ---
   const handleRequest = useCallback(
     async <T,>(
       key: string,
@@ -109,13 +159,18 @@ export default function AdminPage() {
         refresh?: boolean;
       },
     ): Promise<T | null> => {
+      if (!isMounted.current) return null;
       setProcessingKey(key, true);
+
       try {
         const res = await fetch(url, {
           method,
+          credentials: 'include',
           headers: body ? { 'Content-Type': 'application/json' } : undefined,
           body: body ? JSON.stringify(body) : undefined,
         });
+
+        if (!isMounted.current) return null;
 
         if (res.status === 401) {
           router.push('/login');
@@ -138,7 +193,11 @@ export default function AdminPage() {
 
         if (opts?.successMessage) toast.success(opts.successMessage);
         if (opts?.onSuccess && data) opts.onSuccess(data as T);
-        if (opts?.refresh) fetchConfig();
+
+        // Robust Refresh Logic
+        if (opts?.refresh) {
+          await fetchConfigData();
+        }
 
         return (data as T) ?? null;
       } catch (e) {
@@ -146,25 +205,20 @@ export default function AdminPage() {
         toast.error('Network error');
         return null;
       } finally {
-        setProcessingKey(key, false);
+        if (isMounted.current) {
+          setProcessingKey(key, false);
+        }
       }
     },
-    [router, fetchConfig],
+    [router, setProcessingKey, fetchConfigData],
   );
-
-  // --- Initial Load ---
-  useEffect(() => {
-    fetchConfig();
-  }, [fetchConfig]);
 
   // --- Handlers ---
 
   const handleLogout = async () => {
-    // Only redirect if the logout request actually succeeds
-    const res = await handleRequest('logout', '/api/auth/logout', 'POST');
-    if (res !== null) {
-      router.push('/login');
-    }
+    // Fire and forget the logout request, then redirect immediately
+    await handleRequest('logout', '/api/auth/logout', 'POST');
+    router.push('/login');
   };
 
   const saveBaseConfig = () => {
@@ -194,7 +248,7 @@ export default function AdminPage() {
       'saveSubscribe',
       '/api/admin/subscribe',
       'POST',
-      config.ConfigSubscribtion,
+      config.ConfigSubscription,
       {
         successMessage: 'Subscription config saved',
         refresh: true,
@@ -202,31 +256,26 @@ export default function AdminPage() {
     );
   };
 
-  /**
-   * Generic List Action Handler
-   * @param keyPrefix - e.g. 'user'
-   * @param endpoint - e.g. '/api/admin/user'
-   * @param action - e.g. 'ban'
-   * @param payload - Data payload
-   * @param uniqueId - Specific ID (username, key) to prevent UI loading collisions
-   */
-  const handleAction = (
-    keyPrefix: string,
-    endpoint: string,
-    action: string,
-    payload: object,
-    uniqueId?: string,
-  ) => {
-    const loadingKey = uniqueId
-      ? `${keyPrefix}-${action}-${uniqueId}`
-      : `${keyPrefix}-${action}`;
-    const body = { action, ...payload };
+  const handleAction = useCallback(
+    (
+      keyPrefix: string,
+      endpoint: string,
+      action: string,
+      payload: object,
+      uniqueId?: string,
+    ) => {
+      const loadingKey = uniqueId
+        ? `${keyPrefix}-${action}-${uniqueId}`
+        : `${keyPrefix}-${action}`;
+      const body = { action, ...payload };
 
-    handleRequest(loadingKey, endpoint, 'POST', body, {
-      successMessage: 'Operation successful',
-      refresh: true,
-    });
-  };
+      handleRequest(loadingKey, endpoint, 'POST', body, {
+        successMessage: 'Operation successful',
+        refresh: true,
+      });
+    },
+    [handleRequest],
+  );
 
   // --- Render ---
 
@@ -329,9 +378,7 @@ export default function AdminPage() {
           <UserManagement
             users={config.UserConfig.Users || []}
             role={role}
-            onAction={(action, payload, uid) =>
-              handleAction('user', '/api/admin/user', action, payload, uid)
-            }
+            onAction={handleAction}
             convert={convert}
             processingMap={processingMap}
           />
@@ -340,9 +387,7 @@ export default function AdminPage() {
         {activeTab === 'sources' && (
           <SourceManagement
             sources={config.SourceConfig || []}
-            onAction={(action, payload, uid) =>
-              handleAction('source', '/api/admin/source', action, payload, uid)
-            }
+            onAction={handleAction}
             convert={convert}
             processingMap={processingMap}
           />
@@ -351,9 +396,7 @@ export default function AdminPage() {
         {activeTab === 'live' && (
           <LiveManagement
             lives={config.LiveConfig || []}
-            onAction={(action, payload, uid) =>
-              handleAction('live', '/api/admin/live', action, payload, uid)
-            }
+            onAction={handleAction}
             onRefresh={refreshLiveChannels}
             isRefreshing={!!processingMap['refreshLive']}
             convert={convert}
@@ -364,15 +407,7 @@ export default function AdminPage() {
         {activeTab === 'category' && (
           <CategoryManagement
             categories={config.CustomCategories || []}
-            onAction={(action, payload, uid) =>
-              handleAction(
-                'category',
-                '/api/admin/category',
-                action,
-                payload,
-                uid,
-              )
-            }
+            onAction={handleAction}
             convert={convert}
             processingMap={processingMap}
           />
@@ -380,7 +415,7 @@ export default function AdminPage() {
 
         {activeTab === 'subscribe' && (
           <SubscribeManagement
-            configSubscribtion={config.ConfigSubscribtion}
+            configSubscription={config.ConfigSubscription}
             setConfig={setConfig}
             onSave={saveSubscribeConfig}
             processing={!!processingMap['saveSubscribe']}
@@ -446,13 +481,17 @@ const BaseConfigForm = ({
           label={convert('接口缓存时间 (秒)')}
           type='number'
           value={config.SiteConfig?.SiteInterfaceCacheTime}
-          onChange={(v) => handleChange('SiteInterfaceCacheTime', Number(v))}
+          onChange={(v) =>
+            handleChange('SiteInterfaceCacheTime', toSafeNumber(v))
+          }
         />
         <FormInput
           label={convert('搜索最大页数')}
           type='number'
           value={config.SiteConfig?.SearchDownstreamMaxPage}
-          onChange={(v) => handleChange('SearchDownstreamMaxPage', Number(v))}
+          onChange={(v) =>
+            handleChange('SearchDownstreamMaxPage', toSafeNumber(v))
+          }
         />
 
         <div className='col-span-1 md:col-span-2'>
@@ -588,11 +627,11 @@ const BaseConfigForm = ({
                 onClick={() => handleSeasonalChange({ intensity: val })}
                 disabled={!config.SiteConfig?.SeasonalEffects?.enabled}
                 className={`flex-1 px-3 py-2 text-sm border first:rounded-l-md last:rounded-r-md 
-                    ${
-                      config.SiteConfig?.SeasonalEffects?.intensity === val
-                        ? 'bg-blue-50 border-blue-500 text-blue-600 dark:bg-blue-900/40 dark:text-blue-200'
-                        : 'bg-white border-gray-300 text-gray-700 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-300 hover:bg-gray-50'
-                    } disabled:opacity-50`}
+                  ${
+                    config.SiteConfig?.SeasonalEffects?.intensity === val
+                      ? 'bg-blue-50 border-blue-500 text-blue-600 dark:bg-blue-900/40 dark:text-blue-200'
+                      : 'bg-white border-gray-300 text-gray-700 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-300 hover:bg-gray-50'
+                  } disabled:opacity-50`}
               >
                 {val === 'light' ? '轻柔' : val === 'normal' ? '正常' : '浓密'}
               </button>
@@ -612,29 +651,29 @@ const BaseConfigForm = ({
   );
 };
 
-interface UserManagementProps {
-  users: User[];
-  role: unknown;
-  onAction: (action: string, payload: object, uniqueId?: string) => void;
-  convert: (s: string) => string;
-  processingMap: Record<string, boolean>;
-}
+// --- Sub-component: User Add Form (Isolated state) ---
 
-function UserManagement({
-  users,
-  role,
-  onAction,
+const UserAddForm = memo(function UserAddForm({
+  onAdd,
+  processing,
   convert,
-  processingMap,
-}: UserManagementProps) {
+}: {
+  onAdd: (u: string, p: string) => void;
+  processing: boolean;
+  convert: (s: string) => string;
+}) {
   const [newUser, setNewUser] = useState({ username: '', password: '' });
+  const [error, setError] = useState<string | null>(null);
+
+  const isValidPassword = newUser.password.length >= 8;
+  const showWarning = newUser.password.length > 0 && !isValidPassword;
 
   return (
-    <div className='space-y-6 animate-in fade-in'>
-      <div className='border dark:border-gray-700 p-5 rounded-xl bg-gray-50/50 dark:bg-gray-700/30'>
-        <h3 className='font-semibold mb-4 text-gray-800 dark:text-white flex items-center gap-2'>
-          <Plus className='w-4 h-4' /> {convert('添加用户')}
-        </h3>
+    <div className='border dark:border-gray-700 p-5 rounded-xl bg-gray-50/50 dark:bg-gray-700/30'>
+      <h3 className='font-semibold mb-4 text-gray-800 dark:text-white flex items-center gap-2'>
+        <Plus className='w-4 h-4' /> {convert('添加用户')}
+      </h3>
+      <div className='flex flex-col gap-2'>
         <div className='flex flex-col md:flex-row gap-4'>
           <input
             placeholder={convert('用户名')}
@@ -647,39 +686,80 @@ function UserManagement({
           <input
             placeholder={convert('密码')}
             type='password'
-            className='flex-1 border p-2 rounded-lg dark:bg-gray-800 dark:border-gray-600 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none'
+            className={`flex-1 border p-2 rounded-lg dark:bg-gray-800 dark:border-gray-600 dark:text-white focus:ring-2 outline-none ${showWarning ? 'ring-2 ring-red-500 border-red-500' : 'focus:ring-blue-500'}`}
             value={newUser.password}
-            onChange={(e) =>
-              setNewUser({ ...newUser, password: e.target.value })
-            }
+            onChange={(e) => {
+              setNewUser({ ...newUser, password: e.target.value });
+              setError(null);
+            }}
           />
           <button
-            className='bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 transition-colors font-medium shadow-sm hover:shadow disabled:opacity-50'
-            disabled={
-              !newUser.username ||
-              !newUser.password ||
-              !!processingMap['user-add-new']
-            }
+            className='bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 transition-colors font-medium shadow-sm hover:shadow disabled:opacity-50 disabled:cursor-not-allowed'
+            disabled={!newUser.username || !isValidPassword || processing}
             onClick={() => {
-              onAction(
-                'add',
-                {
-                  targetUsername: newUser.username,
-                  targetPassword: newUser.password,
-                },
-                'new',
-              );
-              setNewUser({ username: '', password: '' });
+              if (newUser.username && isValidPassword) {
+                onAdd(newUser.username, newUser.password);
+                setNewUser({ username: '', password: '' });
+              }
             }}
+            title={!isValidPassword ? convert('密码至少需要8位') : ''}
           >
-            {processingMap['user-add-new'] ? (
+            {processing ? (
               <Loader2 className='w-4 h-4 animate-spin' />
             ) : (
               convert('添加')
             )}
           </button>
         </div>
+        {showWarning && (
+          <p className='text-xs text-red-500 pl-1'>
+            {convert('密码长度至少需要8位')}
+          </p>
+        )}
       </div>
+    </div>
+  );
+});
+
+interface UserManagementProps {
+  users: User[];
+  role: unknown;
+  onAction: (
+    key: string,
+    endpoint: string,
+    action: string,
+    payload: object,
+    uniqueId?: string,
+  ) => void;
+  convert: (s: string) => string;
+  processingMap: Record<string, boolean>;
+}
+
+function UserManagement({
+  users,
+  role,
+  onAction,
+  convert,
+  processingMap,
+}: UserManagementProps) {
+  return (
+    <div className='space-y-6 animate-in fade-in'>
+      <UserAddForm
+        convert={convert}
+        processing={!!processingMap['user-add-new']}
+        onAdd={(username, password) => {
+          onAction(
+            'user',
+            '/api/admin/user',
+            'add',
+            {
+              targetUsername: username,
+              targetPassword: password,
+            },
+            'new',
+          );
+        }}
+      />
 
       <div className='overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700'>
         <table className='min-w-full text-left'>
@@ -688,6 +768,7 @@ function UserManagement({
               <th className='p-3'>{convert('用户名')}</th>
               <th className='p-3'>{convert('角色')}</th>
               <th className='p-3'>{convert('状态')}</th>
+              <th className='p-3'>{convert('过滤')}</th>
               <th className='p-3 text-right'>{convert('操作')}</th>
             </tr>
           </thead>
@@ -718,9 +799,47 @@ function UserManagement({
                     </span>
                   )}
                 </td>
+                <td className='p-3'>
+                  {u.disableYellowFilter ? (
+                    <span className='flex items-center gap-1 text-orange-600 text-sm'>
+                      {convert('无过滤')}
+                    </span>
+                  ) : (
+                    <span className='flex items-center gap-1 text-gray-500 text-sm'>
+                      {convert('过滤中')}
+                    </span>
+                  )}
+                </td>
                 <td className='p-3 flex justify-end gap-2'>
                   {u.role !== 'owner' && (
                     <>
+                      <ActionButton
+                        icon={u.disableYellowFilter ? ShieldAlert : Shield}
+                        color={u.disableYellowFilter ? 'red' : 'green'}
+                        // Fixed: Loading key now matches the generated key format
+                        loading={
+                          !!processingMap[
+                            `user-updateUserAdultFilter-${u.username}`
+                          ]
+                        }
+                        onClick={() =>
+                          onAction(
+                            'user',
+                            '/api/admin/user',
+                            'updateUserAdultFilter',
+                            {
+                              targetUsername: u.username,
+                              disableYellowFilter: !u.disableYellowFilter,
+                            },
+                            u.username,
+                          )
+                        }
+                        title={
+                          u.disableYellowFilter
+                            ? convert('启用过滤')
+                            : convert('禁用过滤')
+                        }
+                      />
                       <ActionButton
                         icon={u.banned ? CheckCircle : Ban}
                         color={u.banned ? 'green' : 'orange'}
@@ -731,6 +850,8 @@ function UserManagement({
                         }
                         onClick={() =>
                           onAction(
+                            'user',
+                            '/api/admin/user',
                             u.banned ? 'unban' : 'ban',
                             { targetUsername: u.username },
                             u.username,
@@ -748,6 +869,8 @@ function UserManagement({
                         }
                         onClick={() =>
                           onAction(
+                            'user',
+                            '/api/admin/user',
                             u.role === 'admin' ? 'cancelAdmin' : 'setAdmin',
                             { targetUsername: u.username },
                             u.username,
@@ -767,6 +890,8 @@ function UserManagement({
                         }
                         onClick={() =>
                           onAction(
+                            'user',
+                            '/api/admin/user',
                             'deleteUser',
                             { targetUsername: u.username },
                             u.username,
@@ -786,9 +911,72 @@ function UserManagement({
   );
 }
 
+// --- Sub-component: Source Add Form ---
+const SourceAddForm = memo(function SourceAddForm({
+  onAdd,
+  processing,
+  convert,
+}: {
+  onAdd: (s: { key: string; name: string; api: string }) => void;
+  processing: boolean;
+  convert: (s: string) => string;
+}) {
+  const [newSource, setNewSource] = useState({ key: '', name: '', api: '' });
+
+  return (
+    <div className='border dark:border-gray-700 p-5 rounded-xl bg-gray-50/50 dark:bg-gray-700/30'>
+      <h3 className='font-semibold mb-4 text-gray-800 dark:text-white flex items-center gap-2'>
+        <Plus className='w-4 h-4' /> {convert('添加采集源')}
+      </h3>
+      <div className='grid grid-cols-1 md:grid-cols-4 gap-4'>
+        <input
+          placeholder={convert('Key (唯一标识)')}
+          className='border p-2 rounded-lg dark:bg-gray-800 dark:border-gray-600 dark:text-white'
+          value={newSource.key}
+          onChange={(e) => setNewSource({ ...newSource, key: e.target.value })}
+        />
+        <input
+          placeholder={convert('名称')}
+          className='border p-2 rounded-lg dark:bg-gray-800 dark:border-gray-600 dark:text-white'
+          value={newSource.name}
+          onChange={(e) => setNewSource({ ...newSource, name: e.target.value })}
+        />
+        <input
+          placeholder={convert('API 地址')}
+          className='col-span-1 md:col-span-2 border p-2 rounded-lg dark:bg-gray-800 dark:border-gray-600 dark:text-white'
+          value={newSource.api}
+          onChange={(e) => setNewSource({ ...newSource, api: e.target.value })}
+        />
+      </div>
+      <div className='mt-4 flex justify-end'>
+        <button
+          className='bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50'
+          disabled={!newSource.key || !newSource.name || processing}
+          onClick={() => {
+            onAdd(newSource);
+            setNewSource({ key: '', name: '', api: '' });
+          }}
+        >
+          {processing ? (
+            <Loader2 className='w-4 h-4 animate-spin' />
+          ) : (
+            convert('添加')
+          )}
+        </button>
+      </div>
+    </div>
+  );
+});
+
 interface SourceManagementProps {
   sources: ApiSite[];
-  onAction: (action: string, payload: object, uniqueId?: string) => void;
+  onAction: (
+    key: string,
+    endpoint: string,
+    action: string,
+    payload: object,
+    uniqueId?: string,
+  ) => void;
   convert: (s: string) => string;
   processingMap: Record<string, boolean>;
 }
@@ -799,61 +987,15 @@ function SourceManagement({
   convert,
   processingMap,
 }: SourceManagementProps) {
-  const [newSource, setNewSource] = useState({ key: '', name: '', api: '' });
-
   return (
     <div className='space-y-6'>
-      <div className='border dark:border-gray-700 p-5 rounded-xl bg-gray-50/50 dark:bg-gray-700/30'>
-        <h3 className='font-semibold mb-4 text-gray-800 dark:text-white flex items-center gap-2'>
-          <Plus className='w-4 h-4' /> {convert('添加采集源')}
-        </h3>
-        <div className='grid grid-cols-1 md:grid-cols-4 gap-4'>
-          <input
-            placeholder={convert('Key (唯一标识)')}
-            className='border p-2 rounded-lg dark:bg-gray-800 dark:border-gray-600 dark:text-white'
-            value={newSource.key}
-            onChange={(e) =>
-              setNewSource({ ...newSource, key: e.target.value })
-            }
-          />
-          <input
-            placeholder={convert('名称')}
-            className='border p-2 rounded-lg dark:bg-gray-800 dark:border-gray-600 dark:text-white'
-            value={newSource.name}
-            onChange={(e) =>
-              setNewSource({ ...newSource, name: e.target.value })
-            }
-          />
-          <input
-            placeholder={convert('API 地址')}
-            className='col-span-1 md:col-span-2 border p-2 rounded-lg dark:bg-gray-800 dark:border-gray-600 dark:text-white'
-            value={newSource.api}
-            onChange={(e) =>
-              setNewSource({ ...newSource, api: e.target.value })
-            }
-          />
-        </div>
-        <div className='mt-4 flex justify-end'>
-          <button
-            className='bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50'
-            disabled={
-              !newSource.key ||
-              !newSource.name ||
-              !!processingMap['source-add-new']
-            }
-            onClick={() => {
-              onAction('add', newSource, 'new');
-              setNewSource({ key: '', name: '', api: '' });
-            }}
-          >
-            {processingMap['source-add-new'] ? (
-              <Loader2 className='w-4 h-4 animate-spin' />
-            ) : (
-              convert('添加')
-            )}
-          </button>
-        </div>
-      </div>
+      <SourceAddForm
+        convert={convert}
+        processing={!!processingMap['source-add-new']}
+        onAdd={(data) => {
+          onAction('source', '/api/admin/source', 'add', data, 'new');
+        }}
+      />
 
       <div className='overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700'>
         <table className='min-w-full text-left'>
@@ -897,6 +1039,8 @@ function SourceManagement({
                     }
                     onClick={() =>
                       onAction(
+                        'source',
+                        '/api/admin/source',
                         s.disabled ? 'enable' : 'disable',
                         { key: s.key },
                         s.key,
@@ -908,7 +1052,15 @@ function SourceManagement({
                     icon={Trash2}
                     color='red'
                     loading={!!processingMap[`source-delete-${s.key}`]}
-                    onClick={() => onAction('delete', { key: s.key }, s.key)}
+                    onClick={() =>
+                      onAction(
+                        'source',
+                        '/api/admin/source',
+                        'delete',
+                        { key: s.key },
+                        s.key,
+                      )
+                    }
                     title={convert('删除')}
                   />
                 </td>
@@ -921,9 +1073,72 @@ function SourceManagement({
   );
 }
 
+// --- Sub-component: Live Add Form ---
+const LiveAddForm = memo(function LiveAddForm({
+  onAdd,
+  processing,
+  convert,
+}: {
+  onAdd: (l: { key: string; name: string; url: string }) => void;
+  processing: boolean;
+  convert: (s: string) => string;
+}) {
+  const [newLive, setNewLive] = useState({ key: '', name: '', url: '' });
+
+  return (
+    <div className='border dark:border-gray-700 p-5 rounded-xl bg-gray-50/50 dark:bg-gray-700/30'>
+      <h3 className='font-semibold mb-4 text-gray-800 dark:text-white flex items-center gap-2'>
+        <Plus className='w-4 h-4' /> {convert('添加直播源')}
+      </h3>
+      <div className='grid grid-cols-1 md:grid-cols-3 gap-4'>
+        <input
+          placeholder={convert('Key')}
+          className='border p-2 rounded-lg dark:bg-gray-800 dark:border-gray-600 dark:text-white'
+          value={newLive.key}
+          onChange={(e) => setNewLive({ ...newLive, key: e.target.value })}
+        />
+        <input
+          placeholder={convert('名称')}
+          className='border p-2 rounded-lg dark:bg-gray-800 dark:border-gray-600 dark:text-white'
+          value={newLive.name}
+          onChange={(e) => setNewLive({ ...newLive, name: e.target.value })}
+        />
+        <input
+          placeholder={convert('M3U8 URL')}
+          className='border p-2 rounded-lg dark:bg-gray-800 dark:border-gray-600 dark:text-white'
+          value={newLive.url}
+          onChange={(e) => setNewLive({ ...newLive, url: e.target.value })}
+        />
+      </div>
+      <div className='mt-4 flex justify-end'>
+        <button
+          className='bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50'
+          onClick={() => {
+            onAdd(newLive);
+            setNewLive({ key: '', name: '', url: '' });
+          }}
+          disabled={!newLive.key || processing}
+        >
+          {processing ? (
+            <Loader2 className='w-4 h-4 animate-spin' />
+          ) : (
+            convert('添加')
+          )}
+        </button>
+      </div>
+    </div>
+  );
+});
+
 interface LiveManagementProps {
   lives: LiveCfg[];
-  onAction: (action: string, payload: object, uniqueId?: string) => void;
+  onAction: (
+    key: string,
+    endpoint: string,
+    action: string,
+    payload: object,
+    uniqueId?: string,
+  ) => void;
   onRefresh: () => void;
   isRefreshing: boolean;
   convert: (s: string) => string;
@@ -938,8 +1153,6 @@ function LiveManagement({
   convert,
   processingMap,
 }: LiveManagementProps) {
-  const [newLive, setNewLive] = useState({ key: '', name: '', url: '' });
-
   return (
     <div className='space-y-6'>
       <div className='flex justify-between items-center'>
@@ -960,47 +1173,13 @@ function LiveManagement({
         </button>
       </div>
 
-      <div className='border dark:border-gray-700 p-5 rounded-xl bg-gray-50/50 dark:bg-gray-700/30'>
-        <h3 className='font-semibold mb-4 text-gray-800 dark:text-white flex items-center gap-2'>
-          <Plus className='w-4 h-4' /> {convert('添加直播源')}
-        </h3>
-        <div className='grid grid-cols-1 md:grid-cols-3 gap-4'>
-          <input
-            placeholder={convert('Key')}
-            className='border p-2 rounded-lg dark:bg-gray-800 dark:border-gray-600 dark:text-white'
-            value={newLive.key}
-            onChange={(e) => setNewLive({ ...newLive, key: e.target.value })}
-          />
-          <input
-            placeholder={convert('名称')}
-            className='border p-2 rounded-lg dark:bg-gray-800 dark:border-gray-600 dark:text-white'
-            value={newLive.name}
-            onChange={(e) => setNewLive({ ...newLive, name: e.target.value })}
-          />
-          <input
-            placeholder={convert('M3U8 URL')}
-            className='border p-2 rounded-lg dark:bg-gray-800 dark:border-gray-600 dark:text-white'
-            value={newLive.url}
-            onChange={(e) => setNewLive({ ...newLive, url: e.target.value })}
-          />
-        </div>
-        <div className='mt-4 flex justify-end'>
-          <button
-            className='bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50'
-            onClick={() => {
-              onAction('add', newLive, 'new');
-              setNewLive({ key: '', name: '', url: '' });
-            }}
-            disabled={!newLive.key || !!processingMap['live-add-new']}
-          >
-            {processingMap['live-add-new'] ? (
-              <Loader2 className='w-4 h-4 animate-spin' />
-            ) : (
-              convert('添加')
-            )}
-          </button>
-        </div>
-      </div>
+      <LiveAddForm
+        convert={convert}
+        processing={!!processingMap['live-add-new']}
+        onAdd={(data) => {
+          onAction('live', '/api/admin/live', 'add', data, 'new');
+        }}
+      />
 
       <div className='overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700'>
         <table className='min-w-full text-left'>
@@ -1042,6 +1221,8 @@ function LiveManagement({
                     }
                     onClick={() =>
                       onAction(
+                        'live',
+                        '/api/admin/live',
                         l.disabled ? 'enable' : 'disable',
                         { key: l.key },
                         l.key,
@@ -1054,7 +1235,15 @@ function LiveManagement({
                       icon={Trash2}
                       color='red'
                       loading={!!processingMap[`live-delete-${l.key}`]}
-                      onClick={() => onAction('delete', { key: l.key }, l.key)}
+                      onClick={() =>
+                        onAction(
+                          'live',
+                          '/api/admin/live',
+                          'delete',
+                          { key: l.key },
+                          l.key,
+                        )
+                      }
                       title={convert('删除')}
                     />
                   )}
@@ -1068,9 +1257,80 @@ function LiveManagement({
   );
 }
 
+// --- Sub-component: Category Add Form ---
+const CategoryAddForm = memo(function CategoryAddForm({
+  onAdd,
+  processing,
+  convert,
+}: {
+  onAdd: (c: { name: string; type: 'movie' | 'tv'; query: string }) => void;
+  processing: boolean;
+  convert: (s: string) => string;
+}) {
+  const [newCat, setNewCat] = useState<{
+    name: string;
+    type: 'movie' | 'tv';
+    query: string;
+  }>({ name: '', type: 'movie', query: '' });
+
+  return (
+    <div className='border dark:border-gray-700 p-5 rounded-xl bg-gray-50/50 dark:bg-gray-700/30'>
+      <h3 className='font-semibold mb-4 text-gray-800 dark:text-white flex items-center gap-2'>
+        <Plus className='w-4 h-4' /> {convert('添加分类')}
+      </h3>
+      <div className='grid grid-cols-1 md:grid-cols-3 gap-4'>
+        <input
+          placeholder={convert('名称')}
+          className='border p-2 rounded-lg dark:bg-gray-800 dark:border-gray-600 dark:text-white'
+          value={newCat.name}
+          onChange={(e) => setNewCat({ ...newCat, name: e.target.value })}
+        />
+        <select
+          className='border p-2 rounded-lg dark:bg-gray-800 dark:border-gray-600 dark:text-white'
+          value={newCat.type}
+          onChange={(e) =>
+            setNewCat({ ...newCat, type: e.target.value as 'movie' | 'tv' })
+          }
+        >
+          <option value='movie'>{convert('电影')}</option>
+          <option value='tv'>{convert('剧集')}</option>
+        </select>
+        <input
+          placeholder={convert('查询关键词')}
+          className='border p-2 rounded-lg dark:bg-gray-800 dark:border-gray-600 dark:text-white'
+          value={newCat.query}
+          onChange={(e) => setNewCat({ ...newCat, query: e.target.value })}
+        />
+      </div>
+      <div className='mt-4 flex justify-end'>
+        <button
+          className='bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50'
+          onClick={() => {
+            onAdd(newCat);
+            setNewCat({ name: '', type: 'movie', query: '' });
+          }}
+          disabled={!newCat.name || !newCat.query || processing}
+        >
+          {processing ? (
+            <Loader2 className='w-4 h-4 animate-spin' />
+          ) : (
+            convert('添加')
+          )}
+        </button>
+      </div>
+    </div>
+  );
+});
+
 interface CategoryManagementProps {
   categories: CustomCategory[];
-  onAction: (action: string, payload: object, uniqueId?: string) => void;
+  onAction: (
+    key: string,
+    endpoint: string,
+    action: string,
+    payload: object,
+    uniqueId?: string,
+  ) => void;
   convert: (s: string) => string;
   processingMap: Record<string, boolean>;
 }
@@ -1081,63 +1341,15 @@ function CategoryManagement({
   convert,
   processingMap,
 }: CategoryManagementProps) {
-  const [newCat, setNewCat] = useState<{
-    name: string;
-    type: 'movie' | 'tv';
-    query: string;
-  }>({ name: '', type: 'movie', query: '' });
-
   return (
     <div className='space-y-6'>
-      <div className='border dark:border-gray-700 p-5 rounded-xl bg-gray-50/50 dark:bg-gray-700/30'>
-        <h3 className='font-semibold mb-4 text-gray-800 dark:text-white flex items-center gap-2'>
-          <Plus className='w-4 h-4' /> {convert('添加分类')}
-        </h3>
-        <div className='grid grid-cols-1 md:grid-cols-3 gap-4'>
-          <input
-            placeholder={convert('名称')}
-            className='border p-2 rounded-lg dark:bg-gray-800 dark:border-gray-600 dark:text-white'
-            value={newCat.name}
-            onChange={(e) => setNewCat({ ...newCat, name: e.target.value })}
-          />
-          <select
-            className='border p-2 rounded-lg dark:bg-gray-800 dark:border-gray-600 dark:text-white'
-            value={newCat.type}
-            onChange={(e) =>
-              setNewCat({ ...newCat, type: e.target.value as 'movie' | 'tv' })
-            }
-          >
-            <option value='movie'>{convert('电影')}</option>
-            <option value='tv'>{convert('剧集')}</option>
-          </select>
-          <input
-            placeholder={convert('查询关键词')}
-            className='border p-2 rounded-lg dark:bg-gray-800 dark:border-gray-600 dark:text-white'
-            value={newCat.query}
-            onChange={(e) => setNewCat({ ...newCat, query: e.target.value })}
-          />
-        </div>
-        <div className='mt-4 flex justify-end'>
-          <button
-            className='bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50'
-            onClick={() => {
-              onAction('add', newCat, 'new');
-              setNewCat({ name: '', type: 'movie', query: '' });
-            }}
-            disabled={
-              !newCat.name ||
-              !newCat.query ||
-              !!processingMap['category-add-new']
-            }
-          >
-            {processingMap['category-add-new'] ? (
-              <Loader2 className='w-4 h-4 animate-spin' />
-            ) : (
-              convert('添加')
-            )}
-          </button>
-        </div>
-      </div>
+      <CategoryAddForm
+        convert={convert}
+        processing={!!processingMap['category-add-new']}
+        onAdd={(data) => {
+          onAction('category', '/api/admin/category', 'add', data, 'new');
+        }}
+      />
 
       <div className='overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700'>
         <table className='min-w-full text-left'>
@@ -1168,6 +1380,8 @@ function CategoryManagement({
                       loading={!!processingMap[`category-delete-${c.query}`]}
                       onClick={() =>
                         onAction(
+                          'category',
+                          '/api/admin/category',
                           'delete',
                           { query: c.query, type: c.type },
                           c.query,
@@ -1187,7 +1401,7 @@ function CategoryManagement({
 }
 
 interface SubscribeManagementProps {
-  configSubscribtion: AdminConfig['ConfigSubscribtion'];
+  configSubscription: AdminConfig['ConfigSubscription'];
   setConfig: Dispatch<SetStateAction<AdminConfig | null>>;
   onSave: () => void;
   processing: boolean;
@@ -1195,7 +1409,7 @@ interface SubscribeManagementProps {
 }
 
 function SubscribeManagement({
-  configSubscribtion,
+  configSubscription,
   setConfig,
   onSave,
   processing,
@@ -1206,7 +1420,7 @@ function SubscribeManagement({
       prev
         ? {
             ...prev,
-            ConfigSubscribtion: { ...prev.ConfigSubscribtion, [key]: value },
+            ConfigSubscription: { ...prev.ConfigSubscription, [key]: value },
           }
         : null,
     );
@@ -1224,7 +1438,7 @@ function SubscribeManagement({
       <div className='grid grid-cols-1 gap-6'>
         <FormInput
           label={convert('订阅 URL')}
-          value={configSubscribtion?.URL}
+          value={configSubscription?.URL}
           onChange={(v) => handleChange('URL', v)}
           placeholder='https://example.com/config.json'
         />
@@ -1239,7 +1453,7 @@ function SubscribeManagement({
             </span>
           </div>
           <Toggle
-            checked={configSubscribtion?.AutoUpdate}
+            checked={configSubscription?.AutoUpdate}
             onChange={(v) => handleChange('AutoUpdate', v)}
           />
         </div>
@@ -1249,7 +1463,7 @@ function SubscribeManagement({
             {convert('上次检查时间')}
           </label>
           <div className='text-gray-900 dark:text-white font-mono'>
-            {configSubscribtion?.LastCheck || 'N/A'}
+            {configSubscription?.LastCheck || 'N/A'}
           </div>
         </div>
       </div>

@@ -3,6 +3,7 @@ export interface AuthInfo {
   role?: 'owner' | 'admin' | 'user';
   timestamp?: number;
   signature?: string; // only present in server cookie
+  disableYellowFilter?: boolean;
 }
 
 // Valid roles set for runtime validation

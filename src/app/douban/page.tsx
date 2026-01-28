@@ -199,6 +199,7 @@ function DoubanPageClient() {
 
     let newPrimary = '';
     let newSecondary = '全部';
+    let newWeekday = '';
 
     if (type === 'custom' && customCategories.length > 0) {
       const types = Array.from(
@@ -212,7 +213,13 @@ function DoubanPageClient() {
       );
       if (firstCat) newSecondary = firstCat.query;
     } else {
-      if (type === 'movie') {
+      if (type === 'anime') {
+        newPrimary = '每日放送';
+        newSecondary = '全部';
+        const today = new Date().getDay();
+        const weekdayMap = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        newWeekday = weekdayMap[today];
+      } else if (type === 'movie') {
         newPrimary = '热门';
         newSecondary = '全部';
       } else if (type === 'tv') {
@@ -221,16 +228,13 @@ function DoubanPageClient() {
       } else if (type === 'show') {
         newPrimary = '最近热门';
         newSecondary = 'show';
-      } else if (type === 'anime') {
-        newPrimary = '每日放送';
-        newSecondary = '全部';
       }
     }
 
     setFilters({
       primary: newPrimary,
       secondary: newSecondary,
-      weekday: '',
+      weekday: newWeekday,
       multiLevel: {
         type: 'all',
         region: 'all',

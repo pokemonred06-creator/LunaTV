@@ -60,6 +60,47 @@ function removeSourcePermissions(config: AdminConfig, sourceKey: string) {
 
 // --- Main Handler ---
 
+// --- Main Handler ---
+
+export async function GET(request: NextRequest) {
+  try {
+    const authInfo = await getAuthInfoFromCookie(request);
+    if (!authInfo || !authInfo.username) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const config = await getConfig();
+
+    // Authorization: Owner or Admin
+    let isWriter = false;
+    if (authInfo.username === process.env.USERNAME) {
+      isWriter = true;
+    } else {
+      const user = config.UserConfig.Users.find(
+        (u) => u.username === authInfo.username,
+      );
+      if (
+        user &&
+        (user.role === 'owner' || user.role === 'admin') &&
+        !user.banned
+      ) {
+        isWriter = true;
+      }
+    }
+
+    if (!isWriter) {
+      return NextResponse.json({ error: '权限不足' }, { status: 403 });
+    }
+
+    return NextResponse.json(config.SourceConfig, {
+      headers: { 'Cache-Control': 'no-store' },
+    });
+  } catch (error) {
+    console.error('[API] Get Sources Error:', error);
+    return NextResponse.json({ error: '获取源列表失败' }, { status: 500 });
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body: SourcePayload = await request.json();

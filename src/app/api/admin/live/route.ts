@@ -9,6 +9,44 @@ import { deleteCachedLiveChannels, refreshLiveChannels } from '@/lib/live';
 
 export const runtime = 'nodejs';
 
+export async function GET(request: NextRequest) {
+  try {
+    const authInfo = await getAuthInfoFromCookie(request);
+    if (!authInfo || !authInfo.username) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const config = await getConfig();
+
+    // Auth Check
+    let isPrivileged = false;
+    if (authInfo.username === process.env.USERNAME) {
+      isPrivileged = true;
+    } else {
+      const user = config.UserConfig.Users.find(
+        (u) => u.username === authInfo.username,
+      );
+      if (
+        user &&
+        (user.role === 'owner' || user.role === 'admin') &&
+        !user.banned
+      ) {
+        isPrivileged = true;
+      }
+    }
+
+    if (!isPrivileged) {
+      return NextResponse.json({ error: '权限不足' }, { status: 403 });
+    }
+
+    return NextResponse.json(config.LiveConfig || [], {
+      headers: { 'Cache-Control': 'no-store' },
+    });
+  } catch (error) {
+    return NextResponse.json({ error: '获取直播源失败' }, { status: 500 });
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     // 权限检查
