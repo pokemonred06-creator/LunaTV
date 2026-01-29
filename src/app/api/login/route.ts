@@ -148,6 +148,7 @@ export async function POST(req: NextRequest) {
           JSON.stringify({
             username: 'admin',
             role: 'owner',
+            disableYellowFilter: true, // Owner always exempt
           }),
         ),
         {
@@ -221,6 +222,7 @@ export async function POST(req: NextRequest) {
           JSON.stringify({
             username: lowerUsername,
             role: 'owner',
+            disableYellowFilter: true, // Owner always exempt
           }),
         ),
         {

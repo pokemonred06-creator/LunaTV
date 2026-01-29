@@ -551,10 +551,40 @@ export async function POST(request: NextRequest) {
       await db.saveAdminConfig(adminConfig);
     }
 
-    return NextResponse.json(
+    const response = NextResponse.json(
       { ok: true },
       { headers: { 'Cache-Control': 'no-store' } },
     );
+
+    // If user modified themselves, update the client-side cookie immediately
+    if (username === targetUsername && action === 'updateUserAdultFilter') {
+      const updatedUser = adminConfig.UserConfig.Users.find(
+        (u) => u.username === username,
+      );
+      if (updatedUser) {
+        response.cookies.set(
+          'auth-user',
+          encodeURIComponent(
+            JSON.stringify({
+              username: updatedUser.username,
+              role: updatedUser.role,
+              disableYellowFilter: updatedUser.disableYellowFilter,
+            }),
+          ),
+          {
+            path: '/',
+            expires: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
+            sameSite: 'lax',
+            httpOnly: false,
+            secure:
+              process.env.NODE_ENV === 'production' &&
+              process.env.DISABLE_SECURE_COOKIES !== 'true',
+          },
+        );
+      }
+    }
+
+    return response;
   } catch (error) {
     console.error('User management operation failed:', error);
     return NextResponse.json(

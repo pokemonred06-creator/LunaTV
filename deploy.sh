@@ -1,6 +1,7 @@
-#!/bin/bash
 
 # Configuration
+set -e
+
 TARGET="synology"
 REMOTE_DIR="/volume5/docker"
 IMAGE_TAR="lunatv_custom.tar"

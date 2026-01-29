@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import * as OpenCC from 'opencc-js';
 
 import { getAuthInfoFromCookie } from '@/lib/auth/server';
@@ -10,193 +10,214 @@ import { yellowWords } from '@/lib/yellow';
 
 export const runtime = 'nodejs';
 
+// --- HELPERS ---
+
+const normalize = (s: string) =>
+  (s || '').toLowerCase().replace(/[^\u4e00-\u9fa5a-zA-Z0-9]+/g, '');
+
+const NORMALIZED_BLOCKLIST = yellowWords
+  .map((w) => normalize(String(w)))
+  .filter((w) => w.length > 0);
+
+const OPENCC_CONVERTER = OpenCC.Converter({ from: 'hk', to: 'cn' });
+
+// Abort-aware timeout wrapper
+// Rejects immediately if signal aborts, preventing hanging promises
+const withTimeout = <T>(
+  promise: Promise<T>,
+  ms: number,
+  signal?: AbortSignal,
+): Promise<T> => {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(new Error('aborted'));
+
+    const timer = setTimeout(() => reject(new Error('timeout')), ms);
+
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new Error('aborted'));
+    };
+
+    if (signal) signal.addEventListener('abort', onAbort, { once: true });
+
+    promise.then(
+      (val) => {
+        clearTimeout(timer);
+        if (signal) signal.removeEventListener('abort', onAbort);
+        resolve(val);
+      },
+      (err) => {
+        clearTimeout(timer);
+        if (signal) signal.removeEventListener('abort', onAbort);
+        reject(err);
+      },
+    );
+  });
+};
+
 export async function GET(request: NextRequest) {
   const authInfo = await getAuthInfoFromCookie(request);
   if (!authInfo || !authInfo.username) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    return new Response('Unauthorized', { status: 401 });
   }
 
   const { searchParams } = new URL(request.url);
-  let query = searchParams.get('q');
+  const rawQuery = searchParams.get('q');
+  const query = typeof rawQuery === 'string' ? rawQuery.trim() : '';
 
-  if (query) {
-    try {
-      const converter = OpenCC.Converter({ from: 'hk', to: 'cn' });
-      query = converter(query);
-    } catch (e) {
-      console.error('Conversion error:', e);
+  if (!query || query.length > 200) {
+    return new Response('Invalid query', { status: 400 });
+  }
+
+  const convertedQuery = OPENCC_CONVERTER(query);
+  const config = await getConfig();
+
+  let applyFilter = !config.SiteConfig?.DisableYellowFilter;
+  const OWNER_USERNAME = process.env.USERNAME;
+  const isOwner = !!OWNER_USERNAME && authInfo.username === OWNER_USERNAME;
+
+  if (applyFilter) {
+    if (isOwner) {
+      applyFilter = false;
+    } else {
+      const users = config.UserConfig?.Users ?? [];
+      const user = users.find((u) => u.username === authInfo.username);
+      if (user?.disableYellowFilter) applyFilter = false;
     }
   }
 
-  if (!query) {
-    return new Response(JSON.stringify({ error: '搜索关键词不能为空' }), {
-      status: 400,
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
-  }
+  const encoder = new TextEncoder();
+  const signal = request.signal;
 
-  const config = await getConfig();
-  const apiSites = await getAvailableApiSites(authInfo.username);
-
-  // 共享状态
-  let streamClosed = false;
-
-  // 创建可读流
   const stream = new ReadableStream({
     async start(controller) {
-      const encoder = new TextEncoder();
+      let isStreamClosed = false;
 
-      // 辅助函数：安全地向控制器写入数据
-      const safeEnqueue = (data: Uint8Array) => {
-        try {
-          if (
-            streamClosed ||
-            (!controller.desiredSize && controller.desiredSize !== 0)
-          ) {
-            // 流已标记为关闭或控制器已关闭
-            return false;
+      // Safe close logic: set flag, then close
+      const safeClose = () => {
+        if (!isStreamClosed) {
+          isStreamClosed = true;
+          try {
+            controller.close();
+          } catch {
+            /* ignore */
           }
-          controller.enqueue(data);
-          return true;
-        } catch (error) {
-          // 控制器已关闭或出现其他错误
-          console.warn('Failed to enqueue data:', error);
-          streamClosed = true;
-          return false;
         }
       };
 
-      // 发送开始事件
-      const startEvent = `data: ${JSON.stringify({
-        type: 'start',
-        query,
-        totalSources: apiSites.length,
-        timestamp: Date.now(),
-      })}\n\n`;
+      const send = (data: any) => {
+        if (isStreamClosed || signal.aborted) return;
+        try {
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify(data)}\n\n`),
+          );
+        } catch (e) {
+          isStreamClosed = true;
+          safeClose();
+        }
+      };
 
-      if (!safeEnqueue(encoder.encode(startEvent))) {
-        return; // 连接已关闭，提前退出
+      // Correctly close stream on client disconnect
+      signal.addEventListener(
+        'abort',
+        () => {
+          safeClose();
+        },
+        { once: true },
+      );
+
+      // Send Ping to flush buffers
+      if (!isStreamClosed && !signal.aborted) {
+        try {
+          controller.enqueue(encoder.encode(':ok\n\n'));
+        } catch {
+          safeClose();
+          return;
+        }
       }
 
-      // 记录已完成的源数量
-      let completedSources = 0;
-      const allResults: any[] = [];
+      // 1. PRE-FLIGHT BLOCK CHECK
+      if (applyFilter) {
+        const normalizedQuery = normalize(convertedQuery);
+        const isRestricted = NORMALIZED_BLOCKLIST.some((word) =>
+          normalizedQuery.includes(word),
+        );
 
-      // 为每个源创建搜索 Promise
-      const searchPromises = apiSites.map(async (site) => {
+        if (isRestricted) {
+          if (process.env.NODE_ENV !== 'production') {
+            console.log('[SSE] Blocked query:', query);
+          }
+          send({ type: 'blocked' });
+          safeClose();
+          return;
+        }
+      }
+
+      if (signal.aborted) {
+        safeClose();
+        return;
+      }
+
+      const rawApiSites = await getAvailableApiSites(authInfo.username);
+      const apiSites = rawApiSites.slice(0, 20);
+
+      send({ type: 'start', totalSources: apiSites.length });
+
+      let completedCount = 0;
+
+      const promises = apiSites.map(async (site) => {
+        if (signal.aborted) return;
+
         try {
-          // 添加超时控制
-          const searchPromise = Promise.race([
-            searchFromApi(site, query as string),
-            new Promise((_, reject) =>
-              setTimeout(
-                () => reject(new Error(`${site.name} timeout`)),
-                20000,
-              ),
-            ),
-          ]);
+          // Pass signal to downstream fetch for true cancellation
+          const results = await withTimeout(
+            searchFromApi(site, convertedQuery, { signal }),
+            20000,
+            signal,
+          );
 
-          const results = (await searchPromise) as any[];
-
-          // 过滤黄色内容
-          let filteredResults = results;
-          if (!config.SiteConfig.DisableYellowFilter) {
-            filteredResults = results.filter((result) => {
-              const typeName = result.type_name || '';
-              return !yellowWords.some((word: string) =>
-                typeName.includes(word),
+          let safeResults = results;
+          if (applyFilter) {
+            safeResults = results.filter((item: any) => {
+              const typeName = normalize(item.type_name);
+              const name = normalize(item.title);
+              return (
+                !NORMALIZED_BLOCKLIST.some((w) => typeName.includes(w)) &&
+                !NORMALIZED_BLOCKLIST.some((w) => name.includes(w))
               );
             });
           }
 
-          // 发送该源的搜索结果
-          completedSources++;
-
-          if (!streamClosed) {
-            const sourceEvent = `data: ${JSON.stringify({
-              type: 'source_result',
-              source: site.key,
-              sourceName: site.name,
-              results: filteredResults,
-              timestamp: Date.now(),
-            })}\n\n`;
-
-            if (!safeEnqueue(encoder.encode(sourceEvent))) {
-              streamClosed = true;
-              return; // 连接已关闭，停止处理
-            }
-          }
-
-          if (filteredResults.length > 0) {
-            allResults.push(...filteredResults);
-          }
-        } catch (error) {
-          console.warn(`搜索失败 ${site.name}:`, error);
-
-          // 发送源错误事件
-          completedSources++;
-
-          if (!streamClosed) {
-            const errorEvent = `data: ${JSON.stringify({
-              type: 'source_error',
-              source: site.key,
-              sourceName: site.name,
-              error: error instanceof Error ? error.message : '搜索失败',
-              timestamp: Date.now(),
-            })}\n\n`;
-
-            if (!safeEnqueue(encoder.encode(errorEvent))) {
-              streamClosed = true;
-              return; // 连接已关闭，停止处理
-            }
-          }
-        }
-
-        // 检查是否所有源都已完成
-        if (completedSources === apiSites.length) {
-          if (!streamClosed) {
-            // 发送最终完成事件
-            const completeEvent = `data: ${JSON.stringify({
-              type: 'complete',
-              totalResults: allResults.length,
-              completedSources,
-              timestamp: Date.now(),
-            })}\n\n`;
-
-            if (safeEnqueue(encoder.encode(completeEvent))) {
-              // 只有在成功发送完成事件后才关闭流
-              try {
-                controller.close();
-              } catch (error) {
-                console.warn('Failed to close controller:', error);
-              }
-            }
-          }
+          send({
+            type: 'source_result',
+            source: site.name,
+            results: safeResults,
+          });
+        } catch (err) {
+          send({ type: 'source_error', source: site.name });
+        } finally {
+          completedCount++;
         }
       });
 
-      // 等待所有搜索完成
-      await Promise.allSettled(searchPromises);
-    },
+      await Promise.allSettled(promises);
 
-    cancel() {
-      // 客户端断开连接时，标记流已关闭
-      streamClosed = true;
-      console.log('Client disconnected, cancelling search stream');
+      if (!signal.aborted) {
+        send({ type: 'complete', completedSources: completedCount });
+        safeClose();
+      }
     },
   });
 
-  // 返回流式响应
   return new Response(stream, {
     headers: {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control':
+        'private, no-cache, no-store, must-revalidate, no-transform',
+      Pragma: 'no-cache',
+      Expires: '0',
       Connection: 'keep-alive',
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET',
-      'Access-Control-Allow-Headers': 'Content-Type',
+      'X-Accel-Buffering': 'no', // Critical for Nginx
     },
   });
 }
