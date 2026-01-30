@@ -3,7 +3,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAuthInfoFromCookie } from '@/lib/auth/server';
 import { getAvailableApiSites, getConfig } from '@/lib/config'; // Modified import
 import { searchFromApi } from '@/lib/downstream';
-import { shouldFilterItem } from '@/lib/yellow-filter';
+import {
+  converter as OPENCC_CONVERTER,
+  shouldFilterItem,
+} from '@/lib/yellow-filter';
 
 export const runtime = 'nodejs';
 
@@ -15,7 +18,8 @@ export async function GET(request: NextRequest) {
   }
 
   const { searchParams } = new URL(request.url);
-  const query = searchParams.get('q');
+  const rawQuery = searchParams.get('q');
+  const query = rawQuery ? OPENCC_CONVERTER(rawQuery) : '';
   const resourceId = searchParams.get('resourceId');
 
   const config = await getConfig(); // Get config early

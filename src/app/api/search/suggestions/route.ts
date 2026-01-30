@@ -6,7 +6,11 @@ import { AdminConfig } from '@/lib/admin.types';
 import { getAuthInfoFromCookie } from '@/lib/auth/server';
 import { getAvailableApiSites, getConfig } from '@/lib/config';
 import { searchFromApi } from '@/lib/downstream';
-import { shouldFilterItem } from '@/lib/yellow-filter';
+import {
+  converter as OPENCC_CONVERTER,
+  isBlocked,
+  shouldFilterItem,
+} from '@/lib/yellow-filter';
 
 export const runtime = 'nodejs';
 
@@ -26,13 +30,31 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ suggestions: [] });
     }
 
-    // Convert Traditional to Simplified Chinese
-    const query = rawQuery;
+    // Convert Traditional to Simplified Chinese for best search results
+    const query = OPENCC_CONVERTER(rawQuery);
+
+    let applyFilter = !config.SiteConfig?.DisableYellowFilter;
+    const OWNER_USERNAME = process.env.USERNAME;
+    const isOwner = !!OWNER_USERNAME && authInfo.username === OWNER_USERNAME;
+
+    if (applyFilter) {
+      if (isOwner) {
+        applyFilter = false;
+      } else {
+        const users = config.UserConfig?.Users ?? [];
+        const user = users.find((u) => u.username === authInfo.username);
+        if (user?.disableYellowFilter) applyFilter = false;
+      }
+    }
+
+    if (applyFilter && isBlocked(query)) {
+      return NextResponse.json({ suggestions: [] });
+    }
 
     // 生成建议
     const suggestions = await generateSuggestions(
       config,
-      query as string,
+      query,
       authInfo.username,
     );
 
