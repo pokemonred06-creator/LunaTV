@@ -1,11 +1,16 @@
 'use client';
 
-import { createContext, ReactNode, useCallback,useContext, useEffect, useState } from 'react';
+import {
+  createContext,
+  ReactNode,
+  useCallback,
+  useContext,
+  useEffect,
+  useState,
+} from 'react';
 
-import type { Season } from './SeasonalEffects';
+import type { Intensity, Season } from './SeasonalEffects';
 import SeasonalEffects from './SeasonalEffects';
-
-type Intensity = 'light' | 'normal' | 'heavy';
 
 interface SeasonalEffectsContextType {
   enabled: boolean;
@@ -15,7 +20,9 @@ interface SeasonalEffectsContextType {
   getCurrentSeasonName: () => string;
 }
 
-const SeasonalEffectsContext = createContext<SeasonalEffectsContextType | undefined>(undefined);
+const SeasonalEffectsContext = createContext<
+  SeasonalEffectsContextType | undefined
+>(undefined);
 
 const seasonNames: Record<Season, string> = {
   spring: '春季 🌸',
@@ -26,7 +33,9 @@ const seasonNames: Record<Season, string> = {
   off: '关闭',
 };
 
-export const SeasonalEffectsProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+export const SeasonalEffectsProvider: React.FC<{ children: ReactNode }> = ({
+  children,
+}) => {
   const [enabled, setEnabled] = useState(false);
   const [season, setSeason] = useState<Season>('auto');
   const [intensity, setIntensity] = useState<Intensity>('normal');
@@ -77,7 +86,13 @@ export const SeasonalEffectsProvider: React.FC<{ children: ReactNode }> = ({ chi
       }}
     >
       {children}
-      {mounted && <SeasonalEffects season={season} intensity={intensity} enabled={enabled} />}
+      {mounted && (
+        <SeasonalEffects
+          season={season}
+          intensity={intensity}
+          enabled={enabled}
+        />
+      )}
     </SeasonalEffectsContext.Provider>
   );
 };
@@ -85,7 +100,9 @@ export const SeasonalEffectsProvider: React.FC<{ children: ReactNode }> = ({ chi
 export const useSeasonalEffects = () => {
   const context = useContext(SeasonalEffectsContext);
   if (context === undefined) {
-    throw new Error('useSeasonalEffects must be used within a SeasonalEffectsProvider');
+    throw new Error(
+      'useSeasonalEffects must be used within a SeasonalEffectsProvider',
+    );
   }
   return context;
 };
