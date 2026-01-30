@@ -9,7 +9,6 @@ IMAGE_TAR="lunatv_custom.tar"
 echo "--> Testing connection to $TARGET..."
 if ! ssh -q $TARGET exit; then
     echo "Error: Cannot connect to $TARGET. Please check your SSH configuration or network."
-    echo "Try: ssh -p 8522 red@192.168.50.8"
     exit 1
 fi
 
@@ -27,7 +26,7 @@ scp -O $IMAGE_TAR $TARGET:$REMOTE_DIR/
 echo "--> Deploying to Production at $REMOTE_DIR..."
 ssh $TARGET "mkdir -p $REMOTE_DIR/cache && \
     echo 'Ensuring PROXY_SECRET exists in .env...' && \
-    (grep -q 'PROXY_SECRET=' $REMOTE_DIR/.env || echo 'PROXY_SECRET=7d9a2b4c8e1f3g5h7j9k0l2m4n6p8q0r' >> $REMOTE_DIR/.env) && \
+    (grep -q 'PROXY_SECRET=' $REMOTE_DIR/.env || echo "PROXY_SECRET=$(openssl rand -hex 32)" >> $REMOTE_DIR/.env) && \
     (grep -q 'DISABLE_SECURE_COOKIES=' $REMOTE_DIR/.env || echo 'DISABLE_SECURE_COOKIES=true' >> $REMOTE_DIR/.env) && \
     echo 'Stopping legacy container...' && \
     (/usr/local/bin/docker stop lunatv || true) && \
@@ -45,4 +44,4 @@ ssh $TARGET "mkdir -p $REMOTE_DIR/cache && \
     /usr/local/bin/docker image prune -f"
 
 echo "--> Deployment Complete!"
-echo "Check status at http://192.168.50.8:8899 (or configured port)"
+echo "Check status directly on your server or at the configured port."

@@ -1,8 +1,9 @@
 import { test } from '@playwright/test';
 
 test('verify adult content filter', async ({ page }) => {
+  const TEST_URL = process.env.TEST_URL || 'http://localhost:3000';
   // 1. Visit Home Page (Visitor Mode)
-  await page.goto('http://192.168.50.8:8899');
+  await page.goto(TEST_URL);
 
   // 2. Check Movie Category Filter
   await page.click('text=电影');

@@ -8,7 +8,6 @@ IMAGE_TAR="lunatv_custom.tar"
 echo "--> Testing connection to $TARGET..."
 if ! ssh -q $TARGET exit; then
     echo "Error: Cannot connect to $TARGET. Please check your SSH configuration or network."
-    echo "Try: ssh -p 8522 red@192.168.50.8"
     exit 1
 fi
 
@@ -32,4 +31,4 @@ ssh $TARGET "cd $DEST && \
     /usr/local/bin/docker system prune -f"
 
 echo "--> Test Deployment Complete!"
-echo "Check status directly on NAS or visit http://192.168.50.8:3002"
+echo "Check status directly on NAS."
