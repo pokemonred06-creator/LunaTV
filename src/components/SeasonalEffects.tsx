@@ -33,12 +33,117 @@ function usePrefersReducedMotion() {
       return () => mediaQuery.removeEventListener('change', update);
     } else {
       mediaQuery.addListener(update);
-
       return () => mediaQuery.removeListener(update);
     }
   }, []);
   return prefersReducedMotion;
 }
+
+const getCurrentSeason = (): ActiveSeason => {
+  const month = new Date().getMonth() + 1;
+  if (month >= 3 && month <= 5) return 'spring';
+  if (month >= 6 && month <= 8) return 'summer';
+  if (month >= 9 && month <= 11) return 'autumn';
+  return 'winter';
+};
+
+const isActiveSeason = (s: Season): s is ActiveSeason => {
+  return ['spring', 'summer', 'autumn', 'winter'].includes(s);
+};
+
+// -- Glass Layer (Atmosphere) --
+const GlassLayer = memo(({ season }: { season: ActiveSeason }) => {
+  const [isCoarse, setIsCoarse] = useState(false);
+
+  useEffect(() => {
+    // Safe listener for pointer type (Safari/Legacy support)
+    const mq = window.matchMedia('(pointer: coarse)');
+    const update = () => setIsCoarse(mq.matches);
+    update();
+
+    if (isModernMediaQuery(mq)) {
+      mq.addEventListener('change', update);
+      return () => mq.removeEventListener('change', update);
+    } else {
+      mq.addListener(update);
+      return () => mq.removeListener(update);
+    }
+  }, []);
+
+  // 1. Check for backdrop-filter support
+  const supportsBackdrop =
+    typeof CSS !== 'undefined' &&
+    (CSS.supports('backdrop-filter: blur(1px)') ||
+      CSS.supports('-webkit-backdrop-filter: blur(1px)'));
+
+  // 2. Check for mask-image support (using valid syntax)
+  const supportsMask =
+    typeof CSS !== 'undefined' &&
+    (CSS.supports(
+      'mask-image: radial-gradient(circle at center, transparent 40%, black 100%)',
+    ) ||
+      CSS.supports(
+        '-webkit-mask-image: radial-gradient(circle at center, transparent 40%, black 100%)',
+      ));
+
+  const baseStyle: React.CSSProperties = {
+    position: 'fixed',
+    inset: 0,
+    pointerEvents: 'none',
+    zIndex: 10, // ABOVE particles to blur them
+  };
+
+  if (season === 'winter') {
+    const blurPx = isCoarse ? 2 : 4;
+    const maskImage =
+      'radial-gradient(circle at center, transparent 40%, black 100%)';
+
+    // Critical Fallback: Only enable blur if we can mask it.
+    // Otherwise, the center would be blurred, ruining usability.
+    const canBlur = supportsBackdrop && supportsMask;
+    const backdrop = canBlur ? `blur(${blurPx}px)` : undefined;
+
+    return (
+      <div
+        style={{
+          ...baseStyle,
+          backdropFilter: backdrop,
+          WebkitBackdropFilter: backdrop,
+          ...(supportsMask ? { maskImage, WebkitMaskImage: maskImage } : {}),
+          // Fallback / Vignette Tint
+          background:
+            'radial-gradient(circle at center, transparent 40%, rgba(255, 255, 255, 0.2) 100%)',
+        }}
+        aria-hidden='true'
+      />
+    );
+  }
+
+  if (season === 'summer') {
+    const blurPx = isCoarse ? 0.5 : 1;
+    // Summer blur is subtle enough that full-screen is acceptable even without mask,
+    // but we stick to supportsBackdrop check.
+    const backdrop = supportsBackdrop
+      ? `blur(${blurPx}px) contrast(1.05)`
+      : undefined;
+
+    return (
+      <div
+        style={{
+          ...baseStyle,
+          backdropFilter: backdrop,
+          WebkitBackdropFilter: backdrop,
+          background:
+            'linear-gradient(180deg, rgba(255,250,220,0.04) 0%, rgba(200,240,255,0.06) 100%)',
+        }}
+        aria-hidden='true'
+      />
+    );
+  }
+
+  return null;
+});
+GlassLayer.displayName = 'GlassLayer';
 
 // -- Texture Caching System --
 const createCachedCanvas = (
@@ -56,7 +161,6 @@ const createCachedCanvas = (
   return canvas;
 };
 
-// Texture Storage
 const shapes: {
   leaf: HTMLCanvasElement[];
   petal: HTMLCanvasElement[];
@@ -70,11 +174,10 @@ const shapes: {
 let shapesInitialized = false;
 
 const initShapes = () => {
-  // Fix 1: Idempotent initialization guard
   if (shapesInitialized) return;
   shapesInitialized = true;
 
-  // 1. Realistic Snow
+  // 1. Snow
   const snowCanvas = createCachedCanvas(15, 15, (ctx) => {
     const grad = ctx.createRadialGradient(7.5, 7.5, 0, 7.5, 7.5, 7.5);
     grad.addColorStop(0, 'rgba(255, 255, 255, 0.9)');
@@ -85,16 +188,16 @@ const initShapes = () => {
   });
   if (snowCanvas) shapes.snow = snowCanvas;
 
-  // 2. High-Fidelity Autumn Leaves
+  // 2. Leaves (Maple & Oak restored)
   shapes.leaf = [];
   const leafPalettes = [
     { base: '#D2691E', highlight: '#FF8C00' }, // Chocolate
-    { base: '#8B0000', highlight: '#CD5C5C' }, // Deep Red
+    { base: '#8B0000', highlight: '#CD5C5C' }, // Red
     { base: '#DAA520', highlight: '#FFD700' }, // Gold
   ];
 
   leafPalettes.forEach(({ base, highlight }) => {
-    // Maple Leaf
+    // Maple Leaf (Sharp)
     const maple = createCachedCanvas(40, 40, (ctx) => {
       const grad = ctx.createLinearGradient(10, 0, 30, 40);
       grad.addColorStop(0, highlight);
@@ -102,7 +205,6 @@ const initShapes = () => {
       ctx.fillStyle = grad;
       ctx.strokeStyle = 'rgba(0,0,0,0.2)';
       ctx.lineWidth = 1;
-
       ctx.beginPath();
       ctx.moveTo(20, 40);
       ctx.lineTo(20, 35);
@@ -121,7 +223,6 @@ const initShapes = () => {
       ctx.closePath();
       ctx.fill();
       ctx.stroke();
-
       ctx.beginPath();
       ctx.moveTo(20, 35);
       ctx.lineTo(20, 5);
@@ -133,7 +234,7 @@ const initShapes = () => {
     });
     if (maple) shapes.leaf.push(maple);
 
-    // Oak Leaf
+    // Oak Leaf (Rounded) - Restored!
     const oak = createCachedCanvas(30, 45, (ctx) => {
       const grad = ctx.createLinearGradient(15, 0, 15, 45);
       grad.addColorStop(0, highlight);
@@ -166,10 +267,9 @@ const initShapes = () => {
     if (oak) shapes.leaf.push(oak);
   });
 
-  // 3. High-Fidelity Spring (Sakura)
+  // 3. Petals
   shapes.petal = [];
   const petalColors = ['#FFC0CB', '#FFB7C5', '#FFF0F5'];
-
   petalColors.forEach((color) => {
     // Single Petal
     const petal = createCachedCanvas(20, 20, (ctx) => {
@@ -178,7 +278,6 @@ const initShapes = () => {
       grad.addColorStop(0.6, color);
       grad.addColorStop(1, color);
       ctx.fillStyle = grad;
-
       ctx.beginPath();
       ctx.moveTo(10, 20);
       ctx.quadraticCurveTo(20, 10, 20, 5);
@@ -195,13 +294,11 @@ const initShapes = () => {
     // Whole Flower
     const flower = createCachedCanvas(30, 30, (ctx) => {
       ctx.translate(15, 15);
-
       const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, 14);
       grad.addColorStop(0, 'rgba(255,255,255,0.9)');
       grad.addColorStop(0.5, color);
       grad.addColorStop(1, color);
       ctx.fillStyle = grad;
-
       ctx.save();
       for (let i = 0; i < 5; i++) {
         ctx.beginPath();
@@ -210,12 +307,10 @@ const initShapes = () => {
         ctx.rotate((Math.PI * 2) / 5);
       }
       ctx.restore();
-
       ctx.fillStyle = '#FFD700';
       ctx.beginPath();
       ctx.arc(0, 0, 3, 0, Math.PI * 2);
       ctx.fill();
-
       ctx.fillStyle = '#A0522D';
       ctx.save();
       for (let j = 0; j < 5; j++) {
@@ -230,22 +325,10 @@ const initShapes = () => {
   });
 };
 
-const getCurrentSeason = (): ActiveSeason => {
-  const month = new Date().getMonth() + 1;
-  if (month >= 3 && month <= 5) return 'spring';
-  if (month >= 6 && month <= 8) return 'summer';
-  if (month >= 9 && month <= 11) return 'autumn';
-  return 'winter';
-};
-
 const intensityConfig = {
   light: 50,
   normal: 100,
   heavy: 200,
-};
-
-const isActiveSeason = (s: Season): s is ActiveSeason => {
-  return ['spring', 'summer', 'autumn', 'winter'].includes(s);
 };
 
 // -- Particle Class --
@@ -277,7 +360,6 @@ class Particle {
     this.z = 0.2 + Math.random() * 0.8;
     this.x = Math.random() * width;
     this.y = initial ? Math.random() * height : -50;
-
     this.rotation = Math.random() * Math.PI * 2;
     this.vRotation = (Math.random() - 0.5) * 0.05;
     this.flip = Math.random() * Math.PI * 2;
@@ -291,34 +373,29 @@ class Particle {
         this.swingSpeed = 0.02 * this.z;
         this.texture = shapes.snow;
         break;
-
       case 'summer': // Rain
         this.size = (15 + Math.random() * 15) * this.z;
         this.vy = (25 + Math.random() * 10) * this.z;
         this.vx = -1 * this.z;
         this.color = `rgba(200, 220, 255, ${0.1 + 0.2 * this.z})`;
         break;
-
       case 'autumn':
         this.size = (12 + Math.random() * 8) * this.z;
         this.vy = (1 + Math.random() * 1.5) * this.z;
         this.vx = (Math.random() - 0.5) * 2;
         this.swingSpeed = 0.05 * this.z;
-        if (shapes.leaf.length > 0) {
+        if (shapes.leaf.length > 0)
           this.texture =
             shapes.leaf[Math.floor(Math.random() * shapes.leaf.length)];
-        }
         break;
-
       case 'spring':
         this.size = (8 + Math.random() * 6) * this.z;
         this.vy = (0.8 + Math.random() * 1.0) * this.z;
         this.vx = (Math.random() - 0.2) * 1.5;
         this.swingSpeed = 0.03 * this.z;
-        if (shapes.petal.length > 0) {
+        if (shapes.petal.length > 0)
           this.texture =
             shapes.petal[Math.floor(Math.random() * shapes.petal.length)];
-        }
         break;
     }
 
@@ -360,7 +437,6 @@ class Particle {
       ctx.stroke();
       return;
     }
-
     if (!this.texture) return;
 
     ctx.save();
@@ -375,7 +451,6 @@ class Particle {
       const safeFlipY =
         (Math.sign(flipY) || 1) * Math.max(0.15, Math.abs(flipY));
       ctx.scale(1, safeFlipY);
-
       ctx.drawImage(this.texture, -this.w / 2, -this.h / 2, this.w, this.h);
     }
     ctx.restore();
@@ -428,12 +503,10 @@ const SeasonalEffects: React.FC<SeasonalEffectsProps> = memo(
 
       const canvas = canvasRef.current;
       if (!canvas) return;
-
       const ctx = canvas.getContext('2d', { alpha: true });
       if (!ctx) return;
 
       ctx.lineCap = 'round';
-
       let running = true;
       let resizeRaf = 0;
 
@@ -448,14 +521,11 @@ const SeasonalEffects: React.FC<SeasonalEffectsProps> = memo(
       const resizeCanvas = () => {
         const dpr = window.devicePixelRatio || 1;
         const { width, height } = getViewport();
-
         canvas.style.width = `${width}px`;
         canvas.style.height = `${height}px`;
         canvas.width = Math.floor(width * dpr);
         canvas.height = Math.floor(height * dpr);
-
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
         initParticles();
       };
 
@@ -469,11 +539,9 @@ const SeasonalEffects: React.FC<SeasonalEffectsProps> = memo(
 
       const initParticles = () => {
         const { width, height } = getViewport();
-
         const isMobile = width < 768;
-        const baseCount = intensityConfig[intensity];
+        const baseCount = intensityConfig[intensity || 'normal'];
         const count = Math.round(isMobile ? baseCount * 0.6 : baseCount);
-
         const newParticles: Particle[] = [];
         for (let i = 0; i < count; i++) {
           newParticles.push(
@@ -485,32 +553,25 @@ const SeasonalEffects: React.FC<SeasonalEffectsProps> = memo(
 
       const animate = (time: number) => {
         if (!running) return;
-
         if (lastTimeRef.current === 0) lastTimeRef.current = time;
         let delta = (time - lastTimeRef.current) / 16.67;
         lastTimeRef.current = time;
-
         if (delta > MAX_DELTA) delta = MAX_DELTA;
 
         const { width, height } = getViewport();
-
-        if (Math.random() < 0.005) {
+        if (Math.random() < 0.005)
           windTargetRef.current = (Math.random() - 0.5) * 3;
-        }
         windRef.current +=
           (windTargetRef.current - windRef.current) * 0.02 * delta;
 
         ctx.clearRect(0, 0, width, height);
-
         particles.current.forEach((p) => {
           p.update(width, height, delta, windRef.current);
           p.draw(ctx);
         });
-
         requestRef.current = requestAnimationFrame(animate);
       };
 
-      // Fix 2: Listen to VisualViewport events for iOS address bar safety
       const vv = window.visualViewport;
       window.addEventListener('resize', requestResize, { passive: true });
       if (vv) {
@@ -550,14 +611,12 @@ const SeasonalEffects: React.FC<SeasonalEffectsProps> = memo(
 
     return (
       <>
+        {/* 1. Background Gradient (Bottom) */}
         {resolvedSeason !== 'off' && !isPlayPage && (
           <div
             style={{
               position: 'fixed',
-              top: 0,
-              left: 0,
-              width: '100%',
-              height: '100%',
+              inset: 0,
               pointerEvents: 'none',
               zIndex: 0,
               background: backgroundGradients[resolvedSeason as ActiveSeason],
@@ -567,6 +626,7 @@ const SeasonalEffects: React.FC<SeasonalEffectsProps> = memo(
           />
         )}
 
+        {/* 2. Particle Canvas (Middle) */}
         {!shouldDisable && (
           <canvas
             ref={canvasRef}
@@ -581,6 +641,11 @@ const SeasonalEffects: React.FC<SeasonalEffectsProps> = memo(
             }}
             aria-hidden='true'
           />
+        )}
+
+        {/* 3. Atmosphere/Glass Layer (Top - for "looking through" effect) */}
+        {resolvedSeason !== 'off' && !isPlayPage && (
+          <GlassLayer season={resolvedSeason as ActiveSeason} />
         )}
       </>
     );
