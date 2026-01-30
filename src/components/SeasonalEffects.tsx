@@ -1,7 +1,14 @@
 'use client';
 
 import { usePathname } from 'next/navigation';
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  type CSSProperties,
+  memo,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 
 // -- Types --
 export type Season = 'spring' | 'summer' | 'autumn' | 'winter' | 'auto' | 'off';
@@ -51,100 +58,6 @@ const isActiveSeason = (s: Season): s is ActiveSeason => {
   return ['spring', 'summer', 'autumn', 'winter'].includes(s);
 };
 
-// -- Glass Layer (Atmosphere) --
-const GlassLayer = memo(({ season }: { season: ActiveSeason }) => {
-  const [isCoarse, setIsCoarse] = useState(false);
-
-  useEffect(() => {
-    // Safe listener for pointer type (Safari/Legacy support)
-    const mq = window.matchMedia('(pointer: coarse)');
-    const update = () => setIsCoarse(mq.matches);
-    update();
-
-    if (isModernMediaQuery(mq)) {
-      mq.addEventListener('change', update);
-      return () => mq.removeEventListener('change', update);
-    } else {
-      mq.addListener(update);
-      return () => mq.removeListener(update);
-    }
-  }, []);
-
-  // 1. Check for backdrop-filter support
-  const supportsBackdrop =
-    typeof CSS !== 'undefined' &&
-    (CSS.supports('backdrop-filter: blur(1px)') ||
-      CSS.supports('-webkit-backdrop-filter: blur(1px)'));
-
-  // 2. Check for mask-image support (using valid syntax)
-  const supportsMask =
-    typeof CSS !== 'undefined' &&
-    (CSS.supports(
-      'mask-image: radial-gradient(circle at center, transparent 40%, black 100%)',
-    ) ||
-      CSS.supports(
-        '-webkit-mask-image: radial-gradient(circle at center, transparent 40%, black 100%)',
-      ));
-
-  const baseStyle: React.CSSProperties = {
-    position: 'fixed',
-    inset: 0,
-    pointerEvents: 'none',
-    zIndex: 10, // ABOVE particles to blur them
-  };
-
-  if (season === 'winter') {
-    const blurPx = isCoarse ? 2 : 4;
-    const maskImage =
-      'radial-gradient(circle at center, transparent 40%, black 100%)';
-
-    // Critical Fallback: Only enable blur if we can mask it.
-    // Otherwise, the center would be blurred, ruining usability.
-    const canBlur = supportsBackdrop && supportsMask;
-    const backdrop = canBlur ? `blur(${blurPx}px)` : undefined;
-
-    return (
-      <div
-        style={{
-          ...baseStyle,
-          backdropFilter: backdrop,
-          WebkitBackdropFilter: backdrop,
-          ...(supportsMask ? { maskImage, WebkitMaskImage: maskImage } : {}),
-          // Fallback / Vignette Tint
-          background:
-            'radial-gradient(circle at center, transparent 40%, rgba(255, 255, 255, 0.2) 100%)',
-        }}
-        aria-hidden='true'
-      />
-    );
-  }
-
-  if (season === 'summer') {
-    const blurPx = isCoarse ? 0.5 : 1;
-    // Summer blur is subtle enough that full-screen is acceptable even without mask,
-    // but we stick to supportsBackdrop check.
-    const backdrop = supportsBackdrop
-      ? `blur(${blurPx}px) contrast(1.05)`
-      : undefined;
-
-    return (
-      <div
-        style={{
-          ...baseStyle,
-          backdropFilter: backdrop,
-          WebkitBackdropFilter: backdrop,
-          background:
-            'linear-gradient(180deg, rgba(255,250,220,0.04) 0%, rgba(200,240,255,0.06) 100%)',
-        }}
-        aria-hidden='true'
-      />
-    );
-  }
-
-  return null;
-});
-GlassLayer.displayName = 'GlassLayer';
-
 // -- Texture Caching System --
 const createCachedCanvas = (
   width: number,
@@ -188,7 +101,7 @@ const initShapes = () => {
   });
   if (snowCanvas) shapes.snow = snowCanvas;
 
-  // 2. Leaves (Maple & Oak restored)
+  // 2. Leaves (Maple & Oak)
   shapes.leaf = [];
   const leafPalettes = [
     { base: '#D2691E', highlight: '#FF8C00' }, // Chocolate
@@ -197,7 +110,7 @@ const initShapes = () => {
   ];
 
   leafPalettes.forEach(({ base, highlight }) => {
-    // Maple Leaf (Sharp)
+    // Maple
     const maple = createCachedCanvas(40, 40, (ctx) => {
       const grad = ctx.createLinearGradient(10, 0, 30, 40);
       grad.addColorStop(0, highlight);
@@ -234,7 +147,7 @@ const initShapes = () => {
     });
     if (maple) shapes.leaf.push(maple);
 
-    // Oak Leaf (Rounded) - Restored!
+    // Oak
     const oak = createCachedCanvas(30, 45, (ctx) => {
       const grad = ctx.createLinearGradient(15, 0, 15, 45);
       grad.addColorStop(0, highlight);
@@ -242,7 +155,6 @@ const initShapes = () => {
       ctx.fillStyle = grad;
       ctx.strokeStyle = 'rgba(0,0,0,0.15)';
       ctx.lineWidth = 1;
-
       ctx.beginPath();
       ctx.moveTo(15, 45);
       ctx.quadraticCurveTo(5, 40, 5, 30);
@@ -254,7 +166,6 @@ const initShapes = () => {
       ctx.closePath();
       ctx.fill();
       ctx.stroke();
-
       ctx.beginPath();
       ctx.moveTo(15, 45);
       ctx.lineTo(15, 5);
@@ -267,11 +178,11 @@ const initShapes = () => {
     if (oak) shapes.leaf.push(oak);
   });
 
-  // 3. Petals
+  // 3. Petals (Sakura)
   shapes.petal = [];
   const petalColors = ['#FFC0CB', '#FFB7C5', '#FFF0F5'];
   petalColors.forEach((color) => {
-    // Single Petal
+    // Single
     const petal = createCachedCanvas(20, 20, (ctx) => {
       const grad = ctx.createRadialGradient(10, 20, 0, 10, 10, 20);
       grad.addColorStop(0, '#FFFFFF');
@@ -331,7 +242,380 @@ const intensityConfig = {
   heavy: 200,
 };
 
-// -- Particle Class --
+// -- Glass Layer (Atmosphere & Condensation) --
+const GlassLayer = memo(({ season }: { season: ActiveSeason }) => {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  type Droplet = {
+    x: number;
+    y: number;
+    px: number;
+    py: number;
+    r: number;
+    vy: number;
+    isFalling: boolean;
+    phase: number;
+    dead?: boolean; // Mark for removal
+  };
+
+  type TrailSeg = {
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+    w: number;
+    life: number;
+  };
+
+  const dropsRef = useRef<Droplet[]>([]);
+  const trailsRef = useRef<TrailSeg[]>([]);
+  const rafRef = useRef<number>(0);
+
+  const [isCoarse, setIsCoarse] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mq = window.matchMedia('(pointer: coarse)');
+    const update = () => setIsCoarse(mq.matches);
+    update();
+    if (isModernMediaQuery(mq)) {
+      mq.addEventListener('change', update);
+      return () => mq.removeEventListener('change', update);
+    } else {
+      mq.addListener(update);
+      return () => mq.removeListener(update);
+    }
+  }, []);
+
+  const isWinter = season === 'winter';
+  const isSummer = season === 'summer';
+
+  const supportsBackdrop =
+    typeof CSS !== 'undefined' &&
+    (CSS.supports('backdrop-filter: blur(1px)') ||
+      CSS.supports('-webkit-backdrop-filter: blur(1px)'));
+
+  const supportsMask =
+    typeof CSS !== 'undefined' &&
+    (CSS.supports(
+      'mask-image: radial-gradient(circle at center, transparent 40%, black 100%)',
+    ) ||
+      CSS.supports(
+        '-webkit-mask-image: radial-gradient(circle at center, transparent 40%, black 100%)',
+      ));
+
+  const baseStyle: CSSProperties = {
+    position: 'fixed',
+    inset: 0,
+    pointerEvents: 'none',
+    zIndex: 10,
+    willChange: 'transform',
+  };
+
+  // ---- SUMMER SIMULATION ----
+  useEffect(() => {
+    if (!isSummer) return;
+
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d', { alpha: true });
+    if (!ctx) return;
+
+    // Config
+    const DROP_LIMIT = isCoarse ? 220 : 520;
+    const TRAIL_LIMIT = isCoarse ? 260 : 650;
+    const SPAWN_PER_SEC = isCoarse ? 18 : 32;
+    const GROW_PER_SEC = 0.1;
+    const GRAVITY_R_THRESHOLD = 3.6;
+    const GRAVITY = 700;
+    const WAVY_AMP = 10;
+    const WAVY_FREQ = 0.02;
+
+    const CELL = 24;
+    const cellKey = (cx: number, cy: number) => `${cx},${cy}`;
+    const grid = new Map<string, number[]>();
+
+    let lastT = 0;
+    let spawnAcc = 0;
+    let running = true;
+    let resizeRaf = 0;
+
+    const getViewport = () => {
+      const vv = window.visualViewport;
+      return {
+        width: vv ? vv.width : window.innerWidth,
+        height: vv ? vv.height : window.innerHeight,
+      };
+    };
+
+    const resizeCanvas = () => {
+      const dpr = window.devicePixelRatio || 1;
+      const { width, height } = getViewport();
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${height}px`;
+      canvas.width = Math.floor(width * dpr);
+      canvas.height = Math.floor(height * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    };
+
+    const requestResize = () => {
+      if (resizeRaf) cancelAnimationFrame(resizeRaf);
+      resizeRaf = requestAnimationFrame(() => {
+        resizeRaf = 0;
+        resizeCanvas();
+      });
+    };
+
+    const drawDroplet = (d: Droplet) => {
+      const g = ctx.createRadialGradient(d.x, d.y, d.r * 0.15, d.x, d.y, d.r);
+      g.addColorStop(0, 'rgba(255,255,255,0.06)');
+      g.addColorStop(0.75, 'rgba(0,0,0,0.08)');
+      g.addColorStop(1, 'rgba(0,0,0,0.16)');
+      ctx.beginPath();
+      ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2);
+      ctx.fillStyle = g;
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(
+        d.x - d.r * 0.32,
+        d.y - d.r * 0.32,
+        d.r * 0.34,
+        d.r * 0.18,
+        Math.PI / 4,
+        0,
+        Math.PI * 2,
+      );
+      ctx.fillStyle = 'rgba(255,255,255,0.55)';
+      ctx.fill();
+    };
+
+    const drawTrail = (t: TrailSeg) => {
+      ctx.save();
+      ctx.globalAlpha = 0.22 * t.life;
+      ctx.lineCap = 'round';
+      ctx.lineWidth = t.w;
+      ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+      ctx.beginPath();
+      ctx.moveTo(t.x1, t.y1);
+      ctx.lineTo(t.x2, t.y2);
+      ctx.stroke();
+      ctx.restore();
+    };
+
+    const addTrail = (d: Droplet) => {
+      const dx = d.x - d.px;
+      const dy = d.y - d.py;
+      if (dx * dx + dy * dy < 2) return;
+      trailsRef.current.push({
+        x1: d.px,
+        y1: d.py,
+        x2: d.x,
+        y2: d.y,
+        w: Math.max(1, d.r * 0.55),
+        life: 1,
+      });
+      if (trailsRef.current.length > TRAIL_LIMIT) {
+        trailsRef.current.splice(0, trailsRef.current.length - TRAIL_LIMIT);
+      }
+    };
+
+    const spawnDrop = (w: number, h: number) => {
+      const d: Droplet = {
+        x: Math.random() * w,
+        y: Math.random() * h,
+        px: 0,
+        py: 0,
+        r: 0.6 + Math.random() * 1.3,
+        vy: 0,
+        isFalling: false,
+        phase: Math.random() * Math.PI * 2,
+      };
+      d.px = d.x;
+      d.py = d.y;
+      dropsRef.current.push(d);
+    };
+
+    // Correct Grid Building (Ignore dead/falling)
+    const rebuildGrid = () => {
+      grid.clear();
+      const drops = dropsRef.current;
+      for (let i = 0; i < drops.length; i++) {
+        const d = drops[i];
+        if (d.dead || d.isFalling) continue;
+        const cx = Math.floor(d.x / CELL);
+        const cy = Math.floor(d.y / CELL);
+        const k = cellKey(cx, cy);
+        const bucket = grid.get(k);
+        if (bucket) bucket.push(i);
+        else grid.set(k, [i]);
+      }
+    };
+
+    // Correct Coalescence Logic: Mark Dead
+    const tryCoalesce = (fallIdx: number) => {
+      const drops = dropsRef.current;
+      const d = drops[fallIdx];
+      if (!d || d.dead) return;
+
+      const cx = Math.floor(d.x / CELL);
+      const cy = Math.floor(d.y / CELL);
+
+      for (let oy = -1; oy <= 1; oy++) {
+        for (let ox = -1; ox <= 1; ox++) {
+          const k = cellKey(cx + ox, cy + oy);
+          const bucket = grid.get(k);
+          if (!bucket) continue;
+
+          for (let bi = bucket.length - 1; bi >= 0; bi--) {
+            const j = bucket[bi];
+            if (j === fallIdx) continue;
+
+            const t = drops[j];
+            if (!t || t.dead || t.isFalling) continue;
+
+            const dx = d.x - t.x;
+            const dy = d.y - t.y;
+            const rr = d.r + t.r;
+
+            if (dx * dx + dy * dy <= rr * rr) {
+              d.r = Math.sqrt(d.r * d.r + t.r * t.r);
+              t.dead = true; // Safe: mark for removal
+              return; // Stop processing this droplet
+            }
+          }
+        }
+      }
+    };
+
+    const tick = (t: number) => {
+      if (!running) return;
+      if (!lastT) lastT = t;
+      const dt = Math.min(0.05, (t - lastT) / 1000);
+      lastT = t;
+
+      const { width, height } = getViewport();
+
+      // Spawn
+      spawnAcc += SPAWN_PER_SEC * dt;
+      while (spawnAcc >= 1 && dropsRef.current.length < DROP_LIMIT) {
+        spawnAcc -= 1;
+        spawnDrop(width, height);
+      }
+
+      // Trail Update
+      const trails = trailsRef.current;
+      for (let i = trails.length - 1; i >= 0; i--) {
+        trails[i].life -= dt * 0.3;
+        if (trails[i].life <= 0) {
+          // Swap-remove for trails is safe as order doesn't matter
+          const last = trails.length - 1;
+          if (i !== last) trails[i] = trails[last];
+          trails.pop();
+        }
+      }
+
+      rebuildGrid();
+      ctx.clearRect(0, 0, width, height);
+
+      // Draw Trails
+      for (let i = 0; i < trails.length; i++) drawTrail(trails[i]);
+
+      const drops = dropsRef.current;
+
+      // Update Loop
+      for (let i = drops.length - 1; i >= 0; i--) {
+        const d = drops[i];
+        if (d.dead) continue; // Skip dead
+
+        d.px = d.x;
+        d.py = d.y;
+
+        if (!d.isFalling) {
+          d.r += GROW_PER_SEC * dt;
+          if (d.r > GRAVITY_R_THRESHOLD) {
+            d.isFalling = true;
+            d.vy = 60;
+          }
+        } else {
+          d.vy += GRAVITY * dt;
+          d.y += d.vy * dt;
+          d.x += Math.sin(d.y * WAVY_FREQ + d.phase) * (WAVY_AMP * dt);
+
+          addTrail(d);
+          tryCoalesce(i);
+        }
+
+        if (d.y > height + 30) {
+          d.dead = true;
+          continue;
+        }
+
+        drawDroplet(d);
+      }
+
+      // Compact: Remove dead droplets once per frame
+      if (drops.some((d) => d.dead)) {
+        dropsRef.current = drops.filter((d) => !d.dead);
+      }
+
+      rafRef.current = requestAnimationFrame(tick);
+    };
+
+    const vv = window.visualViewport;
+    window.addEventListener('resize', requestResize, { passive: true });
+    if (vv) {
+      vv.addEventListener('resize', requestResize, { passive: true });
+      vv.addEventListener('scroll', requestResize, { passive: true });
+    }
+
+    requestResize();
+    rafRef.current = requestAnimationFrame(tick);
+
+    return () => {
+      running = false;
+      window.removeEventListener('resize', requestResize);
+      if (vv) {
+        vv.removeEventListener('resize', requestResize);
+        vv.removeEventListener('scroll', requestResize);
+      }
+      if (resizeRaf) cancelAnimationFrame(resizeRaf);
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      dropsRef.current = [];
+      trailsRef.current = [];
+    };
+  }, [isSummer, isCoarse]);
+
+  if (isWinter) {
+    const blurPx = isCoarse ? 2 : 4;
+    const maskImage =
+      'radial-gradient(circle at center, transparent 40%, black 100%)';
+    const canBlur = supportsBackdrop && supportsMask;
+    const backdrop = canBlur ? `blur(${blurPx}px)` : undefined;
+
+    return (
+      <div
+        style={{
+          ...baseStyle,
+          backdropFilter: backdrop,
+          WebkitBackdropFilter: backdrop,
+          ...(supportsMask ? { maskImage, WebkitMaskImage: maskImage } : {}),
+          background:
+            'radial-gradient(circle at center, transparent 40%, rgba(255, 255, 255, 0.2) 100%)',
+        }}
+        aria-hidden='true'
+      />
+    );
+  }
+
+  if (isSummer) {
+    return <canvas ref={canvasRef} style={baseStyle} aria-hidden='true' />;
+  }
+
+  return null;
+});
+GlassLayer.displayName = 'GlassLayer';
+
+// -- Main Physics Particle --
 class Particle {
   x = 0;
   y = 0;
@@ -526,7 +810,7 @@ const SeasonalEffects: React.FC<SeasonalEffectsProps> = memo(
         canvas.width = Math.floor(width * dpr);
         canvas.height = Math.floor(height * dpr);
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        initParticles();
+        // initParticles(); // Removed redundant call on resize to prevent flicker, let raf handle updates
       };
 
       const requestResize = () => {
@@ -580,6 +864,7 @@ const SeasonalEffects: React.FC<SeasonalEffectsProps> = memo(
       }
 
       resizeCanvas();
+      initParticles(); // Initialize once
       lastTimeRef.current = 0;
       requestRef.current = requestAnimationFrame(animate);
 
@@ -596,7 +881,7 @@ const SeasonalEffects: React.FC<SeasonalEffectsProps> = memo(
       };
     }, [shouldDisable, resolvedSeason, intensity, mounted]);
 
-    if (!mounted || (resolvedSeason === 'off' && !enabled)) return null;
+    if (!mounted) return null;
 
     const backgroundGradients: Record<ActiveSeason, string> = {
       spring:
@@ -609,10 +894,12 @@ const SeasonalEffects: React.FC<SeasonalEffectsProps> = memo(
         'linear-gradient(180deg, rgba(224,255,255,0.1) 0%, transparent 100%)',
     };
 
+    const showEffect = !shouldDisable;
+
     return (
       <>
         {/* 1. Background Gradient (Bottom) */}
-        {resolvedSeason !== 'off' && !isPlayPage && (
+        {showEffect && (
           <div
             style={{
               position: 'fixed',
@@ -621,13 +908,14 @@ const SeasonalEffects: React.FC<SeasonalEffectsProps> = memo(
               zIndex: 0,
               background: backgroundGradients[resolvedSeason as ActiveSeason],
               opacity: 0.5,
+              willChange: 'transform',
             }}
             aria-hidden='true'
           />
         )}
 
         {/* 2. Particle Canvas (Middle) */}
-        {!shouldDisable && (
+        {showEffect && (
           <canvas
             ref={canvasRef}
             style={{
@@ -638,15 +926,14 @@ const SeasonalEffects: React.FC<SeasonalEffectsProps> = memo(
               height: '100%',
               pointerEvents: 'none',
               zIndex: 5,
+              willChange: 'transform',
             }}
             aria-hidden='true'
           />
         )}
 
-        {/* 3. Atmosphere/Glass Layer (Top - for "looking through" effect) */}
-        {resolvedSeason !== 'off' && !isPlayPage && (
-          <GlassLayer season={resolvedSeason as ActiveSeason} />
-        )}
+        {/* 3. Atmosphere/Glass Layer (Top) */}
+        {showEffect && <GlassLayer season={resolvedSeason as ActiveSeason} />}
       </>
     );
   },
