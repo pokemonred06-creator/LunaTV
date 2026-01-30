@@ -1,13 +1,12 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { NextRequest, NextResponse } from 'next/server';
-import * as OpenCC from 'opencc-js';
 
 import { AdminConfig } from '@/lib/admin.types';
 import { getAuthInfoFromCookie } from '@/lib/auth/server';
 import { getAvailableApiSites, getConfig } from '@/lib/config';
 import { searchFromApi } from '@/lib/downstream';
-import { yellowWords } from '@/lib/yellow';
+import { shouldFilterItem } from '@/lib/yellow-filter';
 
 export const runtime = 'nodejs';
 
@@ -21,19 +20,14 @@ export async function GET(request: NextRequest) {
 
     const config = await getConfig();
     const { searchParams } = new URL(request.url);
-    let query = searchParams.get('q')?.trim();
+    const rawQuery = searchParams.get('q')?.trim();
 
-    if (!query) {
+    if (!rawQuery) {
       return NextResponse.json({ suggestions: [] });
     }
 
     // Convert Traditional to Simplified Chinese
-    try {
-      const converter = OpenCC.Converter({ from: 'hk', to: 'cn' });
-      query = converter(query);
-    } catch (e) {
-      console.error('Conversion failed:', e);
-    }
+    const query = rawQuery;
 
     // 生成建议
     const suggestions = await generateSuggestions(
@@ -88,10 +82,7 @@ async function generateSuggestions(
         results
           .filter(
             (r: any) =>
-              config.SiteConfig.DisableYellowFilter ||
-              !yellowWords.some((word: string) =>
-                (r.type_name || '').includes(word),
-              ),
+              config.SiteConfig.DisableYellowFilter || !shouldFilterItem(r),
           )
           .map((r: any) => r.title)
           .filter(Boolean)

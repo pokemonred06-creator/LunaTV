@@ -1,12 +1,15 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { NextRequest, NextResponse } from 'next/server';
-import * as OpenCC from 'opencc-js';
 
 import { getAuthInfoFromCookie } from '@/lib/auth/server';
 import { getAvailableApiSites, getConfig } from '@/lib/config';
 import { searchFromApi } from '@/lib/downstream';
-import { yellowWords } from '@/lib/yellow';
+import {
+  converter as OPENCC_CONVERTER,
+  isBlocked,
+  shouldFilterItem,
+} from '@/lib/yellow-filter';
 
 export const runtime = 'nodejs';
 
@@ -17,19 +20,6 @@ const NO_CACHE_HEADERS = {
   Pragma: 'no-cache',
   Expires: '0',
 };
-
-// OpenCC converter instance (HK -> CN)
-const OPENCC_CONVERTER = OpenCC.Converter({ from: 'hk', to: 'cn' });
-
-// Centralized normalization logic: Lowercase + remove whitespace/punctuation/underscores
-const normalize = (s: string): string =>
-  (s || '').toLowerCase().replace(/[^\u4e00-\u9fa5a-zA-Z0-9]+/g, '');
-
-// Pre-compute blocklist at module scope.
-// CRITICAL: Filter out empty strings to prevent matching everything (e.g. if a word is just " ").
-const NORMALIZED_BLOCKLIST = yellowWords
-  .map((w) => normalize(String(w)))
-  .filter((w) => w.length > 0);
 
 // --- HANDLER ---
 
@@ -82,12 +72,7 @@ export async function GET(request: NextRequest) {
   const convertedQuery = OPENCC_CONVERTER(query);
 
   if (applyFilter) {
-    const normalizedQuery = normalize(convertedQuery);
-
-    // Check if any blocked word exists inside the normalized query
-    const isRestricted = NORMALIZED_BLOCKLIST.some((word) =>
-      normalizedQuery.includes(word),
-    );
+    const isRestricted = isBlocked(convertedQuery);
 
     if (isRestricted) {
       if (process.env.NODE_ENV !== 'production') {
@@ -128,15 +113,9 @@ export async function GET(request: NextRequest) {
 
     // 8. POST-FLIGHT FILTER (Cleanup on Results)
     if (applyFilter) {
-      flattenedResults = flattenedResults.filter((result) => {
-        const typeName = result.type_name ? normalize(result.type_name) : '';
-        const name = result.name ? normalize(result.name) : '';
-
-        return (
-          !NORMALIZED_BLOCKLIST.some((word) => typeName.includes(word)) &&
-          !NORMALIZED_BLOCKLIST.some((word) => name.includes(word))
-        );
-      });
+      flattenedResults = flattenedResults.filter(
+        (item: any) => !shouldFilterItem(item),
+      );
     }
 
     return NextResponse.json(

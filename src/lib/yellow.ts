@@ -23,6 +23,12 @@ export const yellowWords = [
   '艷情', // Erotic/Romance (Old school)
   '大尺度', // Explicit / Large Scale
   'R级', // R-Rated
+  '全裸', // Full Nude
+  '裸体',
+  '裸體', // Naked
+  '淫秽',
+  '淫穢', // Obscene
+  '禁片', // Banned/Forbidden Films
 
   // --- Specific Content Tags ---
   '电影解说',
@@ -46,6 +52,18 @@ export const yellowWords = [
   '萝莉', // Loli
   '门事件', // Scandal/Gate events
   '写真', // Gravure (often softcore)
+  '丝袜',
+  '絲襪', // Stockings
+  '口交', // Oral
+  '肛交', // Anal
+  '自慰', // Masturbation
+  '做爱',
+  '做愛', // Sex/Make love
+  '性爱',
+  '性愛', // Sex
+  '潮吹', // Squirting
+  '外围', // Escort/Call girl
+  '援交', // Paid dates (Enjo kosai)
 
   // --- Specific Studios/Brands ---
   '麻豆', // Madou Media
@@ -57,6 +75,10 @@ export const yellowWords = [
   '含羞草', // Hanxiucao
   '果冻传媒', // Guodong Media
   'SWAG', // Asian adult platform
+  '玩偶姐姐', // HongKongDoll
+  '糖心', // Tangxin Media
+  '抖阴', // Douyin parody
+  '快妖精', // Kuaiyaojing
 
   // =========================
   // 🇺🇸 ENGLISH (High Confidence)
@@ -71,11 +93,23 @@ export const yellowWords = [
   'milf',
   'incest',
   'creampie',
-  'gangbang',
   'bdsm',
   'fetish',
   'erotica',
   'nsfw',
+  'blowjob',
+  'deepthroat',
+  'squirt',
+  'squirting',
+  'hardcore',
+  'masturbation',
+  'webcam',
+  'lesbian',
+  'cuckold',
+  'threesome',
+  'foursome',
+  'gangbang',
+  'cumshot',
 
   // --- Risky Words ---
   'nude',

@@ -444,11 +444,41 @@ const useCasShader = (
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const failuresRef = useRef(0);
   const rafRef = useRef<number | null>(null);
+  const resourcesRef = useRef<{
+    p: WebGLProgram | null;
+    vS: WebGLShader | null;
+    fS: WebGLShader | null;
+    b: WebGLBuffer | null;
+    tx: WebGLTexture | null;
+    gl: WebGLRenderingContext | null;
+  }>({ p: null, vS: null, fS: null, b: null, tx: null, gl: null });
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
     const cleanup = () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      const res = resourcesRef.current;
+      if (res.gl) {
+        const gl = res.gl;
+        if (res.p) {
+          if (res.vS) gl.detachShader(res.p, res.vS);
+          if (res.fS) gl.detachShader(res.p, res.fS);
+          gl.deleteProgram(res.p);
+        }
+        if (res.vS) gl.deleteShader(res.vS);
+        if (res.fS) gl.deleteShader(res.fS);
+        if (res.b) gl.deleteBuffer(res.b);
+        if (res.tx) gl.deleteTexture(res.tx);
+        resourcesRef.current = {
+          p: null,
+          vS: null,
+          fS: null,
+          b: null,
+          tx: null,
+          gl: null,
+        };
+      }
+
       if (canvasRef.current) {
         canvasRef.current.remove();
         canvasRef.current = null;
@@ -543,6 +573,8 @@ const useCasShader = (
 
     const uR = gl.getUniformLocation(p, 'r');
     const uS = gl.getUniformLocation(p, 's');
+
+    resourcesRef.current = { gl, p, vS, fS, b, tx };
 
     tech.setAttribute('data-cas-active', 'true');
     tech.dataset.casOwner = ownerRef.current;
@@ -748,12 +780,22 @@ export default function VideoJsPlayer({
     nativeAutoplayRef.current = { video: null, handler: null };
   }, []);
 
-  const tryPlayNow = useCallback(() => {
+  const tryPlayNow = useCallback(async () => {
     if (!mountedRef.current || !playerRef.current) return;
-    playerRef.current.play()?.catch(() => {
-      /* empty */
-    });
-  }, []);
+    try {
+      await playerRef.current.play();
+    } catch (e) {
+      if (debug)
+        console.warn('[Player] Initial play failed, retrying in 500ms...', e);
+      setTimeout(() => {
+        if (mountedRef.current && playerRef.current?.paused()) {
+          playerRef.current.play()?.catch(() => {
+            /* silent fail */
+          });
+        }
+      }, 500);
+    }
+  }, [debug]);
 
   const armAutoplay = useCallback(
     (videoEl?: HTMLVideoElement | null) => {
@@ -1029,7 +1071,7 @@ export default function VideoJsPlayer({
 
     const player = videojs(vid, {
       controls: false,
-      autoplay: false,
+      autoplay: autoPlay,
       preload: 'auto',
       fluid: false,
       fill: true,
@@ -1365,8 +1407,7 @@ export default function VideoJsPlayer({
             onPointerDown={(e) => {
               const rect = e.currentTarget.getBoundingClientRect();
 
-              // FIX: Rotated Coordinate Logic
-              // When rotated 90deg, progress runs Top->Bottom (clientY), not Left->Right (clientX)
+              // When rotated 90deg CW: UI Left (progress 0) is Screen Bottom, UI Right (progress 1) is Screen Top
               let rawP = (e.clientX - rect.left) / rect.width;
               if (isRotatedFullscreen) {
                 rawP = (e.clientY - rect.top) / rect.height;

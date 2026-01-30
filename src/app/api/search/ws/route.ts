@@ -1,25 +1,20 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { NextRequest } from 'next/server';
-import * as OpenCC from 'opencc-js';
 
 import { getAuthInfoFromCookie } from '@/lib/auth/server';
 import { getAvailableApiSites, getConfig } from '@/lib/config';
 import { searchFromApi } from '@/lib/downstream';
-import { yellowWords } from '@/lib/yellow';
 
 export const runtime = 'nodejs';
 
 // --- HELPERS ---
 
-const normalize = (s: string) =>
-  (s || '').toLowerCase().replace(/[^\u4e00-\u9fa5a-zA-Z0-9]+/g, '');
-
-const NORMALIZED_BLOCKLIST = yellowWords
-  .map((w) => normalize(String(w)))
-  .filter((w) => w.length > 0);
-
-const OPENCC_CONVERTER = OpenCC.Converter({ from: 'hk', to: 'cn' });
+import {
+  converter as OPENCC_CONVERTER,
+  isBlocked,
+  shouldFilterItem,
+} from '@/lib/yellow-filter';
 
 // Abort-aware timeout wrapper
 // Rejects immediately if signal aborts, preventing hanging promises
@@ -138,10 +133,7 @@ export async function GET(request: NextRequest) {
 
       // 1. PRE-FLIGHT BLOCK CHECK
       if (applyFilter) {
-        const normalizedQuery = normalize(convertedQuery);
-        const isRestricted = NORMALIZED_BLOCKLIST.some((word) =>
-          normalizedQuery.includes(word),
-        );
+        const isRestricted = isBlocked(convertedQuery);
 
         if (isRestricted) {
           if (process.env.NODE_ENV !== 'production') {
@@ -178,14 +170,9 @@ export async function GET(request: NextRequest) {
 
           let safeResults = results;
           if (applyFilter) {
-            safeResults = results.filter((item: any) => {
-              const typeName = normalize(item.type_name);
-              const name = normalize(item.title);
-              return (
-                !NORMALIZED_BLOCKLIST.some((w) => typeName.includes(w)) &&
-                !NORMALIZED_BLOCKLIST.some((w) => name.includes(w))
-              );
-            });
+            safeResults = results.filter(
+              (item: any) => !shouldFilterItem(item),
+            );
           }
 
           send({
