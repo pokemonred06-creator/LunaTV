@@ -1078,6 +1078,17 @@ export default function VideoJsPlayer({
         callbacksRef.current.onPause?.();
       }
     });
+    // FIX: Update duration immediately on loadedmetadata/durationchange
+    player.on('loadedmetadata', () => {
+      if (!mountedRef.current) return;
+      const d = player.duration() || 0;
+      if (Number.isFinite(d) && d > 0) setDuration(d);
+    });
+    player.on('durationchange', () => {
+      if (!mountedRef.current) return;
+      const d = player.duration() || 0;
+      if (Number.isFinite(d) && d > 0) setDuration(d);
+    });
     player.on('timeupdate', () => {
       if (!mountedRef.current) return;
       const t = player.currentTime() || 0;

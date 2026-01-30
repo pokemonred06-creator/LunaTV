@@ -13,6 +13,7 @@ export const yellowWords = [
   '情色', // Erotic
   '成人', // Adult
   '18禁', // 18+ Forbidden
+  '淫', // Lewd/Obscene
   '无码',
   '無碼', // Uncensored
   '有码',

@@ -1347,8 +1347,11 @@ function PlayPageClient() {
               </div>
               {detail?.desc && (
                 <div
-                  className='mt-0 text-base leading-relaxed opacity-90 overflow-y-auto pr-2 flex-1 min-h-0 scrollbar-hide'
-                  style={{ whiteSpace: 'pre-line' }}
+                  className='mt-0 text-base leading-relaxed opacity-90 overflow-y-auto pr-2 pb-4 max-h-40 md:max-h-60'
+                  style={{
+                    whiteSpace: 'pre-line',
+                    WebkitOverflowScrolling: 'touch',
+                  }}
                 >
                   {convert(detail.desc)}
                 </div>
