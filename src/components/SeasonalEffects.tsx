@@ -1,58 +1,28 @@
-'use client';
-
 import { usePathname } from 'next/navigation';
-import {
-  type CSSProperties,
-  memo,
-  useEffect,
-  useId,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import React, { memo, useEffect, useMemo, useRef, useState } from 'react';
+
+import PureSnow from './PureSnow';
+import { generateTextures } from './SeasonalEffectsHelpers';
+
+// -- Constants --
+const CSS_PREFIX = 'se-fx';
 
 // -- Types --
 export type Season = 'spring' | 'summer' | 'autumn' | 'winter' | 'auto' | 'off';
-export type Intensity = 'light' | 'normal' | 'heavy';
 type ActiveSeason = 'spring' | 'summer' | 'autumn' | 'winter';
+export type Intensity = 'gentle' | 'normal' | 'dense';
 
-export interface SeasonalEffectsProps {
+interface SeasonalEffectsProps {
   season?: Season;
   intensity?: Intensity;
+  disableMobile?: boolean;
   enabled?: boolean;
 }
 
-// -- Constants --
-const MAX_DELTA = 3.0;
-
-const intensityConfig = {
-  light: 50,
-  normal: 100,
-  heavy: 200,
-};
-
 // -- Helpers --
-const isModernMediaQuery = (mq: MediaQueryList): boolean => {
-  return typeof mq.addEventListener === 'function';
+const isActiveSeason = (s: string): s is ActiveSeason => {
+  return ['spring', 'summer', 'autumn', 'winter'].includes(s);
 };
-
-function usePrefersReducedMotion() {
-  const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
-    const update = () => setPrefersReducedMotion(mediaQuery.matches);
-    update();
-    if (isModernMediaQuery(mediaQuery)) {
-      mediaQuery.addEventListener('change', update);
-      return () => mediaQuery.removeEventListener('change', update);
-    } else {
-      mediaQuery.addListener(update);
-      return () => mediaQuery.removeListener(update);
-    }
-  }, []);
-  return prefersReducedMotion;
-}
 
 const getCurrentSeason = (): ActiveSeason => {
   const month = new Date().getMonth() + 1;
@@ -62,986 +32,649 @@ const getCurrentSeason = (): ActiveSeason => {
   return 'winter';
 };
 
-const isActiveSeason = (s: Season): s is ActiveSeason => {
-  return ['spring', 'summer', 'autumn', 'winter'].includes(s);
+function useSafeResizeObserver<T extends Element>(
+  ref: React.RefObject<T | null>,
+  callback: (entry: DOMRectReadOnly) => void,
+) {
+  useEffect(() => {
+    if (!ref.current) return;
+    const obs = new ResizeObserver((entries) => {
+      if (!entries[0]) return;
+      callback(entries[0].contentRect);
+    });
+    obs.observe(ref.current);
+    return () => obs.disconnect();
+  }, [ref, callback]);
+}
+
+// -- Glass Layer (Production Physics - Summer) --
+
+// Types for Physics Engine
+type GlassDrop = {
+  x: number;
+  y: number;
+  r: number; // radius
+  vx: number;
+  vy: number;
+  seed: number; // For stable random shape
+  wobble: number; // 0..1
+  stretch: number; // 0..1
+  age: number; // seconds
+  falling: boolean;
 };
 
-// -- Noise Generator --
-let noiseDataUrl = '';
-const getNoiseUrl = () => {
-  if (noiseDataUrl) return noiseDataUrl;
-  if (typeof document === 'undefined') return '';
-  const canvas = document.createElement('canvas');
-  canvas.width = 64;
-  canvas.height = 64;
-  const ctx = canvas.getContext('2d');
-  if (ctx) {
-    const idata = ctx.createImageData(64, 64);
-    for (let i = 0; i < idata.data.length; i += 4) {
-      const val = Math.random() * 255;
-      idata.data[i] = val;
-      idata.data[i + 1] = val;
-      idata.data[i + 2] = val;
-      idata.data[i + 3] = 20; // Alpha
+type GlassTrail = {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  w: number;
+  life: number; // 0..1
+};
+
+// Spatial Hash Helpers
+const GRID_CELL = 42;
+const getGridKey = (cx: number, cy: number) => (cx << 16) ^ cy;
+
+const buildGrid = (drops: GlassDrop[]) => {
+  const grid = new Map<number, number[]>();
+  for (let i = 0; i < drops.length; i++) {
+    const d = drops[i];
+    const k = getGridKey((d.x / GRID_CELL) | 0, (d.y / GRID_CELL) | 0);
+    let arr = grid.get(k);
+    if (!arr) {
+      arr = [];
+      grid.set(k, arr);
     }
-    ctx.putImageData(idata, 0, 0);
-    noiseDataUrl = canvas.toDataURL();
+    arr.push(i);
   }
-  return noiseDataUrl;
+  return grid;
 };
 
-// -- Glass Layer --
-const GlassLayer = memo(({ season }: { season: ActiveSeason }) => {
+// Drawing Helpers (No Clip Optimization)
+const drawDrop = (
+  ctx: CanvasRenderingContext2D,
+  d: GlassDrop,
+  t: number,
+  ramp: number,
+  cfg: { WOBBLE_AMP: number; WOBBLE_SPEED: number },
+) => {
+  const wob = d.wobble;
+  const baseR = d.r;
+
+  // Stretch: faster falling = more vertical elongation
+  const aspect = 1 + d.stretch * 0.55;
+  const rx = baseR * (1 - d.stretch * 0.18);
+  const ry = baseR * aspect;
+
+  // Irregular outline via few points (poly-blob)
+  const steps = 9;
+  ctx.beginPath();
+  for (let i = 0; i <= steps; i++) {
+    const a = (i / steps) * Math.PI * 2;
+    // Noise function for organic edge
+    const n =
+      Math.sin(a * 3.0 + d.seed * 9.1 + t * cfg.WOBBLE_SPEED) * 0.6 +
+      Math.cos(a * 2.0 + d.seed * 4.7 + t * cfg.WOBBLE_SPEED * 0.8) * 0.4;
+    const edge = 1 + n * (cfg.WOBBLE_AMP * wob);
+    const px = Math.cos(a) * rx * edge;
+    const py = Math.sin(a) * ry * edge;
+    if (i === 0) ctx.moveTo(d.x + px, d.y + py);
+    else ctx.lineTo(d.x + px, d.y + py);
+  }
+  ctx.closePath();
+
+  // 1. Body gradient (fake refraction depth)
+  const g = ctx.createRadialGradient(
+    d.x - rx * 0.22,
+    d.y - ry * 0.25,
+    Math.max(1, baseR * 0.15),
+    d.x,
+    d.y,
+    baseR * 1.25,
+  );
+  // Alpha ramps in with condensation
+  const alpha = 0.1 * ramp;
+  g.addColorStop(0, `rgba(255,255,255,${0.11 * ramp})`);
+  g.addColorStop(0.55, `rgba(255,255,255,${0.03 * ramp})`);
+  g.addColorStop(1, `rgba(0,0,0,${0.22 * ramp})`);
+  ctx.fillStyle = g;
+  ctx.fill();
+
+  // 2. Rim (thin bright edge, meniscus)
+  ctx.lineWidth = Math.max(0.6, baseR * 0.08);
+  ctx.strokeStyle = `rgba(255,255,255,${0.1 * ramp})`;
+  ctx.stroke();
+
+  // 3. Specular highlight (Top-Left)
+  ctx.beginPath();
+  ctx.ellipse(
+    d.x - rx * 0.28,
+    d.y - ry * 0.33,
+    Math.max(0.8, rx * 0.22),
+    Math.max(0.6, ry * 0.12),
+    -0.35,
+    0,
+    Math.PI * 2,
+  );
+  ctx.fillStyle = `rgba(255,255,255,${(0.22 + 0.12 * wob) * ramp})`;
+  ctx.fill();
+
+  // 4. Inner shadow (Bottom-Right, fake caustics)
+  ctx.beginPath();
+  ctx.ellipse(
+    d.x + rx * 0.2,
+    d.y + ry * 0.22,
+    rx * 0.55,
+    ry * 0.4,
+    0.2,
+    0,
+    Math.PI * 2,
+  );
+  ctx.fillStyle = `rgba(0,0,0,${alpha})`;
+  ctx.fill();
+};
+
+const drawTrails = (ctx: CanvasRenderingContext2D, trails: GlassTrail[]) => {
+  ctx.lineCap = 'round';
+  for (let i = 0; i < trails.length; i++) {
+    const tr = trails[i];
+    const a = tr.life;
+
+    // Double stroke for feathering
+    // Core
+    ctx.globalAlpha = a * 0.1;
+    ctx.lineWidth = tr.w * 1.6;
+    ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+    ctx.beginPath();
+    ctx.moveTo(tr.x1, tr.y1);
+    ctx.lineTo(tr.x2, tr.y2);
+    ctx.stroke();
+
+    // Sharp
+    ctx.globalAlpha = a * 0.18;
+    ctx.lineWidth = tr.w;
+    ctx.strokeStyle = 'rgba(255,255,255,0.45)';
+    ctx.beginPath();
+    ctx.moveTo(tr.x1, tr.y1);
+    ctx.lineTo(tr.x2, tr.y2);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+};
+
+const GlassLayer = memo(({ intensity }: { intensity: Intensity }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const winterRef = useRef<HTMLDivElement>(null);
 
-  // Unique ID for scoped styles/keyframes (prevents collisions)
-  const uniqueId = useId().replace(/:/g, '');
-  const animationName = `winterFogDrift_${uniqueId}`;
+  // State Refs (Mutable)
+  const stateRef = useRef({
+    drops: [] as GlassDrop[],
+    trails: [] as GlassTrail[],
+    startTime: 0,
+    spawnAcc: 0,
+    width: 0,
+    height: 0,
+  });
 
-  type Droplet = {
-    x: number;
-    y: number;
-    px: number;
-    py: number;
-    r: number;
-    vy: number;
-    isFalling: boolean;
-    phase: number;
-    dead?: boolean;
-  };
-  type TrailSeg = {
-    x1: number;
-    y1: number;
-    x2: number;
-    y2: number;
-    w: number;
-    life: number;
-  };
+  // Config
+  const CONFIG = useMemo(
+    () => ({
+      // Spawning
+      MAX_DROPS:
+        intensity === 'dense' ? 900 : intensity === 'normal' ? 500 : 220,
+      SPAWN_PER_SEC:
+        intensity === 'dense' ? 28 : intensity === 'normal' ? 16 : 7,
+      RAMP_TIME: 3.0, // seconds: clear -> full
+      CLEAR_HOLD: 0.8, // seconds: hold clear
+      MICRO_R_MAX: 2.2, // max radius for new micro drops
 
-  const dropsRef = useRef<Droplet[]>([]);
-  const trailsRef = useRef<TrailSeg[]>([]);
-  const rafRef = useRef<number>(0);
+      // Physics
+      GROWTH_PER_SEC: 0.35,
+      MERGE_DIST_FACTOR: 0.62,
+      GRAVITY_R: 4.0, // radius threshold to fall
+      GRAVITY: 420, // px/s^2
+      DRAG_X: 2.5,
+      DRAG_Y: 0.7,
+      TERM_V: 900,
+      DRIFT: 25,
 
-  const [isCoarse, setIsCoarse] = useState(false);
-  const [noiseUrl, setNoiseUrl] = useState('');
+      // Visuals
+      WOBBLE_SPEED: 2.2,
+      WOBBLE_AMP: 0.14,
+      TRAIL_SPAWN_DY: 2.0,
+      TRAIL_DECAY: 0.55,
+    }),
+    [intensity],
+  );
 
-  // 1. Setup
+  useSafeResizeObserver(canvasRef, (rect) => {
+    const c = canvasRef.current;
+    if (!c) return;
+    const dpr = Math.min(
+      2,
+      typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1,
+    );
+
+    c.width = rect.width * dpr;
+    c.height = rect.height * dpr;
+
+    stateRef.current.width = rect.width;
+    stateRef.current.height = rect.height;
+
+    // Reset on resize
+    stateRef.current.drops = [];
+    stateRef.current.trails = [];
+    stateRef.current.startTime = Date.now();
+  });
+
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    setNoiseUrl(getNoiseUrl());
-
-    const mq = window.matchMedia('(pointer: coarse)');
-    const update = () => setIsCoarse(mq.matches);
-    update();
-
-    if (isModernMediaQuery(mq)) {
-      mq.addEventListener('change', update);
-      return () => mq.removeEventListener('change', update);
-    } else {
-      mq.addListener(update);
-      return () => mq.removeListener(update);
-    }
-  }, []);
-
-  const isWinter = season === 'winter';
-  const isSummer = season === 'summer';
-
-  const supportsBackdrop =
-    typeof CSS !== 'undefined' &&
-    (CSS.supports('backdrop-filter: blur(1px)') ||
-      CSS.supports('-webkit-backdrop-filter: blur(1px)'));
-
-  // 2. Winter Logic
-  useEffect(() => {
-    if (!isWinter) return;
-    const el = winterRef.current;
-    if (!el) return;
-
-    let raf = 0;
-    let px = -9999,
-      py = -9999;
-
-    const updateVars = () => {
-      el.style.setProperty('--px', `${px}px`);
-      el.style.setProperty('--py', `${py}px`);
-      raf = 0;
-    };
-
-    const onMove = (e: PointerEvent) => {
-      px = e.clientX;
-      py = e.clientY;
-      if (!raf) raf = requestAnimationFrame(updateVars);
-    };
-
-    const clear = () => {
-      px = -9999;
-      py = -9999;
-      if (!raf) raf = requestAnimationFrame(updateVars);
-    };
-
-    const onOut = (e: MouseEvent) => {
-      if (!e.relatedTarget) clear();
-    };
-
-    window.addEventListener('pointermove', onMove, { passive: true });
-    window.addEventListener('pointercancel', clear);
-    window.addEventListener('blur', clear);
-    document.addEventListener('mouseleave', clear);
-    document.addEventListener('mouseout', onOut);
-
-    // -- Animation Injection (Scoped) --
-    const styleId = `seasonal-style-${uniqueId}`;
-    let style = document.getElementById(styleId) as HTMLStyleElement | null;
-    if (!style) {
-      style = document.createElement('style');
-      style.id = styleId;
-      document.head.appendChild(style);
-    }
-
-    const hasNoise = !!noiseUrl;
-    const layerCount = hasNoise ? 8 : 7;
-    const startPos = Array(layerCount).fill('0 0').join(', ');
-    const endPos =
-      (hasNoise ? '128px 128px' : '0 0') +
-      ', ' +
-      Array(layerCount - 1)
-        .fill('0 0')
-        .join(', ');
-
-    style.textContent = `
-      @keyframes ${animationName} {
-        0% { background-position: ${startPos}; }
-        100% { background-position: ${endPos}; }
-      }
-    `;
-
-    return () => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointercancel', clear);
-      window.removeEventListener('blur', clear);
-      document.removeEventListener('mouseleave', clear);
-      document.removeEventListener('mouseout', onOut);
-      if (raf) cancelAnimationFrame(raf);
-    };
-  }, [isWinter, noiseUrl, uniqueId, animationName]);
-
-  // 3. Summer Simulation (MOVED UP to run unconditionally)
-  useEffect(() => {
-    if (!isSummer) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d', { alpha: true });
+    const c = canvasRef.current;
+    if (!c) return;
+    const ctx = c.getContext('2d');
     if (!ctx) return;
 
-    const DROP_LIMIT = isCoarse ? 150 : 300;
-    const TRAIL_LIMIT = isCoarse ? 180 : 400;
-    const SPAWN_PER_SEC = isCoarse ? 12 : 24;
-    const GROW_PER_SEC = 0.15;
-    const GRAVITY_R_THRESHOLD = 5.5;
-    const GRAVITY = 800;
-    const WAVY_AMP = 12;
-    const WAVY_FREQ = 0.015;
-    const CELL = 32;
-    const cellKey = (cx: number, cy: number) => `${cx},${cy}`;
-    const grid = new Map<string, number[]>();
+    let raf = 0;
+    let lastTime = Date.now();
+    stateRef.current.startTime = Date.now();
 
-    let lastT = 0;
-    let spawnAcc = 0;
-    let running = true;
-    let resizeRaf = 0;
+    const loop = () => {
+      const now = Date.now();
+      const dt = Math.min((now - lastTime) / 1000, 0.1);
+      lastTime = now;
 
-    const getViewport = () => {
-      const vv = window.visualViewport;
-      return {
-        width: vv ? vv.width : window.innerWidth,
-        height: vv ? vv.height : window.innerHeight,
-      };
-    };
-
-    const resizeCanvas = () => {
-      const dpr = window.devicePixelRatio || 1;
-      const { width, height } = getViewport();
-      canvas.style.width = `${width}px`;
-      canvas.style.height = `${height}px`;
-      canvas.width = Math.floor(width * dpr);
-      canvas.height = Math.floor(height * dpr);
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    };
-
-    const requestResize = () => {
-      if (resizeRaf) cancelAnimationFrame(resizeRaf);
-      resizeRaf = requestAnimationFrame(() => {
-        resizeRaf = 0;
-        resizeCanvas();
-      });
-    };
-
-    // -- Realistic Lens Refraction --
-    const drawDroplet = (d: Droplet) => {
-      // 1. Refraction/Body (Light Inversion)
-      const g = ctx.createRadialGradient(d.x, d.y, d.r * 0.1, d.x, d.y, d.r);
-      g.addColorStop(0, 'rgba(255,255,255,0.02)');
-      g.addColorStop(0.7, 'rgba(0,0,0,0.08)');
-      g.addColorStop(1, 'rgba(0,0,0,0.25)');
-
-      ctx.beginPath();
-      ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2);
-      ctx.fillStyle = g;
-      ctx.fill();
-
-      // 2. Caustic Glow (Bottom Right)
-      const caustic = ctx.createRadialGradient(
-        d.x + d.r * 0.3,
-        d.y + d.r * 0.3,
-        0,
-        d.x + d.r * 0.3,
-        d.y + d.r * 0.3,
-        d.r * 0.6,
-      );
-      caustic.addColorStop(0, 'rgba(255,255,255,0.15)');
-      caustic.addColorStop(1, 'rgba(255,255,255,0)');
-
-      // Explicit new path for safety
-      ctx.beginPath();
-      ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2);
-      ctx.fillStyle = caustic;
-      ctx.fill();
-
-      // 3. Specular Highlight (Top Left)
-      ctx.beginPath();
-      ctx.ellipse(
-        d.x - d.r * 0.4,
-        d.y - d.r * 0.4,
-        d.r * 0.35,
-        d.r * 0.2,
-        Math.PI / 4,
-        0,
-        Math.PI * 2,
-      );
-      ctx.fillStyle = 'rgba(255,255,255,0.7)';
-      ctx.fill();
-    };
-
-    const drawTrail = (t: TrailSeg) => {
-      ctx.save();
-      ctx.globalAlpha = 0.2 * t.life;
-      ctx.lineCap = 'round';
-      ctx.lineWidth = t.w;
-      ctx.strokeStyle = 'rgba(255,255,255,0.4)';
-      ctx.beginPath();
-      ctx.moveTo(t.x1, t.y1);
-      ctx.lineTo(t.x2, t.y2);
-      ctx.stroke();
-      ctx.restore();
-    };
-
-    const addTrail = (d: Droplet) => {
-      const dx = d.x - d.px;
-      const dy = d.y - d.py;
-      if (dx * dx + dy * dy < 2) return;
-      trailsRef.current.push({
-        x1: d.px,
-        y1: d.py,
-        x2: d.x,
-        y2: d.y,
-        w: Math.max(1, d.r * 0.6),
-        life: 1,
-      });
-      if (trailsRef.current.length > TRAIL_LIMIT)
-        trailsRef.current.splice(0, trailsRef.current.length - TRAIL_LIMIT);
-    };
-
-    const spawnDrop = (w: number, h: number) => {
-      const d: Droplet = {
-        x: Math.random() * w,
-        y: Math.random() * h,
-        px: 0,
-        py: 0,
-        r: 2.0 + Math.random() * 3.5, // Larger drops (2px - 5.5px)
-        vy: 0,
-        isFalling: false,
-        phase: Math.random() * Math.PI * 2,
-      };
-      d.px = d.x;
-      d.py = d.y;
-      dropsRef.current.push(d);
-    };
-
-    const rebuildGrid = () => {
-      grid.clear();
-      const drops = dropsRef.current;
-      for (let i = 0; i < drops.length; i++) {
-        const d = drops[i];
-        if (d.dead || d.isFalling) continue;
-        const cx = Math.floor(d.x / CELL);
-        const cy = Math.floor(d.y / CELL);
-        const k = cellKey(cx, cy);
-        const bucket = grid.get(k);
-        if (bucket) bucket.push(i);
-        else grid.set(k, [i]);
+      const { width: w, height: h, drops, trails } = stateRef.current;
+      if (w === 0) {
+        raf = requestAnimationFrame(loop);
+        return;
       }
-    };
 
-    const tryCoalesce = (fallIdx: number) => {
-      const drops = dropsRef.current;
-      const d = drops[fallIdx];
-      if (!d || d.dead) return;
-      const cx = Math.floor(d.x / CELL);
-      const cy = Math.floor(d.y / CELL);
-      for (let oy = -1; oy <= 1; oy++) {
-        for (let ox = -1; ox <= 1; ox++) {
-          const k = cellKey(cx + ox, cy + oy);
-          const bucket = grid.get(k);
-          if (!bucket) continue;
-          for (let bi = bucket.length - 1; bi >= 0; bi--) {
-            const j = bucket[bi];
-            if (j === fallIdx) continue;
-            const t = drops[j];
-            if (!t || t.dead || t.isFalling) continue;
-            const dx = d.x - t.x;
-            const dy = d.y - t.y;
-            const rr = d.r + t.r;
-            if (dx * dx + dy * dy <= rr * rr) {
-              d.r = Math.sqrt(d.r * d.r + t.r * t.r);
-              t.dead = true;
-              return;
+      const dpr = c.width / w;
+
+      // 1. Ramp Logic
+      const elapsed = (now - stateRef.current.startTime) / 1000;
+      let ramp = 0;
+      if (elapsed > CONFIG.CLEAR_HOLD) {
+        const x = Math.min(1, (elapsed - CONFIG.CLEAR_HOLD) / CONFIG.RAMP_TIME);
+        ramp = x * x * (3 - 2 * x); // smoothstep
+      }
+
+      // 2. Spawning (Condensation)
+      const targetCount = Math.floor(CONFIG.MAX_DROPS * ramp);
+      if (ramp > 0) {
+        stateRef.current.spawnAcc += CONFIG.SPAWN_PER_SEC * ramp * dt;
+        while (stateRef.current.spawnAcc >= 1 && drops.length < targetCount) {
+          stateRef.current.spawnAcc -= 1;
+          drops.push({
+            x: Math.random() * w,
+            y: Math.random() * h,
+            r: 0.7 + Math.random() * Math.min(CONFIG.MICRO_R_MAX, 2.0),
+            vx: 0,
+            vy: 0,
+            seed: Math.random(),
+            wobble: Math.random(),
+            stretch: 0,
+            age: 0,
+            falling: false,
+          });
+        }
+      }
+
+      // 3. Physics & Trails
+      for (let i = drops.length - 1; i >= 0; i--) {
+        const d = drops[i];
+        d.age += dt;
+
+        // Growth phase
+        if (!d.falling) {
+          d.r = Math.min(d.r + CONFIG.GROWTH_PER_SEC * dt, 10);
+          if (d.r > CONFIG.GRAVITY_R && d.age > 0.8) d.falling = true;
+        }
+
+        // Falling Motion
+        if (d.falling) {
+          const mass = Math.max(0.4, d.r / 6);
+          d.vy = Math.min(CONFIG.TERM_V, d.vy + CONFIG.GRAVITY * mass * dt);
+
+          // Snake drift
+          d.vx += Math.sin(d.y * 0.03 + d.seed * 10) * CONFIG.DRIFT * dt;
+
+          // Drag
+          d.vx *= Math.exp(-CONFIG.DRAG_X * dt);
+          d.vy *= Math.exp(-CONFIG.DRAG_Y * dt);
+
+          const oldX = d.x;
+          const oldY = d.y;
+          d.x += d.vx * dt;
+          d.y += d.vy * dt;
+
+          // Stretch
+          const speed = Math.min(600, Math.hypot(d.vx, d.vy));
+          d.stretch = Math.min(1, speed / 500);
+
+          // Spawn Trail
+          if (d.y - oldY > CONFIG.TRAIL_SPAWN_DY) {
+            trails.push({
+              x1: oldX,
+              y1: oldY,
+              x2: d.x,
+              y2: d.y,
+              w: d.r * 0.65,
+              life: 1,
+            });
+          }
+
+          // Respawn loop (recycle as micro drop at top)
+          if (d.y > h + 80) {
+            d.y = -30 - Math.random() * 60;
+            d.x = Math.random() * w;
+            d.r = 0.8 + Math.random() * 1.4;
+            d.vx = 0;
+            d.vy = 0;
+            d.falling = false;
+            d.age = 0;
+            d.stretch = 0;
+          }
+        } else {
+          d.stretch *= Math.exp(-2.0 * dt); // Relax stretch
+        }
+      }
+
+      // Trail Decay
+      for (let i = trails.length - 1; i >= 0; i--) {
+        trails[i].life -= CONFIG.TRAIL_DECAY * dt;
+        if (trails[i].life <= 0) trails.splice(i, 1);
+      }
+      // Safety cap (FIFO)
+      if (trails.length > 1200) trails.splice(0, trails.length - 1200);
+
+      // 4. Spatial Hash Merging
+      // Rebuild grid once per frame then iterate
+      // We repeat 3 times to cascade merges fast
+      let grid = buildGrid(drops);
+
+      // Let's implement the simpler merge loop provided by user exactly
+      // "tryMergeDrops" adapted for valid TS scope
+      const mergePass = () => {
+        for (let i = 0; i < drops.length; i++) {
+          const a = drops[i];
+          const cx = (a.x / GRID_CELL) | 0;
+          const cy = (a.y / GRID_CELL) | 0;
+
+          for (let oy = -1; oy <= 1; oy++) {
+            for (let ox = -1; ox <= 1; ox++) {
+              const arr = grid.get(getGridKey(cx + ox, cy + oy));
+              if (!arr) continue;
+
+              for (const j of arr) {
+                if (j <= i || j >= drops.length) continue;
+                const b = drops[j];
+
+                // Dist Check
+                const dx = a.x - b.x;
+                const dy = a.y - b.y;
+                const rr = (a.r + b.r) * CONFIG.MERGE_DIST_FACTOR;
+                if (dx * dx + dy * dy > rr * rr) continue;
+
+                // Merge B into A
+                const area = a.r * a.r + b.r * b.r;
+                const newR = Math.sqrt(area);
+
+                const wa = a.r * a.r,
+                  wb = b.r * b.r;
+                a.x = (a.x * wa + b.x * wb) / (wa + wb);
+                a.y = (a.y * wa + b.y * wb) / (wa + wb);
+                a.vx = (a.vx * wa + b.vx * wb) / (wa + wb);
+                a.vy = (a.vy * wa + b.vy * wb) / (wa + wb);
+                a.r = newR;
+                a.wobble = Math.max(a.wobble, b.wobble) * 0.92 + 0.08;
+                a.age = Math.min(a.age, b.age);
+                a.falling = a.falling || b.falling;
+
+                // Remove B (Swap with last)
+                drops[j] = drops[drops.length - 1];
+                drops.pop();
+
+                return true; // Rebuild grid
+              }
             }
           }
         }
+        return false;
+      };
+
+      for (let k = 0; k < 4; k++) {
+        if (mergePass()) grid = buildGrid(drops);
+        else break;
       }
+
+      // 5. Render
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, w, h);
+
+      drawTrails(ctx, trails);
+
+      const timeSec = now / 1000;
+      for (let i = 0; i < drops.length; i++) {
+        drawDrop(ctx, drops[i], timeSec, ramp, CONFIG);
+      }
+
+      raf = requestAnimationFrame(loop);
     };
 
-    const tick = (t: number) => {
-      if (!running) return;
-      if (!lastT) lastT = t;
-      const dt = Math.min(0.05, (t - lastT) / 1000);
-      lastT = t;
-      const { width, height } = getViewport();
-      spawnAcc += SPAWN_PER_SEC * dt;
-      while (spawnAcc >= 1 && dropsRef.current.length < DROP_LIMIT) {
-        spawnAcc -= 1;
-        spawnDrop(width, height);
-      }
-      const trails = trailsRef.current;
-      for (let i = trails.length - 1; i >= 0; i--) {
-        trails[i].life -= dt * 0.3;
-        if (trails[i].life <= 0) {
-          const last = trails.length - 1;
-          if (i !== last) trails[i] = trails[last];
-          trails.pop();
-        }
-      }
-      rebuildGrid();
-      ctx.clearRect(0, 0, width, height);
-      for (let i = 0; i < trails.length; i++) drawTrail(trails[i]);
-      const drops = dropsRef.current;
-      for (let i = drops.length - 1; i >= 0; i--) {
-        const d = drops[i];
-        if (d.dead) continue;
-        d.px = d.x;
-        d.py = d.y;
-        if (!d.isFalling) {
-          d.r += GROW_PER_SEC * dt;
-          if (d.r > GRAVITY_R_THRESHOLD) {
-            d.isFalling = true;
-            d.vy = 60;
-          }
-        } else {
-          d.vy += GRAVITY * dt;
-          d.y += d.vy * dt;
-          d.x += Math.sin(d.y * WAVY_FREQ + d.phase) * (WAVY_AMP * dt);
-          addTrail(d);
-          tryCoalesce(i);
-        }
-        if (d.y > height + 30) {
-          d.dead = true;
-          continue;
-        }
-        drawDroplet(d);
-      }
-      if (drops.some((d) => d.dead))
-        dropsRef.current = drops.filter((d) => !d.dead);
-      rafRef.current = requestAnimationFrame(tick);
-    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, [CONFIG]);
 
-    const vv = window.visualViewport;
-    window.addEventListener('resize', requestResize, { passive: true });
-    if (vv) {
-      vv.addEventListener('resize', requestResize, { passive: true });
-      vv.addEventListener('scroll', requestResize, { passive: true });
-    }
-    requestResize();
-    rafRef.current = requestAnimationFrame(tick);
-    return () => {
-      running = false;
-      window.removeEventListener('resize', requestResize);
-      if (vv) {
-        vv.removeEventListener('resize', requestResize);
-        vv.removeEventListener('scroll', requestResize);
-      }
-      if (resizeRaf) cancelAnimationFrame(resizeRaf);
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
-      dropsRef.current = [];
-      trailsRef.current = [];
-    };
-  }, [isSummer, isCoarse]);
-
-  // ---- WINTER RENDER ----
-  if (isWinter) {
-    const blurPx = isCoarse ? 3 : 6;
-    const backdrop = supportsBackdrop
-      ? `blur(${blurPx}px) brightness(1.03) saturate(0.9)`
-      : undefined;
-
-    type Layer = { img: string; size: string; repeat: string; blend: string };
-
-    const layers: Layer[] = [
-      noiseUrl
-        ? {
-            img: `url(${noiseUrl})`,
-            size: '128px 128px',
-            repeat: 'repeat',
-            blend: 'overlay',
-          }
-        : null,
-      {
-        img: `repeating-linear-gradient(105deg, rgba(255,255,255,0) 0px, rgba(255,255,255,0.03) 14px, rgba(255,255,255,0) 28px)`,
-        size: '100% 100%',
-        repeat: 'no-repeat',
-        blend: 'soft-light',
-      },
-      {
-        img: `radial-gradient(circle at 0% 0%, rgba(255,255,255,0.35), transparent 55%)`,
-        size: '100% 100%',
-        repeat: 'no-repeat',
-        blend: 'normal',
-      },
-      {
-        img: `radial-gradient(circle at 100% 0%, rgba(255,255,255,0.33), transparent 55%)`,
-        size: '100% 100%',
-        repeat: 'no-repeat',
-        blend: 'normal',
-      },
-      {
-        img: `radial-gradient(circle at 0% 100%, rgba(255,255,255,0.30), transparent 60%)`,
-        size: '100% 100%',
-        repeat: 'no-repeat',
-        blend: 'normal',
-      },
-      {
-        img: `radial-gradient(circle at 100% 100%, rgba(255,255,255,0.32), transparent 60%)`,
-        size: '100% 100%',
-        repeat: 'no-repeat',
-        blend: 'normal',
-      },
-      {
-        img: `radial-gradient(circle 170px at calc(var(--px, -9999px) + 22px) calc(var(--py, -9999px) - 12px), rgba(255,255,255,0.02) 0%, rgba(255,255,255,0.16) 35%, rgba(255,255,255,0.62) 100%)`,
-        size: '100% 100%',
-        repeat: 'no-repeat',
-        blend: 'normal',
-      },
-      {
-        img: `radial-gradient(circle 110px at calc(var(--px, -9999px) - 18px) calc(var(--py, -9999px) + 10px), rgba(255,255,255,0) 0%, rgba(255,255,255,0.10) 45%, rgba(255,255,255,0.55) 100%)`,
-        size: '100% 100%',
-        repeat: 'no-repeat',
-        blend: 'normal',
-      },
-    ].filter((l): l is Layer => Boolean(l));
-
-    const baseStyle: CSSProperties = {
-      position: 'fixed',
-      inset: 0,
-      pointerEvents: 'none',
-      zIndex: 10,
-    };
-
-    return (
-      <div
-        ref={winterRef}
-        style={{
-          ...baseStyle,
-          willChange: 'background-position',
-          backdropFilter: backdrop,
-          WebkitBackdropFilter: backdrop,
-          backgroundImage: layers.map((l) => l.img).join(', '),
-          backgroundSize: layers.map((l) => l.size).join(', '),
-          backgroundRepeat: layers.map((l) => l.repeat).join(', '),
-          backgroundBlendMode: layers.map((l) => l.blend).join(', '),
-          opacity: 1,
-          filter: 'saturate(0.9) contrast(1.03)',
-          animation: noiseUrl
-            ? `${animationName} 40s linear infinite`
-            : undefined,
-        }}
-        aria-hidden='true'
-      />
-    );
-  }
-
-  // ---- SUMMER RENDER ----
-  if (isSummer) {
-    const baseStyle: CSSProperties = {
-      position: 'fixed',
-      inset: 0,
-      pointerEvents: 'none',
-      zIndex: 10,
-    };
-    return <canvas ref={canvasRef} style={baseStyle} aria-hidden='true' />;
-  }
-
-  return null;
+  return (
+    <canvas
+      ref={canvasRef}
+      className={`${CSS_PREFIX}-glass`}
+      style={{
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        width: '100%',
+        height: '100%',
+        pointerEvents: 'none',
+        zIndex: 2,
+      }}
+    />
+  );
 });
 GlassLayer.displayName = 'GlassLayer';
 
-// -- Texture Caching System --
-const createCachedCanvas = (
-  width: number,
-  height: number,
-  drawFn: (ctx: CanvasRenderingContext2D) => void,
-) => {
-  if (typeof document === 'undefined') return null;
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return null;
-  drawFn(ctx);
-  return canvas;
-};
-const shapes: {
-  leaf: HTMLCanvasElement[];
-  petal: HTMLCanvasElement[];
-  snow: HTMLCanvasElement | null;
-} = { leaf: [], petal: [], snow: null };
-let shapesInitialized = false;
-const initShapes = () => {
-  if (shapesInitialized) return;
-  shapesInitialized = true;
-  const snowCanvas = createCachedCanvas(15, 15, (ctx) => {
-    const grad = ctx.createRadialGradient(7.5, 7.5, 0, 7.5, 7.5, 7.5);
-    grad.addColorStop(0, 'rgba(255, 255, 255, 0.9)');
-    grad.addColorStop(0.5, 'rgba(255, 255, 255, 0.4)');
-    grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, 15, 15);
-  });
-  if (snowCanvas) shapes.snow = snowCanvas;
-  shapes.leaf = [];
-  const leafPalettes = [
-    { base: '#D2691E', highlight: '#FF8C00' },
-    { base: '#8B0000', highlight: '#CD5C5C' },
-    { base: '#DAA520', highlight: '#FFD700' },
-  ];
-  leafPalettes.forEach(({ base, highlight }) => {
-    const maple = createCachedCanvas(40, 40, (ctx) => {
-      const grad = ctx.createLinearGradient(10, 0, 30, 40);
-      grad.addColorStop(0, highlight);
-      grad.addColorStop(1, base);
-      ctx.fillStyle = grad;
-      ctx.strokeStyle = 'rgba(0,0,0,0.2)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(20, 40);
-      ctx.lineTo(20, 35);
-      ctx.bezierCurveTo(10, 35, 0, 25, 0, 15);
-      ctx.lineTo(5, 15);
-      ctx.lineTo(2, 5);
-      ctx.lineTo(10, 10);
-      ctx.lineTo(15, 0);
-      ctx.lineTo(20, 5);
-      ctx.lineTo(25, 0);
-      ctx.lineTo(30, 10);
-      ctx.lineTo(38, 5);
-      ctx.lineTo(35, 15);
-      ctx.lineTo(40, 15);
-      ctx.bezierCurveTo(40, 25, 30, 35, 20, 35);
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(20, 35);
-      ctx.lineTo(20, 5);
-      ctx.moveTo(20, 25);
-      ctx.lineTo(5, 15);
-      ctx.moveTo(20, 25);
-      ctx.lineTo(35, 15);
-      ctx.stroke();
-    });
-    if (maple) shapes.leaf.push(maple);
-    const oak = createCachedCanvas(30, 45, (ctx) => {
-      const grad = ctx.createLinearGradient(15, 0, 15, 45);
-      grad.addColorStop(0, highlight);
-      grad.addColorStop(1, base);
-      ctx.fillStyle = grad;
-      ctx.strokeStyle = 'rgba(0,0,0,0.15)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(15, 45);
-      ctx.quadraticCurveTo(5, 40, 5, 30);
-      ctx.bezierCurveTo(0, 25, 0, 15, 5, 10);
-      ctx.bezierCurveTo(5, 5, 10, 0, 15, 0);
-      ctx.bezierCurveTo(20, 0, 25, 5, 25, 10);
-      ctx.bezierCurveTo(30, 15, 30, 25, 25, 30);
-      ctx.quadraticCurveTo(25, 40, 15, 45);
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(15, 45);
-      ctx.lineTo(15, 5);
-      ctx.moveTo(15, 35);
-      ctx.lineTo(5, 25);
-      ctx.moveTo(15, 35);
-      ctx.lineTo(25, 25);
-      ctx.stroke();
-    });
-    if (oak) shapes.leaf.push(oak);
-  });
-  shapes.petal = [];
-  const petalColors = ['#FFC0CB', '#FFB7C5', '#FFF0F5'];
-  petalColors.forEach((color) => {
-    const petal = createCachedCanvas(20, 20, (ctx) => {
-      const grad = ctx.createRadialGradient(10, 20, 0, 10, 10, 20);
-      grad.addColorStop(0, '#FFFFFF');
-      grad.addColorStop(0.6, color);
-      grad.addColorStop(1, color);
-      ctx.fillStyle = grad;
-      ctx.beginPath();
-      ctx.moveTo(10, 20);
-      ctx.quadraticCurveTo(20, 10, 20, 5);
-      ctx.quadraticCurveTo(20, 0, 15, 0);
-      ctx.lineTo(10, 4);
-      ctx.lineTo(5, 0);
-      ctx.quadraticCurveTo(0, 0, 0, 5);
-      ctx.quadraticCurveTo(0, 10, 10, 20);
-      ctx.closePath();
-      ctx.fill();
-    });
-    if (petal) shapes.petal.push(petal);
-    const flower = createCachedCanvas(30, 30, (ctx) => {
-      ctx.translate(15, 15);
-      const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, 14);
-      grad.addColorStop(0, 'rgba(255,255,255,0.9)');
-      grad.addColorStop(0.5, color);
-      grad.addColorStop(1, color);
-      ctx.fillStyle = grad;
-      ctx.save();
-      for (let i = 0; i < 5; i++) {
-        ctx.beginPath();
-        ctx.ellipse(0, -8, 4, 8, 0, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.rotate((Math.PI * 2) / 5);
-      }
-      ctx.restore();
-      ctx.fillStyle = '#FFD700';
-      ctx.beginPath();
-      ctx.arc(0, 0, 3, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = '#A0522D';
-      ctx.save();
-      for (let j = 0; j < 5; j++) {
-        ctx.beginPath();
-        ctx.arc(0, -3, 0.8, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.rotate((Math.PI * 2) / 5);
-      }
-      ctx.restore();
-    });
-    if (flower) shapes.petal.push(flower);
-  });
-};
-
-// -- Particle Class --
-class Particle {
-  x = 0;
-  y = 0;
-  z = 0;
-  size = 0;
-  vx = 0;
-  vy = 0;
-  rotation = 0;
-  vRotation = 0;
-  type: ActiveSeason = 'winter';
-  swing = 0;
-  swingSpeed = 0;
-  flip = 0;
-  flipSpeed = 0;
-  color = '';
-  texture: HTMLCanvasElement | null = null;
-  w = 0;
-  h = 0;
-  constructor(width: number, height: number, type: ActiveSeason) {
-    this.type = type;
-    this.reset(width, height, true);
-  }
-  reset(width: number, height: number, initial = false) {
-    this.z = 0.2 + Math.random() * 0.8;
-    this.x = Math.random() * width;
-    this.y = initial ? Math.random() * height : -50;
-    this.rotation = Math.random() * Math.PI * 2;
-    this.vRotation = (Math.random() - 0.5) * 0.05;
-    this.flip = Math.random() * Math.PI * 2;
-    this.flipSpeed = (0.02 + Math.random() * 0.05) * this.z;
-    switch (this.type) {
-      case 'winter':
-        this.size = (2 + Math.random() * 4) * this.z;
-        this.vy = (0.5 + Math.random() * 1.5) * this.z;
-        this.vx = (Math.random() - 0.5) * 0.5;
-        this.swingSpeed = 0.02 * this.z;
-        this.texture = shapes.snow;
-        break;
-      case 'summer':
-        this.size = (15 + Math.random() * 15) * this.z;
-        this.vy = (25 + Math.random() * 10) * this.z;
-        this.vx = -1 * this.z;
-        this.color = `rgba(200, 220, 255, ${0.1 + 0.2 * this.z})`;
-        break;
-      case 'autumn':
-        this.size = (12 + Math.random() * 8) * this.z;
-        this.vy = (1 + Math.random() * 1.5) * this.z;
-        this.vx = (Math.random() - 0.5) * 2;
-        this.swingSpeed = 0.05 * this.z;
-        if (shapes.leaf.length > 0)
-          this.texture =
-            shapes.leaf[Math.floor(Math.random() * shapes.leaf.length)];
-        break;
-      case 'spring':
-        this.size = (8 + Math.random() * 6) * this.z;
-        this.vy = (0.8 + Math.random() * 1.0) * this.z;
-        this.vx = (Math.random() - 0.2) * 1.5;
-        this.swingSpeed = 0.03 * this.z;
-        if (shapes.petal.length > 0)
-          this.texture =
-            shapes.petal[Math.floor(Math.random() * shapes.petal.length)];
-        break;
-    }
-    if (this.texture && this.texture.width > 0 && this.texture.height > 0) {
-      this.w = this.size;
-      this.h = this.size * (this.texture.height / this.texture.width);
-    } else {
-      this.w = this.size;
-      this.h = this.size;
-    }
-  }
-  update(width: number, height: number, delta: number, wind: number) {
-    this.y += this.vy * delta;
-    this.rotation += this.vRotation * delta;
-    this.flip += this.flipSpeed * delta;
-    if (this.type === 'summer') {
-      this.x += (this.vx + wind * 0.5) * delta;
-    } else {
-      this.swing += this.swingSpeed * delta;
-      const swingMotion =
-        Math.sin(this.swing) * (this.type === 'winter' ? 0.5 : 2) * this.z;
-      this.x += (this.vx + swingMotion + wind * this.z) * delta;
-    }
-    if (this.y > height + 50 || this.x < -100 || this.x > width + 100) {
-      this.reset(width, height);
-    }
-  }
-  draw(ctx: CanvasRenderingContext2D) {
-    if (this.type === 'summer') {
-      ctx.strokeStyle = this.color;
-      ctx.lineWidth = 1.5 * this.z;
-      ctx.beginPath();
-      ctx.moveTo(this.x, this.y);
-      ctx.lineTo(this.x + this.vx, this.y + this.size);
-      ctx.stroke();
-      return;
-    }
-    if (!this.texture) return;
-    ctx.save();
-    ctx.translate(this.x, this.y);
-    ctx.globalAlpha = 0.4 + 0.6 * this.z;
-    if (this.type === 'winter') {
-      ctx.drawImage(this.texture, -this.w / 2, -this.h / 2, this.w, this.h);
-    } else {
-      ctx.rotate(this.rotation);
-      const flipY = Math.cos(this.flip);
-      const safeFlipY =
-        (Math.sign(flipY) || 1) * Math.max(0.15, Math.abs(flipY));
-      ctx.scale(1, safeFlipY);
-      ctx.drawImage(this.texture, -this.w / 2, -this.h / 2, this.w, this.h);
-    }
-    ctx.restore();
-  }
-}
-
-// -- Main Component --
-const SeasonalEffects: React.FC<SeasonalEffectsProps> = memo(
-  ({ season = 'auto', intensity = 'normal', enabled = true }) => {
+// -- Rain Layer (Summer Only - Canvas) --
+const RainLayer = memo(
+  ({ isCoarse, intensity }: { isCoarse: boolean; intensity: Intensity }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
-    const particles = useRef<Particle[]>([]);
-    const requestRef = useRef<number>(0);
-    const lastTimeRef = useRef<number>(0);
-    const windRef = useRef<number>(0);
-    const windTargetRef = useRef<number>(0);
-    const [mounted, setMounted] = useState(false);
-    const prefersReducedMotion = usePrefersReducedMotion();
-    const pathname = usePathname();
-    const isPlayPage = pathname?.startsWith('/play');
+    const stateRef = useRef({
+      drops: [] as { x: number; y: number; l: number; v: number }[],
+      width: 0,
+      height: 0,
+    });
+
+    useSafeResizeObserver(canvasRef, (rect) => {
+      const c = canvasRef.current;
+      if (!c) return;
+      const dpr = Math.min(
+        2,
+        typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1,
+      );
+      c.width = rect.width * dpr;
+      c.height = rect.height * dpr;
+      stateRef.current.width = rect.width;
+      stateRef.current.height = rect.height;
+
+      // Init drops
+      const count =
+        intensity === 'dense' ? 400 : intensity === 'normal' ? 200 : 80;
+      stateRef.current.drops = Array.from({ length: count }, () => ({
+        x: Math.random() * rect.width,
+        y: Math.random() * rect.height,
+        l: Math.random() * 20 + 20,
+        v: Math.random() * 20 + 40,
+      }));
+    });
 
     useEffect(() => {
-      initShapes();
-      setMounted(true);
-    }, []);
-    const resolvedSeason: ActiveSeason | 'off' = useMemo(() => {
-      if (!mounted) return 'off';
-      if (season === 'auto') return getCurrentSeason();
-      return isActiveSeason(season) ? season : 'off';
-    }, [season, mounted]);
-    const shouldDisable =
-      !enabled ||
-      resolvedSeason === 'off' ||
-      isPlayPage ||
-      prefersReducedMotion;
-
-    useEffect(() => {
-      if (shouldDisable || !mounted) {
-        if (requestRef.current) cancelAnimationFrame(requestRef.current);
-        particles.current = [];
-        const canvas = canvasRef.current;
-        if (canvas) {
-          const ctx = canvas.getContext('2d');
-          ctx?.clearRect(0, 0, canvas.width, canvas.height);
-        }
-        return;
-      }
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const ctx = canvas.getContext('2d', { alpha: true });
+      const c = canvasRef.current;
+      if (!c) return;
+      const ctx = c.getContext('2d');
       if (!ctx) return;
-      ctx.lineCap = 'round';
-      let running = true;
-      let resizeRaf = 0;
-      const getViewport = () => {
-        const vv = window.visualViewport;
-        return {
-          width: vv ? vv.width : window.innerWidth,
-          height: vv ? vv.height : window.innerHeight,
-        };
-      };
-      const resizeCanvas = () => {
-        const dpr = window.devicePixelRatio || 1;
-        const { width, height } = getViewport();
-        canvas.style.width = `${width}px`;
-        canvas.style.height = `${height}px`;
-        canvas.width = Math.floor(width * dpr);
-        canvas.height = Math.floor(height * dpr);
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      };
-      const requestResize = () => {
-        if (resizeRaf) cancelAnimationFrame(resizeRaf);
-        resizeRaf = requestAnimationFrame(() => {
-          resizeRaf = 0;
-          resizeCanvas();
-        });
-      };
-      const initParticles = () => {
-        const { width, height } = getViewport();
-        const isMobile = width < 768;
-        const baseCount = intensityConfig[intensity || 'normal'];
-        const count = Math.round(isMobile ? baseCount * 0.6 : baseCount);
-        const newParticles: Particle[] = [];
-        for (let i = 0; i < count; i++) {
-          newParticles.push(
-            new Particle(width, height, resolvedSeason as ActiveSeason),
-          );
-        }
-        particles.current = newParticles;
-      };
-      const animate = (time: number) => {
-        if (!running) return;
-        if (lastTimeRef.current === 0) lastTimeRef.current = time;
-        let delta = (time - lastTimeRef.current) / 16.67;
-        lastTimeRef.current = time;
-        if (delta > MAX_DELTA) delta = MAX_DELTA;
-        const { width, height } = getViewport();
-        if (Math.random() < 0.005)
-          windTargetRef.current = (Math.random() - 0.5) * 3;
-        windRef.current +=
-          (windTargetRef.current - windRef.current) * 0.02 * delta;
-        ctx.clearRect(0, 0, width, height);
-        particles.current.forEach((p) => {
-          p.update(width, height, delta, windRef.current);
-          p.draw(ctx);
-        });
-        requestRef.current = requestAnimationFrame(animate);
-      };
-      const vv = window.visualViewport;
-      window.addEventListener('resize', requestResize, { passive: true });
-      if (vv) {
-        vv.addEventListener('resize', requestResize, { passive: true });
-        vv.addEventListener('scroll', requestResize, { passive: true });
-      }
-      resizeCanvas();
-      initParticles();
-      lastTimeRef.current = 0;
-      requestRef.current = requestAnimationFrame(animate);
-      return () => {
-        running = false;
-        window.removeEventListener('resize', requestResize);
-        if (vv) {
-          vv.removeEventListener('resize', requestResize);
-          vv.removeEventListener('scroll', requestResize);
-        }
-        if (resizeRaf) cancelAnimationFrame(resizeRaf);
-        if (requestRef.current) cancelAnimationFrame(requestRef.current);
-        lastTimeRef.current = 0;
-      };
-    }, [shouldDisable, resolvedSeason, intensity, mounted]);
 
-    if (!mounted) return null;
-    const backgroundGradients: Record<ActiveSeason, string> = {
-      spring:
-        'linear-gradient(180deg, rgba(255,182,193,0.08) 0%, transparent 100%)',
-      summer:
-        'linear-gradient(180deg, rgba(144,238,144,0.06) 0%, transparent 100%)',
-      autumn:
-        'linear-gradient(180deg, rgba(255,99,71,0.08) 0%, transparent 100%)',
-      winter:
-        'linear-gradient(180deg, rgba(224,255,255,0.1) 0%, transparent 100%)',
-    };
-    const showEffect = !shouldDisable;
+      let raf = 0;
+      const loop = () => {
+        const { width: w, height: h, drops } = stateRef.current;
+        if (w === 0) {
+          raf = requestAnimationFrame(loop);
+          return;
+        }
+
+        const dpr = c.width / w;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.clearRect(0, 0, w, h);
+
+        ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+
+        for (const d of drops) {
+          d.y += d.v * 0.5; // slow down slightly
+          if (d.y > h + d.l) {
+            d.y = -d.l;
+            d.x = Math.random() * w;
+          }
+          ctx.moveTo(d.x, d.y);
+          ctx.lineTo(d.x, d.y + d.l);
+        }
+        ctx.stroke();
+        raf = requestAnimationFrame(loop);
+      };
+      raf = requestAnimationFrame(loop);
+      return () => cancelAnimationFrame(raf);
+    }, [intensity]);
 
     return (
-      <>
-        {showEffect && (
-          <div
-            style={{
-              position: 'fixed',
-              inset: 0,
-              pointerEvents: 'none',
-              zIndex: 0,
-              background: backgroundGradients[resolvedSeason as ActiveSeason],
-              opacity: 0.5,
-              willChange: 'transform',
-            }}
-            aria-hidden='true'
-          />
-        )}
-        {showEffect && (
-          <canvas
-            ref={canvasRef}
-            style={{
-              position: 'fixed',
-              top: 0,
-              left: 0,
-              width: '100%',
-              height: '100%',
-              pointerEvents: 'none',
-              zIndex: 5,
-              willChange: 'transform',
-            }}
-            aria-hidden='true'
-          />
-        )}
-        {showEffect && <GlassLayer season={resolvedSeason as ActiveSeason} />}
-      </>
+      <canvas
+        ref={canvasRef}
+        className={`${CSS_PREFIX}-rain`}
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          pointerEvents: 'none',
+          zIndex: 1,
+        }}
+      />
     );
   },
 );
+RainLayer.displayName = 'RainLayer';
 
-SeasonalEffects.displayName = 'SeasonalEffects';
-export default SeasonalEffects;
+// -- Main Component --
+export const SeasonalEffects: React.FC<SeasonalEffectsProps> = ({
+  season = 'auto',
+  intensity = 'normal',
+  disableMobile = false,
+  enabled,
+}) => {
+  const [mounted, setMounted] = useState(false);
+  const [textures, setTextures] = useState<{
+    leaves: string[];
+    petals: string[];
+    snow: string[];
+  }>({
+    leaves: [],
+    petals: [],
+    snow: [],
+  });
+  const pathname = usePathname();
+
+  // Disable on Player page to save perf
+  const isPlayerPage = pathname?.startsWith('/play');
+
+  useEffect(() => {
+    setMounted(true);
+    // Generate textures on mount
+    setTextures(generateTextures());
+  }, []);
+
+  const resolvedSeason: ActiveSeason | 'off' = useMemo(() => {
+    if (!mounted) return 'off';
+    if (season === 'auto') return getCurrentSeason();
+    if (season === 'off') return 'off';
+    if (isActiveSeason(season)) return season;
+    return 'off';
+  }, [season, mounted]);
+
+  if (!mounted || resolvedSeason === 'off' || isPlayerPage) return null;
+
+  return (
+    <div
+      className={`${CSS_PREFIX}-container`}
+      style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        width: '100%',
+        height: '100%',
+        pointerEvents: 'none',
+        zIndex: 0,
+        overflow: 'hidden',
+      }}
+    >
+      {/* Background Gradients */}
+      {resolvedSeason === 'autumn' && (
+        <div
+          className={`${CSS_PREFIX}-bg`}
+          style={{
+            position: 'absolute',
+            inset: 0,
+            background:
+              'linear-gradient(180deg, rgba(60,30,0,0.1) 0%, transparent 100%)',
+            zIndex: 1,
+            pointerEvents: 'none',
+          }}
+        />
+      )}
+      {resolvedSeason === 'winter' && (
+        <div
+          className={`${CSS_PREFIX}-bg`}
+          style={{
+            position: 'absolute',
+            inset: 0,
+            background:
+              'linear-gradient(180deg, rgba(224,255,255,0.1) 0%, transparent 100%)',
+            zIndex: 1,
+            pointerEvents: 'none',
+          }}
+        />
+      )}
+
+      {/* Summer = Canvas Rain + Glass Layer */}
+      {resolvedSeason === 'summer' && (
+        <>
+          <RainLayer isCoarse={false} intensity={intensity} />
+          <GlassLayer intensity={intensity} />
+        </>
+      )}
+
+      {/* Winter/Spring/Autumn = PureSnow (DOM) with Textures */}
+      {resolvedSeason !== 'summer' && (
+        <PureSnow
+          mode={resolvedSeason}
+          count={intensity === 'dense' ? 150 : intensity === 'normal' ? 80 : 40}
+          textures={
+            resolvedSeason === 'autumn'
+              ? textures.leaves
+              : resolvedSeason === 'spring'
+                ? textures.petals
+                : textures.snow
+          }
+        />
+      )}
+    </div>
+  );
+};

@@ -10,7 +10,7 @@ import {
 } from 'react';
 
 import type { Intensity, Season } from './SeasonalEffects';
-import SeasonalEffects from './SeasonalEffects';
+import { SeasonalEffects } from './SeasonalEffects';
 
 interface SeasonalEffectsContextType {
   enabled: boolean;
@@ -118,7 +118,7 @@ export const seasonOptions: { value: Season; label: string }[] = [
 ];
 
 export const intensityOptions: { value: Intensity; label: string }[] = [
-  { value: 'light', label: '轻柔' },
+  { value: 'gentle', label: '轻柔' },
   { value: 'normal', label: '正常' },
-  { value: 'heavy', label: '浓密' },
+  { value: 'dense', label: '浓密' },
 ];
