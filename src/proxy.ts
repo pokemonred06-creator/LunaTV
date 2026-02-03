@@ -23,6 +23,7 @@ function shouldSkipAuth(pathname: string): boolean {
     '/api/auth/verify', // Allow magic link verification
     '/api/proxy',
     '/api/image-proxy',
+    '/api/seasonal-effects',
   ];
 
   return skipPaths.some((path) => pathname.startsWith(path));

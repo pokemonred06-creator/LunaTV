@@ -118,7 +118,7 @@ export const seasonOptions: { value: Season; label: string }[] = [
 ];
 
 export const intensityOptions: { value: Intensity; label: string }[] = [
-  { value: 'gentle', label: '轻柔' },
+  { value: 'light', label: '轻柔' },
   { value: 'normal', label: '正常' },
-  { value: 'dense', label: '浓密' },
+  { value: 'heavy', label: '浓密' },
 ];
