@@ -58,6 +58,7 @@ export interface VideoCardProps {
   isBangumi?: boolean;
   isAggregate?: boolean;
   origin?: 'vod' | 'live';
+  desc?: string;
 }
 
 export type VideoCardHandle = {
@@ -180,6 +181,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       isBangumi = false,
       isAggregate = false,
       origin = 'vod',
+      desc = '',
     },
     ref,
   ) {
@@ -294,6 +296,8 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       if (searchType) params.set('stype', searchType);
       if (isAggregate) params.set('prefer', 'true');
       if (query) params.set('stitle', query.trim());
+      // Pass truncated description for immediate loading UI
+      if (desc) params.set('desc', desc.substring(0, 500));
 
       if (!source && !id && poster) params.set('cover', poster);
 
@@ -322,6 +326,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       query,
       from,
       poster,
+      desc,
     ]);
 
     const handleClick = useCallback(

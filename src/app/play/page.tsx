@@ -181,7 +181,9 @@ function PlayPageClient() {
   const [videoTitle, setVideoTitle] = useState(searchParams.get('title') || '');
   const [videoYear, setVideoYear] = useState(searchParams.get('year') || '');
   const [videoCover, setVideoCover] = useState(searchParams.get('cover') || '');
-  const [videoDesc, setVideoDesc] = useState('');
+  const [videoDesc, setVideoDesc] = useState(
+    searchParams.get('desc') || searchParams.get('videoDesc') || '',
+  );
   const [videoDoubanId, setVideoDoubanId] = useState(0);
   const [currentSource, setCurrentSource] = useState(
     searchParams.get('source') || '',
