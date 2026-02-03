@@ -1143,13 +1143,6 @@ function PlayPageClient() {
                   {videoYear}
                 </span>
               )}
-              {videoDesc && (
-                <div className='mt-4 max-w-lg mx-auto'>
-                  <p className='text-sm text-gray-500 dark:text-gray-400 line-clamp-3 text-center leading-relaxed animate-in fade-in duration-700'>
-                    {convert(videoDesc)}
-                  </p>
-                </div>
-              )}
             </div>
           </div>
           <div className='mb-6 mt-6 w-80 mx-auto'>
@@ -1172,6 +1165,13 @@ function PlayPageClient() {
               {convert(loadingMessage)}
             </p>
           </div>
+          {videoDesc && (
+            <div className='mt-8 max-w-lg mx-auto px-4'>
+              <p className='text-sm text-gray-500 dark:text-gray-400 line-clamp-3 text-center leading-relaxed animate-in fade-in duration-700'>
+                {convert(videoDesc)}
+              </p>
+            </div>
+          )}
         </div>
       </PageLayout>
     );
