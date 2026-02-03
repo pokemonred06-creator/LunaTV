@@ -26,6 +26,7 @@ export class WebGL2Renderer implements Renderer {
   constructor(private canvas: HTMLCanvasElement) {
     // defer init
   }
+
   onContextLost(): void {
     throw new Error('Method not implemented.');
   }
@@ -65,6 +66,20 @@ export class WebGL2Renderer implements Renderer {
 
     this.initBuffers();
     this.initFBOs();
+  }
+
+  private compileShader(type: number, source: string): WebGLShader | null {
+    const gl = this.gl!;
+    const shader = gl.createShader(type);
+    if (!shader) return null;
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+      console.error('Shader compile error:', gl.getShaderInfoLog(shader));
+      gl.deleteShader(shader);
+      return null;
+    }
+    return shader;
   }
 
   private createShader(type: number, source: string): WebGLShader {
@@ -243,6 +258,110 @@ export class WebGL2Renderer implements Renderer {
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
 
+  // --- Sprite Logic ---
+  private programSprite: WebGLProgram | null = null;
+  private texSprites: WebGLTexture | null = null;
+  private vaoSprite: WebGLVertexArrayObject | null = null;
+  private bufSpriteInst: WebGLBuffer | null = null;
+
+  private async initSprites(assets: {
+    snow?: HTMLImageElement[];
+    leaves?: HTMLImageElement[];
+    petals?: HTMLImageElement[];
+  }) {
+    const gl = this.gl!;
+
+    // Compile Sprite Program
+    try {
+      this.programSprite = this.createProgram(vsSprite, fsSprite);
+    } catch (e) {
+      console.error('Sprite shader error', e);
+      return;
+    }
+    if (!this.programSprite) return;
+
+    // Create Texture Array
+    // We assume max 12 textures (4 per season) 256x256
+    const w = 256;
+    const h = 256;
+    const depth = 12;
+    this.texSprites = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.texSprites);
+    gl.texStorage3D(gl.TEXTURE_2D_ARRAY, 1, gl.RGBA8, w, h, depth);
+
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+    // Upload Textures
+    // Index Mapping:
+    // 0-3: Snow
+    // 4-7: Leaves
+    // 8-11: Petals
+
+    const upload = (imgs: HTMLImageElement[] | undefined, offset: number) => {
+      if (!imgs) return;
+      imgs.forEach((img, i) => {
+        if (i >= 4) return;
+        gl.texSubImage3D(
+          gl.TEXTURE_2D_ARRAY,
+          0,
+          0,
+          0,
+          offset + i,
+          w,
+          h,
+          1,
+          gl.RGBA,
+          gl.UNSIGNED_BYTE,
+          img,
+        );
+      });
+    };
+
+    upload(assets.snow, 0);
+    upload(assets.leaves, 4);
+    upload(assets.petals, 8);
+
+    // VAO
+    this.vaoSprite = gl.createVertexArray();
+    gl.bindVertexArray(this.vaoSprite);
+
+    // 0: Quad Vertex (Static)
+    // We can reuse bufDropGeom from drops! (It's just a quad -0.5..0.5)
+    // Wait, bufDropGeom isn't exposed. Let's make a new one to be safe/clean.
+    const bufQuad = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, bufQuad);
+    gl.bufferData(
+      gl.ARRAY_BUFFER,
+      new Float32Array([-0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5]),
+      gl.STATIC_DRAW,
+    );
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+
+    // Instance Data
+    // x, y, size, rotation, type, opacity
+    const bufInst = gl.createBuffer();
+    this.bufSpriteInst = bufInst;
+    gl.bindBuffer(gl.ARRAY_BUFFER, bufInst);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(1000 * 6), gl.DYNAMIC_DRAW);
+
+    // 1: x,y,size,rot (vec4)
+    gl.enableVertexAttribArray(1);
+    gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 24, 0);
+    gl.vertexAttribDivisor(1, 1);
+
+    // 2: type, opacity (vec2)
+    gl.enableVertexAttribArray(2);
+    gl.vertexAttribPointer(2, 2, gl.FLOAT, false, 24, 16);
+    gl.vertexAttribDivisor(2, 1);
+
+    gl.vertexAttribDivisor(2, 1);
+
+    gl.bindVertexArray(null);
+  }
   resize(width: number, height: number, dpr: number) {
     if (this.width === width && this.height === height && this.dpr === dpr)
       return;
@@ -261,11 +380,76 @@ export class WebGL2Renderer implements Renderer {
 
   render(state: RenderState) {
     const gl = this.gl;
+    if (!gl) return;
+
+    // Check if season Changed/Init needed
+    if (state.season !== 'summer' && !this.programSprite) {
+      // Lazy Init Sprites on first non-summer frame
+      this.initSprites(state.assets).catch((e) => console.error(e));
+      // Return early this frame
+      return;
+    }
+
+    if (state.season === 'summer') {
+      this.renderGlass(state);
+    } else {
+      this.renderSprites(state);
+    }
+  }
+
+  private renderSprites(state: RenderState) {
+    const gl = this.gl!;
+    const prog = this.programSprite;
+    const vao = this.vaoSprite;
+    if (!prog || !vao || !this.texSprites) return;
+
+    gl.viewport(0, 0, this.width, this.height);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    gl.useProgram(prog);
+
+    // Uniforms
+    const uRes = gl.getUniformLocation(prog, 'u_res');
+    gl.uniform2f(uRes, this.width, this.height);
+
+    // Texture
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.texSprites);
+    const uTex = gl.getUniformLocation(prog, 'u_textures');
+    gl.uniform1i(uTex, 0);
+
+    // Instance Data
+    const sprites = state.sprites;
+    if (sprites.length === 0) return;
+
+    const data = new Float32Array(sprites.length * 6);
+    for (let i = 0; i < sprites.length; i++) {
+      const s = sprites[i];
+      const offset = i * 6;
+      data[offset + 0] = s.x;
+      data[offset + 1] = s.y;
+      data[offset + 2] = s.size;
+      data[offset + 3] = s.rotation;
+      data[offset + 4] = s.type;
+      data[offset + 5] = s.opacity;
+    }
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.bufSpriteInst);
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, data);
+
+    gl.bindVertexArray(vao);
+    gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, sprites.length);
+    gl.bindVertexArray(null);
+  }
+
+  private renderGlass(state: RenderState) {
+    const gl = this.gl!;
     const programDrop = this.programDrop;
     const programTrail = this.programTrail;
     const programComposite = this.programComposite;
 
-    if (!gl || !programDrop || !programTrail || !programComposite) return;
+    if (!programDrop || !programTrail || !programComposite) return;
 
     // 0. Update BG if changed
     if (state.backgroundImage) {
@@ -421,6 +605,68 @@ export class WebGL2Renderer implements Renderer {
 
 // --- SHADERS ---
 
+// --- Sprite Shaders (Snow, Leaves, Petals) ---
+const vsSprite = `#version 300 es
+layout(location=0) in vec2 i_pos;      // Quad vertex (-0.5..0.5)
+layout(location=1) in vec4 i_params;   // x,y, size, rotation
+layout(location=2) in vec2 i_meta;     // type, opacity
+
+uniform vec2 u_res;
+
+out vec2 v_uv;
+out float v_type;
+out float v_opacity;
+
+void main() {
+  float x = i_params.x;
+  float y = i_params.y;
+  float size = i_params.z;
+  float rot = i_params.w;
+  
+  float c = cos(rot);
+  float s = sin(rot);
+  mat2 rotMat = mat2(c, -s, s, c);
+  
+  vec2 pos = rotMat * i_pos * size;
+  vec2 worldPos = vec2(x, y) + pos;
+  
+  // Normalize to Clip Space (-1..1)
+  // 0..w -> -1..1
+  vec2 clip = (worldPos / u_res) * 2.0 - 1.0;
+  clip.y *= -1.0; // Flip Y
+  
+  gl_Position = vec4(clip, 0.0, 1.0);
+  v_uv = i_pos + 0.5; // 0..1
+  v_type = i_meta.x;
+  v_opacity = i_meta.y;
+}
+`;
+
+const fsSprite = `#version 300 es
+precision highp float;
+
+in vec2 v_uv;
+in float v_type;
+in float v_opacity;
+
+uniform sampler2DArray u_textures; // Texture Array for sprites
+
+out vec4 fragColor;
+
+void main() {
+  // Sample texture array based on v_type
+  vec4 color = texture(u_textures, vec3(v_uv, v_type));
+  
+  // Apply opacity
+  color.a *= v_opacity;
+  
+  if (color.a < 0.01) discard;
+  
+  fragColor = color;
+}
+`;
+
+// --- Drop Shaders (Glass) ---
 const vsDrop = `#version 300 es
 layout(location=0) in vec2 pos;
 layout(location=1) in vec2 i_pos;
@@ -431,6 +677,7 @@ uniform vec2 u_res;
 out vec2 v_uv;
 out vec2 v_center;
 out float v_r;
+out float v_seed; // Random seed
 
 void main() {
   float r = i_params.x;
@@ -446,19 +693,18 @@ void main() {
   // Blob (r > 4.0): Dampen stretch (slug)
   
   float stretchFactor = 4.0;
-  if (r > 4.0) {
-      stretchFactor = 0.5; // Only stretch 1.5x for big blobs
+  if (r > 4.5) { // Slightly higher threshold
+      stretchFactor = 0.5; 
   }
   
   float sy = 1.0 + stretch * stretchFactor;
   float sx = 1.0 / sqrt(sy); 
   
-  // Allow shrinking down to 0.2 (Thin streaks)
-  sx = max(0.2, 1.0 - stretch * 0.5); 
+  // Allow shrinking down to 0.25 (Thicker streaks)
+  sx = max(0.25, 1.0 - stretch * 0.5); 
 
   vec2 scale = vec2(r * sx, r * sy);
   vec2 worldPos = i_pos + pos * 2.0 * scale; 
-
   
   gl_Position = vec4( (worldPos / u_res) * 2.0 - 1.0, 0.0, 1.0);
   gl_Position.y = -gl_Position.y; // Flip Y
@@ -466,6 +712,7 @@ void main() {
   v_uv = pos * 2.0; // -1 to 1
   v_center = i_pos;
   v_r = r;
+  v_seed = fract(sin(dot(i_pos, vec2(12.9898, 78.233))) * 43758.5453);
 }
 `;
 
@@ -474,17 +721,33 @@ precision highp float;
 in vec2 v_uv;
 in vec2 v_center;
 in float v_r;
+in float v_seed;
 
 uniform vec2 u_res;
 
 out vec4 fragColor;
 
 void main() {
-  float r2 = dot(v_uv, v_uv);
-  if (r2 > 1.0) discard;
+  // Polar Coordinates
+  float angle = atan(v_uv.y, v_uv.x);
+  float radius = length(v_uv);
   
-  float dist = sqrt(r2);
-  vec3 N = vec3(v_uv, sqrt(1.0 - r2));
+  // Natural Shape Distortion (Amoeba)
+  // Combine sin waves based on angle + seed
+  // Warp more for condensation (low stretch/radius), less for rain.
+  // For now apply globally.
+  float warp = sin(angle * 3.0 + v_seed * 10.0) * 0.1 + 
+               sin(angle * 5.0 - v_seed * 20.0) * 0.05 +
+               sin(angle * 7.0 + v_seed * 5.0) * 0.02;
+
+  float shapeRadius = 1.0 + warp;
+  
+  // SDF
+  float dist = radius / shapeRadius;
+
+  if (dist > 1.0) discard;
+  
+  vec3 N = vec3(v_uv, sqrt(1.0 - dist*dist));
   
   // Lighting
   vec3 lightDir = normalize(vec3(-0.3, 0.8, 1.0));

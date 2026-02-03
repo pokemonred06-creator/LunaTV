@@ -159,10 +159,13 @@ export const SeasonalEffects: React.FC<SeasonalEffectsProps> = ({
     width: 0,
     height: 0,
     dpr: 1,
+    season: 'summer', // Default, updated in loop
     drops: [],
     trails: [],
+    sprites: [],
     canvas: null as unknown as HTMLCanvasElement,
     backgroundImage: null,
+    assets: {},
     time: 0,
   });
 
@@ -242,14 +245,14 @@ export const SeasonalEffects: React.FC<SeasonalEffectsProps> = ({
       GRAVITY_ACC: 450,
       TERMINAL_VEL: 600,
       GRAVITY_R: 12.0,
-      GRAVITY: 180,
-      TERM_V: 400,
+      GRAVITY: 80,
+      TERM_V: 200,
       DRIFT: 50,
       WET_SCAN_RADIUS: 28,
       WET_SPRING: 55,
       WET_DAMP: 8.0,
       WET_VY_BOOST: 70,
-      MERGE_DIST_FACTOR: 0.75,
+      MERGE_DIST_FACTOR: 1.0,
       TRAIL_SPAWN_DY: 4.0,
       TRAIL_DECAY: 0.55,
     };
@@ -349,6 +352,7 @@ export const SeasonalEffects: React.FC<SeasonalEffectsProps> = ({
         const dt = Math.min((now - lastTime) / 1000, 0.1);
         lastTime = now;
         stateRef.current.time = now / 1000;
+        stateRef.current.season = resolvedSeason; // Sync season for Renderer
 
         if (document.hidden) {
           rafRef.current = requestAnimationFrame(loop);
@@ -359,7 +363,13 @@ export const SeasonalEffects: React.FC<SeasonalEffectsProps> = ({
 
         // --- PHYSICS UPDATE START ---
         const CONFIG = configRef.current;
-        const { width: w, height: h, drops, trails } = stateRef.current;
+        const {
+          width: w,
+          height: h,
+          drops,
+          trails,
+          sprites,
+        } = stateRef.current;
 
         // 1. Ramp & Spawn
         const elapsed = (now - startTimeRef.current) / 1000;
@@ -374,38 +384,82 @@ export const SeasonalEffects: React.FC<SeasonalEffectsProps> = ({
 
         if (ramp > 0) {
           spawnAccRef.current += CONFIG.SPAWN_PER_SEC * ramp * dt;
+        }
 
-          let safety = 0;
+        // --- PHYSICS UPDATE ---
+        // Branch based on season
+        // SUMMER: Drops (Rain/Condense)
+        // OTHERS: Sprites (Snow/Petals/Leaves)
+
+        if (resolvedSeason === 'summer') {
+          // ... Existing Summer Spawn Logic ...
           while (
             spawnAccRef.current >= 1 &&
-            drops.length < CONFIG.MAX_DROPS &&
-            safety++ < 20
+            drops.length < CONFIG.MAX_DROPS
+            // ... safety ...
           ) {
-            const isRain = Math.random() < 0.4;
-            const isDesktop = w >= 800; // Responsive Tuning
-
-            // Rain: Small radius (2px), falling fast -> Streaks
-            // Blob: Huge radius
-            //   - Mobile: 5-13px (Looks "just right" per user)
-            //   - Desktop: 2.5-6.5px (Looks "too big" if 13px)
+            spawnAccRef.current -= 1;
+            // ... Spawn Drop Code ...
+            const isRain = Math.random() < 0.8;
+            const isDesktop = w >= 800;
             const r = isRain
-              ? 1.5 + Math.random() * 2.0 // Rain: 1.5px-3.5px
+              ? 1.5 + Math.random() * 2.5
               : isDesktop
-                ? 2.5 + Math.random() * 4.0 // Desktop Blob: 2.5px-6.5px
-                : 5.0 + Math.random() * 8.0; // Mobile Blob: 5px-13px
+                ? 2.5 + Math.random() * 4.0
+                : 3.0 + Math.random() * 4.0;
 
             drops.push({
               x: Math.random() * w,
               y: isRain ? -50 : Math.random() * h,
               r: r,
               vx: isRain ? (Math.random() - 0.5) * 50 : 0,
-              vy: isRain ? 500 + Math.random() * 200 : 0,
+              vy: isRain ? 600 + Math.random() * 200 : 0,
               seed: Math.random(),
               wobble: Math.random(),
               stretch: isRain ? 1.0 : 0,
               age: 0,
               falling: isRain,
+              isRain: isRain,
             });
+          }
+        } else {
+          // ... Sprite Spawn Logic ...
+          const MAX_SPRITES = 150;
+          while (spawnAccRef.current >= 1 && sprites.length < MAX_SPRITES) {
+            spawnAccRef.current -= 1;
+            const size = 10 + Math.random() * 15;
+            const typeOffset =
+              resolvedSeason === 'autumn'
+                ? 4
+                : resolvedSeason === 'spring'
+                  ? 8
+                  : 0;
+            sprites.push({
+              x: Math.random() * w,
+              y: -50,
+              size: size,
+              rotation: Math.random() * Math.PI * 2,
+              vx: (Math.random() - 0.5) * 50, // Wind variation
+              vy: 50 + Math.random() * 100, // Fall speed
+              vr: (Math.random() - 0.5) * 2.0, // Rotation speed
+              type: typeOffset + Math.floor(Math.random() * 4), // Select correct texture from array
+              opacity: 0.8 + Math.random() * 0.2,
+            });
+          }
+
+          // Update Sprites
+          for (let i = sprites.length - 1; i >= 0; i--) {
+            const s = sprites[i];
+            s.x += s.vx * dt;
+            s.y += s.vy * dt;
+            s.rotation += s.vr * dt;
+            s.x += Math.sin(stateRef.current.time + s.type) * 20 * dt; // Sway
+
+            if (s.y > h + 50) {
+              // Wrap or Reset
+              s.y = -50;
+              s.x = Math.random() * w;
+            }
           }
         }
 
@@ -478,8 +532,8 @@ export const SeasonalEffects: React.FC<SeasonalEffectsProps> = ({
             d.x += d.vx * dt;
             d.y += d.vy * dt;
 
-            if (d.x < -60) d.x = w + 50;
-            else if (d.x > w + 60) d.x = -50;
+            if (d.x < 0) d.x = 0;
+            else if (d.x > w) d.x = w;
 
             const speed = Math.hypot(d.vx, d.vy);
             d.stretch = Math.min(1, speed / 500);
@@ -524,6 +578,10 @@ export const SeasonalEffects: React.FC<SeasonalEffectsProps> = ({
                 for (const j of arr) {
                   if (j <= i || j >= drops.length) continue;
                   const b = drops[j];
+
+                  // Physics Separation: Rain cannot merge with Condensation
+                  if (a.isRain !== b.isRain) continue;
+
                   const dx = a.x - b.x;
                   const dy = a.y - b.y;
                   const rr = (a.r + b.r) * CONFIG.MERGE_DIST_FACTOR;
@@ -583,7 +641,7 @@ export const SeasonalEffects: React.FC<SeasonalEffectsProps> = ({
       rendererRef.current?.destroy();
       rendererRef.current = null;
     };
-  }, [shouldRun, rect]);
+  }, [shouldRun, rect, resolvedSeason]);
 
   if (!enabled || !mounted || resolvedSeason === 'off') return null;
 

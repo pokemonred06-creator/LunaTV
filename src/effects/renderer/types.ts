@@ -9,6 +9,7 @@ export interface DropState {
   stretch: number;
   age: number;
   falling: boolean;
+  isRain: boolean;
 }
 
 export interface TrailState {
@@ -20,14 +21,33 @@ export interface TrailState {
   life: number;
 }
 
+export interface SpriteState {
+  x: number;
+  y: number;
+  size: number;
+  rotation: number;
+  vx: number;
+  vy: number;
+  vr: number; // Angular velocity
+  type: number; // Texture index (0=Leaf1, 1=Leaf2, etc.)
+  opacity: number;
+}
+
 export interface RenderState {
   width: number;
   height: number;
   dpr: number;
+  season: 'spring' | 'summer' | 'autumn' | 'winter';
   drops: DropState[];
   trails: TrailState[];
+  sprites: SpriteState[];
   canvas: HTMLCanvasElement;
   backgroundImage: HTMLImageElement | null;
+  assets: {
+    snow?: HTMLImageElement[];
+    leaves?: HTMLImageElement[];
+    petals?: HTMLImageElement[];
+  };
   time: number;
 }
 
