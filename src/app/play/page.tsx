@@ -181,6 +181,7 @@ function PlayPageClient() {
   const [videoTitle, setVideoTitle] = useState(searchParams.get('title') || '');
   const [videoYear, setVideoYear] = useState(searchParams.get('year') || '');
   const [videoCover, setVideoCover] = useState(searchParams.get('cover') || '');
+  const [videoDesc, setVideoDesc] = useState('');
   const [videoDoubanId, setVideoDoubanId] = useState(0);
   const [currentSource, setCurrentSource] = useState(
     searchParams.get('source') || '',
@@ -714,6 +715,8 @@ function PlayPageClient() {
         if (detailData.poster !== snap.videoCover)
           setVideoCover(detailData.poster);
 
+        if (detailData.desc) setVideoDesc(detailData.desc);
+
         setVideoDoubanId(detailData.douban_id || 0);
         setDetail(detailData);
 
@@ -959,6 +962,7 @@ function PlayPageClient() {
       setVideoTitle(newDetail.title || newTitle);
       setVideoYear(newDetail.year);
       setVideoCover(newDetail.poster);
+      setVideoDesc(newDetail.desc || '');
       setVideoDoubanId(newDetail.douban_id || 0);
       setCurrentSource(newSource);
       setCurrentId(newId);
@@ -1136,6 +1140,13 @@ function PlayPageClient() {
                 <span className='inline-block mt-2 px-3 py-1 bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 text-xs font-medium rounded-full'>
                   {videoYear}
                 </span>
+              )}
+              {videoDesc && (
+                <div className='mt-4 max-w-lg mx-auto'>
+                  <p className='text-sm text-gray-500 dark:text-gray-400 line-clamp-3 text-center leading-relaxed animate-in fade-in duration-700'>
+                    {convert(videoDesc)}
+                  </p>
+                </div>
               )}
             </div>
           </div>
