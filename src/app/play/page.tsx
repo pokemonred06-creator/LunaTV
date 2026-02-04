@@ -1166,10 +1166,28 @@ function PlayPageClient() {
             </p>
           </div>
           {videoDesc && (
-            <div className='mt-8 max-w-lg mx-auto px-4'>
-              <p className='text-sm text-gray-500 dark:text-gray-400 line-clamp-3 text-center leading-relaxed animate-in fade-in duration-700'>
-                {convert(videoDesc)}
-              </p>
+            <div className='mt-8 max-w-lg mx-auto px-4 w-full'>
+              <div className='h-20 overflow-hidden relative'>
+                <style>{`
+                  @keyframes scrollIntro {
+                    0% { transform: translateY(0); }
+                    100% { transform: translateY(-50%); }
+                  }
+                  .animate-scroll-intro {
+                    animation: scrollIntro 15s linear infinite;
+                  }
+                `}</style>
+                <div className='animate-scroll-intro'>
+                  <div className='space-y-4'>
+                    <p className='text-sm text-gray-500 dark:text-gray-400 text-center leading-relaxed'>
+                      {convert(videoDesc)}
+                    </p>
+                    <p className='text-sm text-gray-500 dark:text-gray-400 text-center leading-relaxed'>
+                      {convert(videoDesc)}
+                    </p>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
         </div>
