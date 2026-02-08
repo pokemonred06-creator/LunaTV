@@ -10,9 +10,15 @@ const nextConfig = {
 
   reactStrictMode: true,
 
-  // Proxy routes to Go server running on port 8080
+  // Proxy routes to Go server.
+  // Note: Next.js loads rewrites at build time, so runtime env toggles may not apply.
+  // Default to enabled (can be disabled explicitly via ENABLE_GO_PROXY=false).
   async rewrites() {
     const goProxyUrl = process.env.GO_PROXY_URL || 'http://127.0.0.1:8080';
+    const useGoProxy = process.env.ENABLE_GO_PROXY !== 'false';
+
+    if (!useGoProxy) return [];
+
     return [
       {
         source: '/api/proxy/:path*',

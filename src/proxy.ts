@@ -21,8 +21,6 @@ function shouldSkipAuth(pathname: string): boolean {
     '/api/cron',
     '/api/server-config',
     '/api/auth/verify', // Allow magic link verification
-    '/api/proxy',
-    '/api/image-proxy',
     '/api/seasonal-effects',
   ];
 
@@ -41,7 +39,7 @@ function handleAuthFailure(request: NextRequest): NextResponse {
   return NextResponse.redirect(loginUrl);
 }
 
-// Renamed from 'middleware' to 'proxy' for Next.js 16+ convention
+// Next.js 16+ proxy entrypoint (formerly middleware)
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
@@ -71,14 +69,8 @@ export async function proxy(request: NextRequest) {
     pathname.startsWith('/dashboard') || pathname.startsWith('/admin');
 
   if (isProtectedRoute) {
-    if (authInfo) {
-      return NextResponse.next();
-    }
-
-    const sessionCookie = request.cookies.get('session_id');
-    if (!sessionCookie) {
-      return NextResponse.redirect(new URL('/login', request.url));
-    }
+    // Already authenticated by the earlier authInfo check.
+    return NextResponse.next();
   }
 
   return NextResponse.next();
@@ -87,3 +79,6 @@ export async function proxy(request: NextRequest) {
 export const config = {
   matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
 };
+
+// Next.js 16 requires either default export or named 'proxy' export
+export default proxy;

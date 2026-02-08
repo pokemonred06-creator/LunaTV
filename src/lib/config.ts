@@ -48,8 +48,21 @@ const IS_PROD = process.env.NODE_ENV === 'production';
 // Explicit precedence: Env Var -> 'admin' (dev only) -> Empty string (unsafe)
 const OWNER_USERNAME = process.env.USERNAME ?? (IS_PROD ? '' : 'admin');
 
-if (IS_PROD && !OWNER_USERNAME) {
-  throw new Error('CRITICAL: process.env.USERNAME must be set in production.');
+// Avoid noisy warnings during `next build` (Next executes server code to collect page data).
+const IS_NEXT_BUILD =
+  process.env.NEXT_PHASE === 'phase-production-build' ||
+  process.env.NEXT_PHASE === 'phase-export';
+
+// Defer the critical check to runtime. console.warn is used instead of throw to avoid crashing.
+if (
+  IS_PROD &&
+  !IS_NEXT_BUILD &&
+  !OWNER_USERNAME &&
+  typeof window === 'undefined'
+) {
+  console.warn(
+    '[Config] WARNING: process.env.USERNAME is not set. Owner routes may fail.',
+  );
 }
 
 /**

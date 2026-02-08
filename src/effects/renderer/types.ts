@@ -4,12 +4,13 @@ export interface DropState {
   r: number;
   vx: number;
   vy: number;
-  seed: number;
   wobble: number;
   stretch: number;
   age: number;
   falling: boolean;
   isRain: boolean;
+  seed: number; // Stable random seed for shape distortion
+  trailY: number; // Accumulated distance for trail spawning
 }
 
 export interface TrailState {
@@ -49,6 +50,7 @@ export interface RenderState {
     petals?: HTMLImageElement[];
   };
   time: number;
+  flash: number; // 0.0 to 1.0 intensity
 }
 
 export interface Renderer {

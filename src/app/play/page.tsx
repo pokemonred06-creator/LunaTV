@@ -5,7 +5,7 @@
 import Hls from 'hls.js';
 import { Heart } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Suspense, useEffect, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import Player from 'video.js/dist/types/player';
 import 'videojs-mobile-ui';
 
@@ -28,6 +28,8 @@ import { getVideoResolutionFromM3u8, processImageUrl } from '@/lib/utils';
 import EpisodeSelector from '@/components/EpisodeSelector';
 import { useLanguage } from '@/components/LanguageProvider';
 import PageLayout from '@/components/PageLayout';
+import { ScrollableDescription } from '@/components/ScrollableDescription';
+import { useSeasonalEffects } from '@/components/SeasonalEffectsProvider';
 import VideoJsPlayer from '@/components/VideoJsPlayer';
 
 // -----------------------------------------------------------------------------
@@ -146,6 +148,7 @@ function PlayPageClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { convert } = useLanguage();
+  const { setBackgroundImage, registerPosterFrame } = useSeasonalEffects();
 
   // --- 基础状态 ---
   const [loading, setLoading] = useState(true);
@@ -215,6 +218,16 @@ function PlayPageClient() {
 
   // 核心播放器 Ref
   const playerRef = useRef<Player | null>(null);
+
+  const handlePosterRef = useCallback(
+    (el: HTMLDivElement | null) => registerPosterFrame('detail-poster', el),
+    [registerPosterFrame],
+  );
+
+  const handlePlayerRef = useCallback(
+    (el: HTMLDivElement | null) => registerPosterFrame('player', el),
+    [registerPosterFrame],
+  );
 
   const resumeTimeRef = useRef<number | null>(null);
   const lastSaveTimeRef = useRef<number>(0);
@@ -307,6 +320,25 @@ function PlayPageClient() {
     }
   }, []);
 
+  useEffect(() => {
+    if (debugEnabled) {
+      if (typeof window !== 'undefined') {
+        (window as any).debugLogs = (window as any).debugLogs || [];
+        (window as any).debugLogs.push(
+          `[${new Date().toISOString()}] PlayPageClient MOUNTED`,
+        );
+      }
+      return () => {
+        if (typeof window !== 'undefined') {
+          (window as any).debugLogs = (window as any).debugLogs || [];
+          (window as any).debugLogs.push(
+            `[${new Date().toISOString()}] PlayPageClient UNMOUNTED`,
+          );
+        }
+      };
+    }
+  }, [debugEnabled]);
+
   // --- Effects: URL 参数变更 ---
   useEffect(() => {
     const sTitle = searchParams.get('title') || '';
@@ -317,10 +349,12 @@ function PlayPageClient() {
     const sSTitle = searchParams.get('stitle') || '';
     const sSType = searchParams.get('stype') || '';
     const sPrefer = searchParams.get('prefer') === 'true';
+    const sDesc = searchParams.get('desc') || '';
 
     if (sTitle !== videoTitle) setVideoTitle(sTitle);
     if (sYear !== videoYear) setVideoYear(sYear);
     if (sCover !== videoCover) setVideoCover(sCover);
+    if (sDesc && sDesc !== videoDesc) setVideoDesc(sDesc);
 
     if (sSource !== currentSource || sId !== currentId) {
       setCurrentSource(sSource);
@@ -348,6 +382,16 @@ function PlayPageClient() {
       setVideoUrl(newUrl);
     }
   }, [detail, currentEpisodeIndex]);
+
+  // --- Effect: Sync Background for Seasonal Effects ---
+  useEffect(() => {
+    if (videoCover) {
+      setBackgroundImage(videoCover);
+    }
+    return () => {
+      setBackgroundImage(null);
+    };
+  }, [videoCover, setBackgroundImage]);
 
   // --- 核心业务逻辑: 优选源 ---
   const calculateSourceScore = (
@@ -424,8 +468,7 @@ function PlayPageClient() {
       if (signal?.aborted) return { status: 'aborted' };
       try {
         if (!source.episodes || source.episodes.length === 0) {
-          if (debugEnabledRef.current)
-            console.warn(`播放源 ${source.source_name} 没有可用的播放地址`);
+          console.warn(`播放源 ${source.source_name} 没有可用的播放地址`);
           return { status: 'error', source };
         }
         const episodeUrl =
@@ -506,8 +549,7 @@ function PlayPageClient() {
       .map((r) => ({ source: r.source, testResult: r.testResult }));
 
     if (successfulResults.length === 0) {
-      if (debugEnabledRef.current)
-        console.warn('所有播放源测速都失败，使用第一个播放源');
+      console.warn('所有播放源测速都失败，使用第一个播放源');
       return sources[0];
     }
 
@@ -544,7 +586,7 @@ function PlayPageClient() {
 
     resultsWithScore.sort((a, b) => b.score - a.score);
 
-    if (process.env.NODE_ENV !== 'production' || debugEnabledRef.current) {
+    if (process.env.NODE_ENV !== 'production') {
       console.log('播放源评分排序结果:');
       resultsWithScore.forEach((result, index) => {
         console.log(
@@ -678,6 +720,11 @@ function PlayPageClient() {
           return;
         }
 
+        // --- NEW: Set videoDesc early to show it during the "Preferring" phase ---
+        if (sourcesInfo[0].desc && !videoDesc) {
+          setVideoDesc(sourcesInfo[0].desc);
+        }
+
         let detailData: SearchResult = sourcesInfo[0];
 
         if (snap.currentSource && snap.currentId && !needPreferRef.current) {
@@ -779,6 +826,7 @@ function PlayPageClient() {
           if (targetIndex !== currentEpisodeIndex)
             setCurrentEpisodeIndex(targetIndex);
           resumeTimeRef.current = record.play_time;
+          if (record.desc && !videoDesc) setVideoDesc(record.desc);
         }
       } catch (err) {
         console.error('读取播放记录失败:', err);
@@ -850,6 +898,7 @@ function PlayPageClient() {
         save_time: Date.now(),
         search_title: searchTitleRef.current,
         category: detailRef.current?.class || detailRef.current?.type_name,
+        desc: videoDesc,
       });
       lastSaveTimeRef.current = Date.now();
     } catch (err) {
@@ -894,7 +943,7 @@ function PlayPageClient() {
     const p = playerRef.current;
     if (p && !p.isDisposed()) {
       if (!p.paused()) saveCurrentPlayProgress();
-      p.pause();
+      // p.pause(); // REMOVED: Let the source change handle stop to avoid FS exit on some browsers
     }
 
     setIsVideoLoading(true);
@@ -1165,31 +1214,22 @@ function PlayPageClient() {
               {convert(loadingMessage)}
             </p>
           </div>
-          {videoDesc && (
-            <div className='mt-8 max-w-lg mx-auto px-4 w-full'>
-              <div className='h-20 overflow-hidden relative'>
-                <style>{`
-                  @keyframes scrollIntro {
-                    0% { transform: translateY(0); }
-                    100% { transform: translateY(-50%); }
-                  }
-                  .animate-scroll-intro {
-                    animation: scrollIntro 15s linear infinite;
-                  }
-                `}</style>
-                <div className='animate-scroll-intro'>
-                  <div className='space-y-4'>
-                    <p className='text-sm text-gray-500 dark:text-gray-400 text-center leading-relaxed'>
-                      {convert(videoDesc)}
-                    </p>
-                    <p className='text-sm text-gray-500 dark:text-gray-400 text-center leading-relaxed'>
-                      {convert(videoDesc)}
-                    </p>
-                  </div>
-                </div>
+          <div className='mt-6 max-w-lg mx-auto px-4 w-full'>
+            <div className='h-24 overflow-hidden relative'>
+              <div className='animate-scroll-y will-change-transform space-y-4'>
+                <p className='text-sm text-gray-500 dark:text-gray-400 text-center leading-relaxed'>
+                  {convert(videoDesc || '正在加载影片简介...')}
+                </p>
+                {/* duplicate for seamless loop */}
+                <p
+                  className='text-sm text-gray-500 dark:text-gray-400 text-center leading-relaxed'
+                  aria-hidden='true'
+                >
+                  {convert(videoDesc || '正在加载影片简介...')}
+                </p>
               </div>
             </div>
-          )}
+          </div>
         </div>
       </PageLayout>
     );
@@ -1274,30 +1314,36 @@ function PlayPageClient() {
             >
               <div className='relative w-full aspect-video lg:aspect-auto lg:h-full bg-black rounded-xl overflow-hidden shadow-2xl'>
                 {/* 核心播放器组件 */}
-                <VideoJsPlayer
-                  key={videoUrl} // FIX: Reset player on URL change
-                  url={videoUrl}
-                  poster={videoCover}
-                  autoPlay={true}
-                  onReady={handlePlayerReady}
-                  onTimeUpdate={handleTimeUpdate}
-                  onEnded={handleEnded}
-                  onPlay={() => setIsVideoLoading(false)}
-                  onError={(err) => {
-                    console.error('Player error:', err);
-                    setIsVideoLoading(false);
-                  }}
-                  enableSkip={skipConfigRef.current.enable}
-                  skipIntroTime={skipConfigRef.current.intro_time}
-                  skipOutroTime={skipConfigRef.current.outro_time}
-                  customHlsLoader={
-                    blockAdEnabled ? CustomHlsJsLoader : undefined
-                  }
-                  debug={debugEnabled}
-                  onNextEpisode={handleNextEpisode}
-                  hasNextEpisode={currentEpisodeIndex < totalEpisodes - 1}
-                  seriesId={currentId}
-                />
+                <div className='w-full h-full' ref={handlePlayerRef}>
+                  {debugEnabled && (
+                    <div className='fixed top-20 left-20 z-50 bg-red-600 text-white p-4 font-bold text-xl border-4 border-yellow-400 pointer-events-none'>
+                      DEBUG MODE ACTIVE
+                    </div>
+                  )}
+                  <VideoJsPlayer
+                    debug={debugEnabled}
+                    url={videoUrl}
+                    poster={videoCover}
+                    autoPlay={true}
+                    onReady={handlePlayerReady}
+                    onTimeUpdate={handleTimeUpdate}
+                    onEnded={handleEnded}
+                    onPlay={() => setIsVideoLoading(false)}
+                    onError={(err) => {
+                      console.error('Player error:', err);
+                      setIsVideoLoading(false);
+                    }}
+                    enableSkip={skipConfigRef.current.enable}
+                    skipIntroTime={skipConfigRef.current.intro_time}
+                    skipOutroTime={skipConfigRef.current.outro_time}
+                    customHlsLoader={
+                      blockAdEnabled ? CustomHlsJsLoader : undefined
+                    }
+                    onNextEpisode={handleNextEpisode}
+                    hasNextEpisode={currentEpisodeIndex < totalEpisodes - 1}
+                    seriesId={currentId}
+                  />
+                </div>
 
                 {/* 加载遮罩 */}
                 {isVideoLoading && (
@@ -1309,12 +1355,24 @@ function PlayPageClient() {
                           <div className='absolute -inset-2 bg-linear-to-r from-green-500 to-emerald-600 rounded-2xl opacity-20 animate-spin'></div>
                         </div>
                       </div>
-                      <div className='space-y-2'>
+                      <div className='space-y-4'>
                         <p className='text-xl font-semibold text-white animate-pulse'>
                           {videoLoadingStage === 'sourceChanging'
                             ? convert('🔄 切换播放源...')
                             : convert('🔄 视频加载中...')}
                         </p>
+                        {videoDesc && (
+                          <div className='max-w-xs mx-auto overflow-hidden relative h-12 flex items-center'>
+                            <div className='whitespace-nowrap flex animate-scroll-x will-change-transform'>
+                              <span className='text-gray-300 text-sm px-4'>
+                                {convert(videoDesc)}
+                              </span>
+                              <span className='text-gray-300 text-sm px-4'>
+                                {convert(videoDesc)}
+                              </span>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1377,21 +1435,19 @@ function PlayPageClient() {
                 {detail?.type_name && <span>{convert(detail.type_name)}</span>}
               </div>
               {detail?.desc && (
-                <div
-                  className='mt-0 text-base leading-relaxed opacity-90 overflow-y-auto pr-2 pb-4 max-h-40 md:max-h-60'
-                  style={{
-                    whiteSpace: 'pre-line',
-                    WebkitOverflowScrolling: 'touch',
-                  }}
-                >
-                  {convert(detail.desc)}
-                </div>
+                <ScrollableDescription
+                  content={convert(detail.desc)}
+                  className='mt-0 text-base leading-relaxed opacity-90 h-40 md:h-60'
+                />
               )}
             </div>
           </div>
           <div className='hidden md:block md:col-span-1 md:order-first'>
             <div className='pl-0 py-4 pr-6'>
-              <div className='relative bg-gray-300 dark:bg-gray-700 aspect-2/3 flex items-center justify-center rounded-xl overflow-hidden'>
+              <div
+                ref={handlePosterRef}
+                className='relative bg-gray-300 dark:bg-gray-700 aspect-2/3 flex items-center justify-center rounded-xl overflow-hidden'
+              >
                 {videoCover ? (
                   <>
                     <img

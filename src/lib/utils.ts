@@ -32,12 +32,23 @@ function getDoubanImageProxyConfig(): {
 export function processImageUrl(originalUrl: string): string {
   if (!originalUrl) return originalUrl;
 
+  // Domains known to block CORS - always proxy these
+  const corsBlockedDomains = ['dytt-img.com', 'tyyswimg.com', 'vip.lz-cdn'];
+
   // 1. 处理特定域名的 HTTPS 升级
   if (originalUrl.includes('lain.bgm.tv')) {
     return originalUrl.replace('http://', 'https://');
   }
 
-  // 2. 如果当前是 HTTPS 环境，但图片是 HTTP，则自动使用代理以避免混合内容错误
+  // 2. Proxy images from domains that block CORS (regardless of HTTP/HTTPS)
+  const needsCorsProxy = corsBlockedDomains.some((domain) =>
+    originalUrl.includes(domain),
+  );
+  if (needsCorsProxy) {
+    return `/api/image-proxy?url=${encodeURIComponent(originalUrl)}`;
+  }
+
+  // 3. 如果当前是 HTTPS 环境，但图片是 HTTP，则自动使用代理以避免混合内容错误
   // 也会处理原本是 http:// 的 tyyswimg.com 等资源
   const isHttps =
     typeof window !== 'undefined' && window.location.protocol === 'https:';
@@ -50,7 +61,7 @@ export function processImageUrl(originalUrl: string): string {
     }
   }
 
-  // 3. 处理豆瓣图片代理
+  // 4. 处理豆瓣图片代理
   if (!originalUrl.includes('doubanio.com')) {
     return originalUrl;
   }

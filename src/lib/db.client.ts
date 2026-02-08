@@ -41,6 +41,7 @@ export interface PlayRecord {
   save_time: number; // 记录保存时间（时间戳）
   search_title?: string; // 搜索时使用的标题
   category?: string; // 视频分类
+  desc?: string; // 视频简介
 }
 
 // ---- 收藏类型 ----

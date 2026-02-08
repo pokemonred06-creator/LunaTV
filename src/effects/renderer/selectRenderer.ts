@@ -42,30 +42,84 @@ function canUseWebGL2(): boolean {
   }
 }
 
+type CreateRendererOptions = {
+  forceCanvas?: boolean;
+  adaptive?: boolean;
+};
+
 export async function createRenderer(
   canvas: HTMLCanvasElement,
+  options: CreateRendererOptions = {},
 ): Promise<Renderer> {
   // 1. Capability Check
   // We check on a temp canvas to avoid "locking" context attributes (alpha, etc.)
   // on the real canvas before we know which renderer to use.
-  // FIXME: Forcing Canvas2D for Release 9.6 until WebGL2 is stable.
-  const supportsWebGL2 = canUseWebGL2();
-  console.log('[SeasonalEffects] Capability Check: WebGL2 =', supportsWebGL2);
+  const supportsWebGL2 = !options.forceCanvas && canUseWebGL2();
+  console.log(
+    '[SeasonalEffects] Capability Check: WebGL2 =',
+    supportsWebGL2,
+    'forceCanvas =',
+    !!options.forceCanvas,
+    'adaptive =',
+    !!options.adaptive,
+  );
 
   // 2. Try WebGL2
   if (supportsWebGL2) {
-    try {
-      console.log('[SeasonalEffects] Attempting WebGL2 init...');
-      const renderer = new WebGL2Renderer(canvas);
-      await renderer.init(); // CRITICAL: Ensure GL resources are created
-      console.log('[SeasonalEffects] WebGL2 init success.');
-      return renderer;
-    } catch (e) {
-      console.warn(
-        '[SeasonalEffects] WebGL2 init failed despite capability check; falling back to Canvas2D',
-        e,
-      );
-      // Fall through to Canvas2D
+    if (options.adaptive) {
+      // Probe: render a handful of clears to estimate per-frame cost
+      const probeCanvas = document.createElement('canvas');
+      probeCanvas.width = 200;
+      probeCanvas.height = 120;
+      const start = performance.now();
+      let ok = true;
+      try {
+        const gl = probeCanvas.getContext('webgl2');
+        if (!gl) ok = false;
+        else {
+          for (let i = 0; i < 60; i++) {
+            gl.clearColor(0, 0, 0, 0);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+          }
+        }
+      } catch {
+        ok = false;
+      }
+      const elapsed = performance.now() - start;
+      const avg = elapsed / 60;
+
+      if (!ok || avg > 2.5) {
+        console.warn(
+          '[SeasonalEffects] Adaptive probe: WebGL2 too slow, using Canvas2D',
+          { avgMs: avg },
+        );
+      } else {
+        try {
+          console.log('[SeasonalEffects] Adaptive probe passed; using WebGL2');
+          const renderer = new WebGL2Renderer(canvas);
+          await renderer.init();
+          return renderer;
+        } catch (e) {
+          console.warn(
+            '[SeasonalEffects] WebGL2 init failed after probe; falling back to Canvas2D',
+            e,
+          );
+        }
+      }
+    } else {
+      try {
+        console.log('[SeasonalEffects] Attempting WebGL2 init...');
+        const renderer = new WebGL2Renderer(canvas);
+        await renderer.init(); // CRITICAL: Ensure GL resources are created
+        console.log('[SeasonalEffects] WebGL2 init success.');
+        return renderer;
+      } catch (e) {
+        console.warn(
+          '[SeasonalEffects] WebGL2 init failed despite capability check; falling back to Canvas2D',
+          e,
+        );
+        // Fall through to Canvas2D
+      }
     }
   }
 

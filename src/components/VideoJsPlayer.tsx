@@ -494,133 +494,144 @@ const useCasShader = (
       }
     };
 
-    if (!playerReady || !casEnabled || isPiPActive || failuresRef.current > 3) {
-      cleanup();
-      return;
-    }
-
-    const tech = getTechVideoEl();
-    if (!tech || !tech.parentElement) return;
-    if (tech.dataset.casActive && tech.dataset.casOwner !== ownerRef.current)
-      return;
-
-    const canvas = document.createElement('canvas');
-    canvas.dataset.casCanvas = '1';
-    canvas.dataset.casOwner = ownerRef.current;
-    Object.assign(canvas.style, {
-      position: 'absolute',
-      top: 0,
-      left: 0,
-      width: '100%',
-      height: '100%',
-      pointerEvents: 'none',
-      zIndex: 0,
-      objectFit: 'contain',
-    });
-    tech.parentElement.insertBefore(canvas, tech.nextSibling);
-    canvasRef.current = canvas;
-    techRef.current = tech;
-
-    const gl = canvas.getContext('webgl', {
-      alpha: false,
-      preserveDrawingBuffer: false,
-      antialias: false,
-    });
-    if (!gl) {
-      cleanup();
-      return;
-    }
-    resourcesRef.current.gl = gl;
-
-    const vs = `attribute vec2 p;varying vec2 v;void main(){gl_Position=vec4(p,0,1);v=p*0.5+0.5;v.y=1.0-v.y;}`;
-    const fs = `precision mediump float;varying vec2 v;uniform sampler2D i;uniform vec2 r;uniform float s;void main(){vec2 t=1.0/r;vec3 e=texture2D(i,v).rgb;vec3 a=texture2D(i,v+vec2(0,-t.y)).rgb;vec3 c=texture2D(i,v+vec2(-t.x,0)).rgb;vec3 g=texture2D(i,v+vec2(t.x,0)).rgb;vec3 i_val=texture2D(i,v+vec2(0,t.y)).rgb;float w=-1.0/mix(8.0,5.0,clamp(s,0.0,1.0));vec3 rs=(a+c+g+i_val)*w+e;float d=1.0+4.0*w;vec3 f=rs/d;vec3 mn=min(min(min(a,c),g),i_val);vec3 mx=max(max(max(a,c),g),i_val);f=clamp(f,min(mn,e),max(mx,e));float l=dot(f,vec3(0.2126,0.7152,0.0722));gl_FragColor=vec4((mix(vec3(l),f,1.15)-0.5)*1.05+0.5,1.0);}`;
-
-    const createS = (t: number, src: string) => {
-      const s = gl.createShader(t);
-      if (!s) return null;
-      gl.shaderSource(s, src);
-      gl.compileShader(s);
-      return s;
-    };
-    const p = gl.createProgram();
-    resourcesRef.current.p = p;
-    const vS = createS(gl.VERTEX_SHADER, vs);
-    resourcesRef.current.vS = vS;
-    const fS = createS(gl.FRAGMENT_SHADER, fs);
-    resourcesRef.current.fS = fS;
-    if (!p || !vS || !fS) {
-      cleanup();
-      return;
-    }
-    gl.attachShader(p, vS);
-    gl.attachShader(p, fS);
-    gl.linkProgram(p);
-    gl.useProgram(p);
-
-    const b = gl.createBuffer();
-    resourcesRef.current.b = b;
-    gl.bindBuffer(gl.ARRAY_BUFFER, b);
-    gl.bufferData(
-      gl.ARRAY_BUFFER,
-      new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]),
-      gl.STATIC_DRAW,
-    );
-    const pos = gl.getAttribLocation(p, 'p');
-    gl.enableVertexAttribArray(pos);
-    gl.vertexAttribPointer(pos, 2, gl.FLOAT, false, 0, 0);
-
-    const tx = gl.createTexture();
-    resourcesRef.current.tx = tx;
-    gl.bindTexture(gl.TEXTURE_2D, tx);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-
-    const uR = gl.getUniformLocation(p, 'r');
-    const uS = gl.getUniformLocation(p, 's');
-
-    tech.setAttribute('data-cas-active', 'true');
-    tech.dataset.casOwner = ownerRef.current;
-    let first = true;
-
-    const loop = () => {
-      if (!tech.isConnected || !canvas.isConnected) {
+    try {
+      if (
+        !playerReady ||
+        !casEnabled ||
+        isPiPActive ||
+        failuresRef.current > 3
+      ) {
         cleanup();
         return;
       }
-      if (
-        canvas.width !== tech.videoWidth ||
-        canvas.height !== tech.videoHeight
-      ) {
-        canvas.width = tech.videoWidth;
-        canvas.height = tech.videoHeight;
-        gl.viewport(0, 0, canvas.width, canvas.height);
-      }
-      try {
-        gl.texImage2D(
-          gl.TEXTURE_2D,
-          0,
-          gl.RGBA,
-          gl.RGBA,
-          gl.UNSIGNED_BYTE,
-          tech,
-        );
-        if (first) {
-          tech.style.opacity = '0';
-          first = false;
-        }
-        if (uR) gl.uniform2f(uR, canvas.width, canvas.height);
-        if (uS) gl.uniform1f(uS, 0.6);
-        gl.drawArrays(gl.TRIANGLES, 0, 6);
-        rafRef.current = requestAnimationFrame(loop);
-      } catch {
-        failuresRef.current++;
+
+      const tech = getTechVideoEl();
+      if (!tech || !tech.parentElement) return;
+      if (tech.dataset.casActive && tech.dataset.casOwner !== ownerRef.current)
+        return;
+
+      const canvas = document.createElement('canvas');
+      canvas.dataset.casCanvas = '1';
+      canvas.dataset.casOwner = ownerRef.current;
+      Object.assign(canvas.style, {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        width: '100%',
+        height: '100%',
+        pointerEvents: 'none',
+        zIndex: 2,
+        objectFit: 'contain',
+      });
+      tech.parentElement.insertBefore(canvas, tech.nextSibling);
+      canvasRef.current = canvas;
+      techRef.current = tech;
+
+      const gl = canvas.getContext('webgl', {
+        alpha: false,
+        preserveDrawingBuffer: false,
+        antialias: false,
+      });
+      if (!gl) {
         cleanup();
-        if (failuresRef.current > 3) disableCas();
+        return;
       }
-    };
-    loop();
+      resourcesRef.current.gl = gl;
+
+      const vs = `attribute vec2 p;varying vec2 v;void main(){gl_Position=vec4(p,0,1);v=p*0.5+0.5;v.y=1.0-v.y;}`;
+      const fs = `precision mediump float;varying vec2 v;uniform sampler2D i;uniform vec2 r;uniform float s;void main(){vec2 t=1.0/r;vec3 e=texture2D(i,v).rgb;vec3 a=texture2D(i,v+vec2(0,-t.y)).rgb;vec3 c=texture2D(i,v+vec2(-t.x,0)).rgb;vec3 g=texture2D(i,v+vec2(t.x,0)).rgb;vec3 i_val=texture2D(i,v+vec2(0,t.y)).rgb;float w=-1.0/mix(8.0,5.0,clamp(s,0.0,1.0));vec3 rs=(a+c+g+i_val)*w+e;float d=1.0+4.0*w;vec3 f=rs/d;vec3 mn=min(min(min(a,c),g),i_val);vec3 mx=max(max(max(a,c),g),i_val);f=clamp(f,min(mn,e),max(mx,e));float l=dot(f,vec3(0.2126,0.7152,0.0722));gl_FragColor=vec4((mix(vec3(l),f,1.15)-0.5)*1.05+0.5,1.0);}`;
+
+      const createS = (t: number, src: string) => {
+        const s = gl.createShader(t);
+        if (!s) return null;
+        gl.shaderSource(s, src);
+        gl.compileShader(s);
+        return s;
+      };
+      const p = gl.createProgram();
+      resourcesRef.current.p = p;
+      const vS = createS(gl.VERTEX_SHADER, vs);
+      resourcesRef.current.vS = vS;
+      const fS = createS(gl.FRAGMENT_SHADER, fs);
+      resourcesRef.current.fS = fS;
+      if (!p || !vS || !fS) {
+        cleanup();
+        return;
+      }
+      gl.attachShader(p, vS);
+      gl.attachShader(p, fS);
+      gl.linkProgram(p);
+      gl.useProgram(p);
+
+      const b = gl.createBuffer();
+      resourcesRef.current.b = b;
+      gl.bindBuffer(gl.ARRAY_BUFFER, b);
+      gl.bufferData(
+        gl.ARRAY_BUFFER,
+        new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]),
+        gl.STATIC_DRAW,
+      );
+      const pos = gl.getAttribLocation(p, 'p');
+      gl.enableVertexAttribArray(pos);
+      gl.vertexAttribPointer(pos, 2, gl.FLOAT, false, 0, 0);
+
+      const tx = gl.createTexture();
+      resourcesRef.current.tx = tx;
+      gl.bindTexture(gl.TEXTURE_2D, tx);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
+      const uR = gl.getUniformLocation(p, 'r');
+      const uS = gl.getUniformLocation(p, 's');
+
+      tech.setAttribute('data-cas-active', 'true');
+      tech.dataset.casOwner = ownerRef.current;
+      let first = true;
+
+      const loop = () => {
+        if (!tech.isConnected || !canvas.isConnected) {
+          cleanup();
+          return;
+        }
+        if (
+          canvas.width !== tech.videoWidth ||
+          canvas.height !== tech.videoHeight
+        ) {
+          canvas.width = tech.videoWidth;
+          canvas.height = tech.videoHeight;
+          gl.viewport(0, 0, canvas.width, canvas.height);
+        }
+        try {
+          gl.texImage2D(
+            gl.TEXTURE_2D,
+            0,
+            gl.RGBA,
+            gl.RGBA,
+            gl.UNSIGNED_BYTE,
+            tech,
+          );
+          if (first) {
+            tech.style.opacity = '0';
+            first = false;
+          }
+          if (uR) gl.uniform2f(uR, canvas.width, canvas.height);
+          if (uS) gl.uniform1f(uS, 0.6);
+          gl.drawArrays(gl.TRIANGLES, 0, 6);
+          rafRef.current = requestAnimationFrame(loop);
+        } catch {
+          failuresRef.current++;
+          cleanup();
+          if (failuresRef.current > 3) disableCas();
+        }
+      };
+      loop();
+    } catch (e) {
+      console.warn('[CAS] Shader initialization failed:', e);
+      cleanup();
+      disableCas();
+    }
     return cleanup;
   }, [
     playerReady,
@@ -672,6 +683,7 @@ export default function VideoJsPlayer({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [isRotatedFullscreen, setIsRotatedFullscreen] = useState(false);
   const [casEnabled, setCasEnabled] = useState(() => {
+    if (typeof window === 'undefined') return true;
     try {
       return localStorage.getItem('lunatv_cas_enabled') !== 'false';
     } catch {
@@ -720,6 +732,25 @@ export default function VideoJsPlayer({
   const playbackRateRef = useRef(playbackRate);
   const casEnabledRef = useRef(casEnabled);
   const isRotatedRef = useRef(isRotatedFullscreen);
+
+  useEffect(() => {
+    if (debug) {
+      if (typeof window !== 'undefined') {
+        (window as any).debugLogs = (window as any).debugLogs || [];
+        (window as any).debugLogs.push(
+          `[${new Date().toISOString()}] VideoJsPlayer MOUNTED`,
+        );
+      }
+      return () => {
+        if (typeof window !== 'undefined') {
+          (window as any).debugLogs = (window as any).debugLogs || [];
+          (window as any).debugLogs.push(
+            `[${new Date().toISOString()}] VideoJsPlayer UNMOUNTED`,
+          );
+        }
+      };
+    }
+  }, [debug]);
 
   // Stats
   const [showStats, setShowStats] = useState(false);
@@ -792,7 +823,8 @@ export default function VideoJsPlayer({
       if (debug)
         console.warn('[Player] Initial play failed, retrying in 500ms...', e);
       setTimeout(() => {
-        if (mountedRef.current && playerRef.current?.paused()) {
+        if (!mountedRef.current) return;
+        if (playerRef.current?.paused()) {
           playerRef.current.play()?.catch(() => {
             /* silent fail */
           });
@@ -895,6 +927,7 @@ export default function VideoJsPlayer({
 
   const initHls = useCallback(
     (videoEl: HTMLVideoElement, sourceUrl: string) => {
+      if (!mountedRef.current) return;
       if (!sourceUrl) return;
       let proxyUrl = sourceUrl;
       if (!sourceUrl.includes('/api/proxy/')) {
@@ -983,6 +1016,14 @@ export default function VideoJsPlayer({
   useEffect(() => {
     if (!playerReady || !playerRef.current) return;
 
+    // FIX: Reset state for new source (since we reuse component)
+    if (mountedRef.current) {
+      setCurrentTime(0);
+      setDuration(0);
+      setSeekingTime(null);
+      setIsPlaying(false);
+    }
+
     isSwitchingRef.current = true;
     autoplayEpochRef.current += 1;
     if (switchGuardRef.current) clearTimeout(switchGuardRef.current);
@@ -998,7 +1039,21 @@ export default function VideoJsPlayer({
 
     // Only use manual HLS if we have a custom loader (e.g. P2P)
     // Otherwise, rely on Video.js (VHS or Native) to handle it via player.src()
+    // Only use manual HLS if we have a custom loader (e.g. P2P)
+    // Otherwise, rely on Video.js (VHS or Native) to handle it via player.src()
     if (isHls && customHlsLoader) {
+      // FIX: Force stop previous playback synchronously
+      try {
+        const v = getTechVideoEl();
+        if (v) {
+          v.pause();
+          // v.removeAttribute('src'); // REMOVED: Causes FS exit
+          // v.load(); // REMOVED: Causes FS exit
+        }
+      } catch {
+        /* ignore */
+      }
+
       if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;
@@ -1013,6 +1068,18 @@ export default function VideoJsPlayer({
       })();
     } else {
       // Standard Video.js handling (HLS, FLV, MP4)
+      // FIX: Force stop previous playback synchronously
+      try {
+        const v = getTechVideoEl();
+        if (v) {
+          v.pause();
+          // v.removeAttribute('src'); // REMOVED: Causes FS exit
+          // v.load(); // REMOVED: Causes FS exit
+        }
+      } catch {
+        /* ignore */
+      }
+
       if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;
@@ -1189,7 +1256,16 @@ export default function VideoJsPlayer({
 
     return () => {
       clearNativeAutoplayListeners();
-      player.dispose();
+      if (player) {
+        try {
+          if (!player.paused()) player.pause();
+          player.src(''); // Clear source to release decoder
+          player.load(); // Force unload
+        } catch {
+          /* ignore */
+        }
+        player.dispose();
+      }
       playerRef.current = null;
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
       document.removeEventListener(

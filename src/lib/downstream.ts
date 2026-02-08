@@ -229,25 +229,64 @@ export async function searchFromApi(
 // 匹配 m3u8 链接的正则
 const M3U8_PATTERN = /(https?:\/\/[^"'\s]+?\.m3u8)/g;
 
+import { getCachedDetail, setCachedDetail } from '@/lib/search-cache';
+
 export async function getDetailFromApi(
   apiSite: ApiSite,
   id: string,
 ): Promise<SearchResult> {
+  const fetchWithTimeout = async (url: string) => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+    try {
+      const res = await fetch(url, {
+        headers: API_CONFIG.detail.headers,
+        signal: controller.signal,
+      });
+      return res;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  };
+
+  // Check Cache First
+  const cached = getCachedDetail(apiSite.key, id);
+  if (cached && cached.status === 'ok' && cached.data.length > 0) {
+    return cached.data[0];
+  }
+
   if (apiSite.detail) {
-    return handleSpecialSourceDetail(id, apiSite);
+    // Note: handleSpecialSourceDetail could be cached inside itself, but we cache the result here too
+    const res = await handleSpecialSourceDetail(id, apiSite);
+    setCachedDetail(apiSite.key, id, 'ok', [res]);
+    return res;
   }
 
   const detailUrl = `${apiSite.api}${API_CONFIG.detail.path}${id}`;
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 10000);
+  // Route through Go proxy when available; fall back to direct fetch
+  const goProxyUrl = process.env.GO_PROXY_URL;
+  const proxyUrl =
+    goProxyUrl &&
+    `${goProxyUrl}/api/detail-proxy?upstream=${encodeURIComponent(detailUrl)}`;
 
-  const response = await fetch(detailUrl, {
-    headers: API_CONFIG.detail.headers,
-    signal: controller.signal,
-  });
+  let response: Response | null = null;
 
-  clearTimeout(timeoutId);
+  if (proxyUrl) {
+    try {
+      response = await fetchWithTimeout(proxyUrl);
+    } catch (err) {
+      console.warn(
+        '[Detail] Proxy fetch failed, falling back to direct:',
+        (err as Error)?.message,
+      );
+      response = null;
+    }
+  }
+
+  if (!response || !response.ok) {
+    response = await fetchWithTimeout(detailUrl);
+  }
 
   if (!response.ok) {
     throw new Error(`详情请求失败: ${response.status}`);
@@ -296,7 +335,7 @@ export async function getDetailFromApi(
     episodes = matches.map((link: string) => link.replace(/^\$/, ''));
   }
 
-  return {
+  const result = {
     id: id.toString(),
     title: videoDetail.vod_name,
     poster: videoDetail.vod_pic,
@@ -312,6 +351,9 @@ export async function getDetailFromApi(
     type_name: videoDetail.type_name,
     douban_id: videoDetail.vod_douban_id,
   };
+
+  setCachedDetail(apiSite.key, id, 'ok', [result]);
+  return result;
 }
 
 async function handleSpecialSourceDetail(

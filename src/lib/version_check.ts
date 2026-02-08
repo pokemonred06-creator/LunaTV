@@ -1,8 +1,6 @@
- 
-
 'use client';
 
-import { CURRENT_VERSION } from "@/lib/version";
+import { CURRENT_VERSION } from '@/lib/version';
 
 // 版本检查结果枚举
 export enum UpdateStatus {
@@ -22,19 +20,16 @@ const VERSION_CHECK_URLS = [
  */
 export async function checkForUpdates(): Promise<UpdateStatus> {
   try {
-    // 尝试从主要URL获取版本信息
-    const primaryVersion = await fetchVersionFromUrl(VERSION_CHECK_URLS[0]);
-    if (primaryVersion) {
-      return compareVersions(primaryVersion);
+    // Iterate through all configured URLs
+    for (const url of VERSION_CHECK_URLS) {
+      if (!url) continue;
+      const version = await fetchVersionFromUrl(url);
+      if (version) {
+        return compareVersions(version);
+      }
     }
 
-    // 如果主要URL失败，尝试备用URL
-    const backupVersion = await fetchVersionFromUrl(VERSION_CHECK_URLS[1]);
-    if (backupVersion) {
-      return compareVersions(backupVersion);
-    }
-
-    // 如果两个URL都失败，返回获取失败状态
+    // All URLs failed
     return UpdateStatus.FETCH_FAILED;
   } catch (error) {
     console.error('版本检查失败:', error);
@@ -48,6 +43,7 @@ export async function checkForUpdates(): Promise<UpdateStatus> {
  * @returns Promise<string | null> - 版本字符串或null
  */
 async function fetchVersionFromUrl(url: string): Promise<string | null> {
+  if (!url) return null;
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000); // 5秒超时

@@ -75,6 +75,14 @@ const config: Config = {
           '0%': { transform: 'translateX(100%)', opacity: '0' },
           '100%': { transform: 'translateX(0)', opacity: '1' },
         },
+        scrollY: {
+          '0%': { transform: 'translateY(0)' },
+          '100%': { transform: 'translateY(-50%)' },
+        },
+        scrollX: {
+          '0%': { transform: 'translateX(0)' },
+          '100%': { transform: 'translateX(-50%)' },
+        },
       },
       animation: {
         flicker: 'flicker 3s linear infinite',
@@ -83,6 +91,8 @@ const config: Config = {
         'slide-up': 'slideUp 0.3s ease-in-out',
         'slide-down': 'slideDown 0.3s ease-in-out',
         'slide-in-from-right': 'slideInFromRight 0.3s ease-out',
+        'scroll-y': 'scrollY 20s linear infinite',
+        'scroll-x': 'scrollX 20s linear infinite',
       },
       backgroundImage: {
         'gradient-radial': 'radial-gradient(var(--tw-gradient-stops))',

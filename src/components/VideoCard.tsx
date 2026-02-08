@@ -18,6 +18,7 @@ import React, {
   useEffect,
   useImperativeHandle,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 
@@ -35,6 +36,7 @@ import { useLongPress } from '@/hooks/useLongPress';
 import { ImagePlaceholder } from '@/components/ImagePlaceholder';
 import { useLanguage } from '@/components/LanguageProvider';
 import MobileActionSheet from '@/components/MobileActionSheet';
+import { useSeasonalEffects } from '@/components/SeasonalEffectsProvider';
 
 // --- Types ---
 
@@ -187,10 +189,30 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
   ) {
     const router = useRouter();
     const { convert } = useLanguage();
+    const { registerPosterFrame } = useSeasonalEffects();
 
     // State
     const [imageLoaded, setImageLoaded] = useState(false);
     const [showMobileActions, setShowMobileActions] = useState(false);
+
+    // Stable ID for registration
+    const cardId = useMemo(() => {
+      const stable = `${from}|${source ?? ''}|${id ?? ''}|${douban_id ?? ''}`;
+      return stable.includes('||')
+        ? `card-${stable}-${poster}`
+        : `card-${stable}`;
+    }, [from, source, id, douban_id, poster]);
+
+    const posterRef = useRef<HTMLDivElement>(null);
+
+    // Callback ref for stable registration (no churn)
+    const posterElRef = useCallback(
+      (node: HTMLDivElement | null) => {
+        posterRef.current = node;
+        registerPosterFrame(cardId, node);
+      },
+      [cardId, registerPosterFrame],
+    );
 
     // Dynamic props: Initialize from props ONCE.
     // Updates should come via imperative handle or parent remounting with new key.
@@ -492,6 +514,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
         >
           {/* Poster */}
           <div
+            ref={posterElRef}
             className={`relative aspect-2/3 overflow-hidden rounded-lg ${origin === 'live' ? 'ring-1 ring-gray-300/80 dark:ring-gray-600/80' : ''}`}
           >
             {!imageLoaded && <ImagePlaceholder aspectRatio='aspect-2/3' />}

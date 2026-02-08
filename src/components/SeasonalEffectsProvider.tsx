@@ -9,6 +9,7 @@ import {
   useState,
 } from 'react';
 
+import type { PosterBounds } from './PhysicsSnow';
 import type { Intensity, Season } from './SeasonalEffects';
 import { SeasonalEffects } from './SeasonalEffects';
 
@@ -18,6 +19,11 @@ interface SeasonalEffectsContextType {
   intensity: Intensity;
   loading: boolean;
   getCurrentSeasonName: () => string;
+  backgroundImage: string | null;
+  setBackgroundImage: (url: string | null) => void;
+  posterBounds: PosterBounds[]; // Change to array
+  posterElements: Map<string, HTMLElement>; // Expose direct elements
+  registerPosterFrame: (id: string, element: HTMLElement | null) => void; // Add ID for tracking
 }
 
 const SeasonalEffectsContext = createContext<
@@ -41,6 +47,79 @@ export const SeasonalEffectsProvider: React.FC<{ children: ReactNode }> = ({
   const [intensity, setIntensity] = useState<Intensity>('normal');
   const [loading, setLoading] = useState(true);
   const [mounted, setMounted] = useState(false);
+  const [backgroundImage, setBackgroundImage] = useState<string | null>(null);
+  const [posterElements, setPosterElements] = useState<
+    Map<string, HTMLElement>
+  >(new Map());
+  const [posterBounds, setPosterBounds] = useState<PosterBounds[]>([]);
+
+  // Register poster frame element and track its bounds
+  const registerPosterFrame = useCallback(
+    (id: string, element: HTMLElement | null) => {
+      setPosterElements((prev) => {
+        // Prevent update if reference hasn't changed
+        if (prev.get(id) === element) return prev;
+
+        const next = new Map(prev);
+        if (element) {
+          next.set(id, element);
+        } else {
+          next.delete(id);
+        }
+        return next;
+      });
+    },
+    [],
+  );
+
+  // Update bounds for all registered elements
+  useEffect(() => {
+    if (posterElements.size === 0) {
+      setPosterBounds([]);
+      return;
+    }
+
+    const updateAllBounds = () => {
+      const newBounds: PosterBounds[] = [];
+      posterElements.forEach((element, key) => {
+        const rect = element.getBoundingClientRect();
+        newBounds.push({
+          key,
+          top: rect.top,
+          left: rect.left,
+          right: rect.right,
+          width: rect.width,
+          height: rect.height,
+          bottom: rect.bottom,
+        });
+      });
+      setPosterBounds(newBounds);
+    };
+
+    // Throttle to one layout read/write per animation frame.
+    let raf = 0;
+    let scheduled = false;
+    const scheduleUpdate = () => {
+      if (scheduled) return;
+      scheduled = true;
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        scheduled = false;
+        updateAllBounds();
+      });
+    };
+
+    scheduleUpdate();
+
+    window.addEventListener('scroll', scheduleUpdate, { passive: true });
+    window.addEventListener('resize', scheduleUpdate, { passive: true });
+
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener('scroll', scheduleUpdate);
+      window.removeEventListener('resize', scheduleUpdate);
+    };
+  }, [posterElements]);
 
   // Fetch config from server on mount
   useEffect(() => {
@@ -83,6 +162,11 @@ export const SeasonalEffectsProvider: React.FC<{ children: ReactNode }> = ({
         intensity,
         loading,
         getCurrentSeasonName,
+        backgroundImage,
+        setBackgroundImage,
+        posterBounds,
+        posterElements, // Expose direct elements for physics engine
+        registerPosterFrame,
       }}
     >
       {children}
@@ -91,6 +175,9 @@ export const SeasonalEffectsProvider: React.FC<{ children: ReactNode }> = ({
           season={season}
           intensity={intensity}
           enabled={enabled}
+          backgroundImageUrl={backgroundImage || undefined}
+          posterBounds={posterBounds}
+          posterElements={posterElements} // Pass to SeasonalEffects
         />
       )}
     </SeasonalEffectsContext.Provider>

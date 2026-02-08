@@ -84,9 +84,9 @@ export default async function RootLayout({
   // 将运行时配置注入到全局 window 对象，供客户端在运行时读取
   const runtimeConfig = {
     STORAGE_TYPE: process.env.NEXT_PUBLIC_STORAGE_TYPE || 'localstorage',
-    DOUBAN_PROXY_TYPE: 'direct',
+    DOUBAN_PROXY_TYPE: doubanProxyType,
     DOUBAN_PROXY: doubanProxy,
-    DOUBAN_IMAGE_PROXY_TYPE: 'server',
+    DOUBAN_IMAGE_PROXY_TYPE: doubanImageProxyType,
     DOUBAN_IMAGE_PROXY: doubanImageProxy,
     DISABLE_YELLOW_FILTER: disableYellowFilter,
     CUSTOM_CATEGORIES: customCategories,
@@ -106,6 +106,19 @@ export default async function RootLayout({
         <script
           dangerouslySetInnerHTML={{
             __html: `window.RUNTIME_CONFIG = ${JSON.stringify(runtimeConfig)};`,
+          }}
+        />
+        <style
+          dangerouslySetInnerHTML={{
+            __html: `
+            @keyframes scrollY {
+              0% { transform: translateY(0); }
+              100% { transform: translateY(-50%); }
+            }
+            .animate-scroll-y {
+              animation: scrollY 20s linear infinite;
+            }
+          `,
           }}
         />
       </head>

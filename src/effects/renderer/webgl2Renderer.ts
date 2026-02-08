@@ -15,10 +15,17 @@ export class WebGL2Renderer implements Renderer {
   private tex1: WebGLTexture | null = null;
   private fbo2: WebGLFramebuffer | null = null;
   private tex2: WebGLTexture | null = null;
+  private fboDistort: WebGLFramebuffer | null = null;
+  private texDistort: WebGLTexture | null = null;
   private texBG: WebGLTexture | null = null;
+  private lastUploadedBG: HTMLImageElement | null = null;
 
-  private width = 0;
-  private height = 0;
+  // CSS pixel size (logical coordinates used by the physics/state).
+  private cssWidth = 0;
+  private cssHeight = 0;
+  // Backbuffer size in device pixels (used for canvas + FBO allocation).
+  private fbWidth = 0;
+  private fbHeight = 0;
   private dpr = 1;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private extMinMax: any = null; // EXT_color_buffer_float
@@ -28,13 +35,92 @@ export class WebGL2Renderer implements Renderer {
   }
 
   onContextLost(): void {
-    throw new Error('Method not implemented.');
+    console.warn('[WebGL2] Context Lost');
+    this.gl = null;
   }
-  onContextRestored(): Promise<void> {
-    throw new Error('Method not implemented.');
+
+  async onContextRestored(): Promise<void> {
+    console.log('[WebGL2] Context Restored');
+    this.initGL();
   }
+
   destroy(): void {
-    throw new Error('Method not implemented.');
+    console.log('[WebGL2] Destroying renderer');
+    const gl = this.gl;
+    if (!gl) return;
+
+    // Delete Shaders & Programs
+    const deleteProgram = (prog: WebGLProgram | null) => {
+      if (!prog) return;
+      const shaders = gl.getAttachedShaders(prog);
+      if (shaders) {
+        shaders.forEach((s) => {
+          gl.detachShader(prog, s);
+          gl.deleteShader(s);
+        });
+      }
+      gl.deleteProgram(prog);
+    };
+
+    deleteProgram(this.programDrop);
+    deleteProgram(this.programTrail);
+    deleteProgram(this.programComposite);
+    deleteProgram(this.programSprite);
+
+    // Delete VAOs
+    const deleteVAO = (vao: WebGLVertexArrayObject | null) => {
+      if (vao) gl.deleteVertexArray(vao);
+    };
+    deleteVAO(this.vaoDrop);
+    deleteVAO(this.vaoTrail);
+    deleteVAO(this.vaoQuad);
+    deleteVAO(this.vaoSprite);
+
+    // Delete Buffers
+    const deleteBuf = (buf: WebGLBuffer | null) => {
+      if (buf) gl.deleteBuffer(buf);
+    };
+    deleteBuf(this.bufDropInst);
+    deleteBuf(this.bufTrailInst);
+    deleteBuf(this.bufSpriteQuad);
+    deleteBuf(this.bufSpriteInst);
+
+    // Delete Textures & FBOs
+    const deleteTex = (tex: WebGLTexture | null) => {
+      if (tex) gl.deleteTexture(tex);
+    };
+    deleteTex(this.tex1);
+    deleteTex(this.tex2);
+    deleteTex(this.texDistort);
+    deleteTex(this.texBG);
+    deleteTex(this.texSprites);
+
+    const deleteFBO = (fbo: WebGLFramebuffer | null) => {
+      if (fbo) gl.deleteFramebuffer(fbo);
+    };
+    deleteFBO(this.fbo1);
+    deleteFBO(this.fbo2);
+    deleteFBO(this.fboDistort);
+
+    this.gl = null;
+    this.programDrop = null;
+    this.programTrail = null;
+    this.programComposite = null;
+    this.programSprite = null;
+    this.vaoDrop = null;
+    this.vaoTrail = null;
+    this.vaoQuad = null;
+    this.vaoSprite = null;
+    this.fbo1 = null;
+    this.tex1 = null;
+    this.fbo2 = null;
+    this.tex2 = null;
+    this.fboDistort = null;
+    this.texDistort = null;
+    this.texBG = null;
+    this.texSprites = null;
+    this.bufSpriteQuad = null;
+    this.spriteInstCapacity = 0;
   }
 
   async init(): Promise<void> {
@@ -131,20 +217,27 @@ export class WebGL2Renderer implements Renderer {
     // x, y, r, stretch, vx, vy
     const bufDropInst = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, bufDropInst);
-    // Reserve space for ~1000 drops
-    gl.bufferData(gl.ARRAY_BUFFER, 1000 * 6 * 4, gl.DYNAMIC_DRAW);
+    // Reserve space for ~1000 drops (increased to 7 floats per drop)
+    gl.bufferData(gl.ARRAY_BUFFER, 1000 * 7 * 4, gl.DYNAMIC_DRAW);
+
+    // Stride = 7 * 4 = 28 bytes
+    const stride = 28;
 
     gl.enableVertexAttribArray(1); // i_pos (x,y)
-    gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 24, 0);
+    gl.vertexAttribPointer(1, 2, gl.FLOAT, false, stride, 0);
     gl.vertexAttribDivisor(1, 1);
 
     gl.enableVertexAttribArray(2); // i_params (r, stretch)
-    gl.vertexAttribPointer(2, 2, gl.FLOAT, false, 24, 8);
+    gl.vertexAttribPointer(2, 2, gl.FLOAT, false, stride, 8);
     gl.vertexAttribDivisor(2, 1);
 
     gl.enableVertexAttribArray(3); // i_vel (vx, vy)
-    gl.vertexAttribPointer(3, 2, gl.FLOAT, false, 24, 16);
+    gl.vertexAttribPointer(3, 2, gl.FLOAT, false, stride, 16);
     gl.vertexAttribDivisor(3, 1);
+
+    gl.enableVertexAttribArray(4); // i_seed (float)
+    gl.vertexAttribPointer(4, 1, gl.FLOAT, false, stride, 24);
+    gl.vertexAttribDivisor(4, 1);
 
     gl.bindVertexArray(null);
 
@@ -194,8 +287,54 @@ export class WebGL2Renderer implements Renderer {
 
   private initFBOs() {
     const gl = this.gl!;
-    const w = Math.max(1, this.width);
-    const h = Math.max(1, this.height);
+    const w = Math.max(1, this.fbWidth);
+    const h = Math.max(1, this.fbHeight);
+
+    // Cleanup previous GPU resources to avoid leaking on resize/re-init.
+    const deleteTex = (tex: WebGLTexture | null) => {
+      if (tex) gl.deleteTexture(tex);
+    };
+    const deleteFBO = (fbo: WebGLFramebuffer | null) => {
+      if (fbo) gl.deleteFramebuffer(fbo);
+    };
+
+    deleteTex(this.texBG);
+    deleteTex(this.tex1);
+    deleteTex(this.tex2);
+    deleteTex(this.texDistort);
+
+    deleteFBO(this.fbo1);
+    deleteFBO(this.fbo2);
+    deleteFBO(this.fboDistort);
+
+    this.texBG = null;
+    this.tex1 = null;
+    this.tex2 = null;
+    this.texDistort = null;
+    this.fbo1 = null;
+    this.fbo2 = null;
+    this.fboDistort = null;
+    this.lastUploadedBG = null;
+
+    // -- Background Texture --
+    this.texBG = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, this.texBG);
+    // Initialize with 1x1 transparent pixel to avoid "dark screen" if not uploaded yet
+    gl.texImage2D(
+      gl.TEXTURE_2D,
+      0,
+      gl.RGBA,
+      1,
+      1,
+      0,
+      gl.RGBA,
+      gl.UNSIGNED_BYTE,
+      new Uint8Array([0, 0, 0, 0]),
+    );
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 
     const createFBO = () => {
       const tex = gl.createTexture();
@@ -235,25 +374,10 @@ export class WebGL2Renderer implements Renderer {
     this.fbo2 = r2.fbo;
     this.tex2 = r2.tex;
 
-    // BG Texture
-    this.texBG = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, this.texBG);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    // Initial 1x1 black
-    gl.texImage2D(
-      gl.TEXTURE_2D,
-      0,
-      gl.RGBA,
-      1,
-      1,
-      0,
-      gl.RGBA,
-      gl.UNSIGNED_BYTE,
-      new Uint8Array([0, 0, 0, 255]),
-    );
+    // Distortion FBO (Normals/Offsets)
+    const rd = createFBO();
+    this.fboDistort = rd.fbo;
+    this.texDistort = rd.tex;
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
@@ -262,7 +386,9 @@ export class WebGL2Renderer implements Renderer {
   private programSprite: WebGLProgram | null = null;
   private texSprites: WebGLTexture | null = null;
   private vaoSprite: WebGLVertexArrayObject | null = null;
+  private bufSpriteQuad: WebGLBuffer | null = null;
   private bufSpriteInst: WebGLBuffer | null = null;
+  private spriteInstCapacity = 0;
 
   private async initSprites(assets: {
     snow?: HTMLImageElement[];
@@ -332,6 +458,7 @@ export class WebGL2Renderer implements Renderer {
     // We can reuse bufDropGeom from drops! (It's just a quad -0.5..0.5)
     // Wait, bufDropGeom isn't exposed. Let's make a new one to be safe/clean.
     const bufQuad = gl.createBuffer();
+    this.bufSpriteQuad = bufQuad;
     gl.bindBuffer(gl.ARRAY_BUFFER, bufQuad);
     gl.bufferData(
       gl.ARRAY_BUFFER,
@@ -346,7 +473,12 @@ export class WebGL2Renderer implements Renderer {
     const bufInst = gl.createBuffer();
     this.bufSpriteInst = bufInst;
     gl.bindBuffer(gl.ARRAY_BUFFER, bufInst);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(1000 * 6), gl.DYNAMIC_DRAW);
+    this.spriteInstCapacity = 1000;
+    gl.bufferData(
+      gl.ARRAY_BUFFER,
+      this.spriteInstCapacity * 6 * 4,
+      gl.DYNAMIC_DRAW,
+    );
 
     // 1: x,y,size,rot (vec4)
     gl.enableVertexAttribArray(1);
@@ -363,15 +495,23 @@ export class WebGL2Renderer implements Renderer {
     gl.bindVertexArray(null);
   }
   resize(width: number, height: number, dpr: number) {
-    if (this.width === width && this.height === height && this.dpr === dpr)
+    if (
+      this.cssWidth === width &&
+      this.cssHeight === height &&
+      this.dpr === dpr
+    )
       return;
-    this.width = width;
-    this.height = height;
+    this.cssWidth = width;
+    this.cssHeight = height;
     this.dpr = dpr;
 
     if (this.canvas) {
-      this.canvas.width = width;
-      this.canvas.height = height;
+      const fbW = Math.max(1, Math.floor(width * dpr));
+      const fbH = Math.max(1, Math.floor(height * dpr));
+      this.fbWidth = fbW;
+      this.fbHeight = fbH;
+      this.canvas.width = fbW;
+      this.canvas.height = fbH;
     }
 
     // Re-init FBOs
@@ -403,7 +543,7 @@ export class WebGL2Renderer implements Renderer {
     const vao = this.vaoSprite;
     if (!prog || !vao || !this.texSprites) return;
 
-    gl.viewport(0, 0, this.width, this.height);
+    gl.viewport(0, 0, this.fbWidth, this.fbHeight);
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
 
@@ -411,7 +551,8 @@ export class WebGL2Renderer implements Renderer {
 
     // Uniforms
     const uRes = gl.getUniformLocation(prog, 'u_res');
-    gl.uniform2f(uRes, this.width, this.height);
+    // Guard against 0-sized host during initial mount/layout.
+    gl.uniform2f(uRes, Math.max(1, this.cssWidth), Math.max(1, this.cssHeight));
 
     // Texture
     gl.activeTexture(gl.TEXTURE0);
@@ -422,6 +563,22 @@ export class WebGL2Renderer implements Renderer {
     // Instance Data
     const sprites = state.sprites;
     if (sprites.length === 0) return;
+
+    if (this.bufSpriteInst && sprites.length > this.spriteInstCapacity) {
+      // Grow buffer to avoid WebGL errors from bufferSubData overflow.
+      const gl2 = gl;
+      const nextCap = Math.max(
+        sprites.length,
+        Math.ceil(this.spriteInstCapacity * 1.5),
+      );
+      this.spriteInstCapacity = nextCap;
+      gl2.bindBuffer(gl2.ARRAY_BUFFER, this.bufSpriteInst);
+      gl2.bufferData(
+        gl2.ARRAY_BUFFER,
+        this.spriteInstCapacity * 6 * 4,
+        gl2.DYNAMIC_DRAW,
+      );
+    }
 
     const data = new Float32Array(sprites.length * 6);
     for (let i = 0; i < sprites.length; i++) {
@@ -452,7 +609,10 @@ export class WebGL2Renderer implements Renderer {
     if (!programDrop || !programTrail || !programComposite) return;
 
     // 0. Update BG if changed
-    if (state.backgroundImage) {
+    if (
+      state.backgroundImage &&
+      state.backgroundImage !== this.lastUploadedBG
+    ) {
       gl.bindTexture(gl.TEXTURE_2D, this.texBG);
       gl.texImage2D(
         gl.TEXTURE_2D,
@@ -462,17 +622,16 @@ export class WebGL2Renderer implements Renderer {
         gl.UNSIGNED_BYTE,
         state.backgroundImage,
       );
+      this.lastUploadedBG = state.backgroundImage;
     }
 
-    gl.viewport(0, 0, this.width, this.height);
+    gl.viewport(0, 0, this.fbWidth, this.fbHeight);
 
-    // 1. Trail Ping-Pong (Decay)
-    // Swap source/dest
+    // 1. Trail Ping-Pong (Decay/Accumulation)
     const srcFbo = this.fbo1;
     const srcTex = this.tex1;
     const dstFbo = this.fbo2;
     const dstTex = this.tex2;
-    // Swap pointers for next frame
     this.fbo1 = dstFbo;
     this.tex1 = dstTex;
     this.fbo2 = srcFbo;
@@ -480,126 +639,136 @@ export class WebGL2Renderer implements Renderer {
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, dstFbo);
     gl.useProgram(programTrail);
-
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
 
-    // Upload Trails
     if (state.trails.length > 0) {
       const arr = new Float32Array(state.trails.length * 6);
       for (let i = 0; i < state.trails.length; i++) {
         const t = state.trails[i];
-        arr[i * 6 + 0] = t.x1;
-        arr[i * 6 + 1] = t.y1;
-        arr[i * 6 + 2] = t.x2;
-        arr[i * 6 + 3] = t.y2;
-        arr[i * 6 + 4] = t.w;
-        arr[i * 6 + 5] = t.life;
+        const off = i * 6;
+        arr[off + 0] = t.x1;
+        arr[off + 1] = t.y1;
+        arr[off + 2] = t.x2;
+        arr[off + 3] = t.y2;
+        arr[off + 4] = t.w;
+        arr[off + 5] = t.life;
       }
       gl.bindBuffer(gl.ARRAY_BUFFER, this.bufTrailInst);
       gl.bufferSubData(gl.ARRAY_BUFFER, 0, arr);
 
-      // Draw Trails to Offscreen
       gl.enable(gl.BLEND);
-      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); // Standard blend
-
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
       gl.uniform2f(
         gl.getUniformLocation(programTrail, 'u_res'),
-        this.width,
-        this.height,
+        Math.max(1, this.cssWidth),
+        Math.max(1, this.cssHeight),
       );
+      gl.uniform1i(gl.getUniformLocation(programTrail, 'u_pass'), 0); // Pass 0: Decay Accumulation
       gl.bindVertexArray(this.vaoTrail);
       gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, state.trails.length);
     }
 
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    gl.clearColor(0, 0, 0, 0);
+    // --- PASS 2: Distortion Map (Normals / Offsets) ---
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.fboDistort);
+    gl.clearColor(0.5, 0.5, 0, 0); // Neutral Normal (0.5, 0.5)
     gl.clear(gl.COLOR_BUFFER_BIT);
 
-    // 2. Composite (BG + Trails + Fog)
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
+    // A. Fill Distortion from Trails
+    if (state.trails.length > 0) {
+      gl.useProgram(programTrail);
+      gl.uniform1i(gl.getUniformLocation(programTrail, 'u_pass'), 1); // Pass 1: Distortion/Normals
+      gl.bindVertexArray(this.vaoTrail);
+      gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, state.trails.length);
+    }
+
+    // B. Fill Distortion from Drops
+    if (state.drops.length > 0) {
+      gl.useProgram(programDrop);
+      const arr = new Float32Array(state.drops.length * 7);
+      for (let i = 0; i < state.drops.length; i++) {
+        const d = state.drops[i];
+        const off = i * 7;
+        arr[off + 0] = d.x;
+        arr[off + 1] = d.y;
+        arr[off + 2] = d.r;
+        arr[off + 3] = d.stretch;
+        arr[off + 4] = d.vx;
+        arr[off + 5] = d.vy;
+        arr[off + 6] = d.seed || 0; // Pass seed
+      }
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.bufDropInst);
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, arr);
+
+      gl.uniform2f(
+        gl.getUniformLocation(programDrop, 'u_res'),
+        Math.max(1, this.cssWidth),
+        Math.max(1, this.cssHeight),
+      );
+      gl.bindVertexArray(this.vaoDrop);
+      gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, state.drops.length);
+    }
+
+    // --- PASS 3: Final Composite (Refractive) ---
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
     gl.useProgram(programComposite);
-    gl.uniform2f(
-      gl.getUniformLocation(programComposite, 'u_res'),
-      this.width,
-      this.height,
-    );
+    gl.clear(gl.COLOR_BUFFER_BIT);
 
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.texBG);
     gl.uniform1i(gl.getUniformLocation(programComposite, 'u_texBG'), 0);
 
     gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D, dstTex); // The trails we just drew
-    gl.uniform1i(gl.getUniformLocation(programComposite, 'u_texTrail'), 1);
+    gl.bindTexture(gl.TEXTURE_2D, this.texDistort);
+    gl.uniform1i(gl.getUniformLocation(programComposite, 'u_texDistort'), 1);
+
+    gl.uniform2f(
+      gl.getUniformLocation(programComposite, 'u_res'),
+      Math.max(1, this.cssWidth),
+      Math.max(1, this.cssHeight),
+    );
+
+    // Pass Flash State
+    gl.uniform1f(
+      gl.getUniformLocation(programComposite, 'u_flash'),
+      state.flash,
+    );
+
+    // Calculate Cover/Scale for BG
+    let bgW = 1,
+      bgH = 1;
+    if (state.backgroundImage) {
+      bgW = state.backgroundImage.naturalWidth || 1;
+      bgH = state.backgroundImage.naturalHeight || 1;
+    }
+    const safeW = Math.max(1, this.cssWidth);
+    const safeH = Math.max(1, this.cssHeight);
+    const screenAspect = safeW / safeH;
+    const bgAspect = bgW / bgH;
+    let scaleX = 1,
+      scaleY = 1;
+
+    if (screenAspect > bgAspect) {
+      // Screen wider than BG -> BG needs to be wider (zoom width to fit)
+      // Actually CSS 'cover' logic:
+      scaleY = safeW / bgAspect / safeH;
+    } else {
+      scaleX = (safeH * bgAspect) / safeW;
+    }
+
+    gl.uniform2f(
+      gl.getUniformLocation(programComposite, 'u_bgScale'),
+      scaleX,
+      scaleY,
+    );
 
     gl.bindVertexArray(this.vaoQuad);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
-
-    // 3. Draw Drops
-    gl.useProgram(programDrop);
-    gl.uniform2f(
-      gl.getUniformLocation(programDrop, 'u_res'),
-      this.width,
-      this.height,
-    );
-
-    // Reuse BG texture for refraction
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, this.texBG);
-    gl.uniform1i(gl.getUniformLocation(programDrop, 'u_texBG'), 0);
-
-    // Aspect Ratio Corection for Background
-    let bgScaleX = 1.0;
-    let bgScaleY = 1.0;
-    if (state.backgroundImage) {
-      const iw =
-        state.backgroundImage.naturalWidth || state.backgroundImage.width || 1;
-      const ih =
-        state.backgroundImage.naturalHeight ||
-        state.backgroundImage.height ||
-        1;
-      const screenAspect = this.width / this.height;
-      const imgAspect = iw / ih;
-
-      // "Cover" logic
-      // If screen is wider than img, we clamp width (1.0) and crop height
-      if (screenAspect > imgAspect) {
-        // Screen is wider relative to height -> Img width needs to match screen width
-        // Img height will be larger than screen height
-        // Scale = (ScreenAspect / ImgAspect)?
-        // UV = uv * scale + offset
-        bgScaleY = screenAspect / imgAspect;
-      } else {
-        // Screen is taller -> Img height matches screen height
-        bgScaleX = imgAspect / screenAspect;
-      }
-    }
-    gl.uniform2f(
-      gl.getUniformLocation(programDrop, 'u_bgScale'),
-      bgScaleX,
-      bgScaleY,
-    );
-
-    if (state.drops.length > 0) {
-      const arr = new Float32Array(state.drops.length * 6);
-      for (let i = 0; i < state.drops.length; i++) {
-        const d = state.drops[i];
-        arr[i * 6 + 0] = d.x;
-        arr[i * 6 + 1] = d.y;
-        arr[i * 6 + 2] = d.r;
-        arr[i * 6 + 3] = d.stretch;
-        arr[i * 6 + 4] = d.vx;
-        arr[i * 6 + 5] = d.vy;
-      }
-      gl.bindBuffer(gl.ARRAY_BUFFER, this.bufDropInst);
-      gl.bufferSubData(gl.ARRAY_BUFFER, 0, arr);
-
-      gl.bindVertexArray(this.vaoDrop);
-      gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, state.drops.length);
-    }
   }
 }
 
@@ -669,17 +838,22 @@ void main() {
 // --- Drop Shaders (Glass) ---
 const vsDrop = `#version 300 es
 layout(location=0) in vec2 pos;
-layout(location=1) in vec2 i_pos;
-layout(location=2) in vec2 i_params; // r, stretch
-layout(location=3) in vec2 i_vel;
+layout(location = 1) in vec2 i_pos;    // x, y
+layout(location = 2) in vec2 i_params; // r, stretch
+layout(location = 3) in vec2 i_vel;    // vx, vy
+layout(location = 4) in float i_seed;  // Stable seed
 
 uniform vec2 u_res;
+
 out vec2 v_uv;
-out vec2 v_center;
-out float v_r;
-out float v_seed; // Random seed
+out vec2 v_localUV;
+out float v_radius;
+out float v_stretch;
+out vec2 v_vel;
+out float v_seed;
 
 void main() {
+  v_seed = i_seed;
   float r = i_params.x;
   float stretch = i_params.y;
   
@@ -694,7 +868,7 @@ void main() {
   
   float stretchFactor = 4.0;
   if (r > 4.5) { // Slightly higher threshold
-      stretchFactor = 0.5; 
+      stretchFactor = 1.5; 
   }
   
   float sy = 1.0 + stretch * stretchFactor;
@@ -709,74 +883,78 @@ void main() {
   gl_Position = vec4( (worldPos / u_res) * 2.0 - 1.0, 0.0, 1.0);
   gl_Position.y = -gl_Position.y; // Flip Y
   
-  v_uv = pos * 2.0; // -1 to 1
-  v_center = i_pos;
-  v_r = r;
-  v_seed = fract(sin(dot(i_pos, vec2(12.9898, 78.233))) * 43758.5453);
+  v_uv = pos + 0.5; // 0..1
+  v_localUV = pos;  // -0.5..0.5
+  v_radius = r;
+  v_stretch = stretch;
+  v_vel = i_vel;
 }
 `;
 
 const fsDrop = `#version 300 es
 precision highp float;
-in vec2 v_uv;
-in vec2 v_center;
-in float v_r;
+in vec2 v_uv;     // 0..1 in drop quad
+in vec2 v_localUV; 
+in float v_radius;
+in float v_stretch;
+in vec2 v_vel;
 in float v_seed;
-
-uniform vec2 u_res;
 
 out vec4 fragColor;
 
 void main() {
-  // Polar Coordinates
-  float angle = atan(v_uv.y, v_uv.x);
-  float radius = length(v_uv);
+  vec2 p = v_uv - 0.5;
   
-  // Natural Shape Distortion (Amoeba)
-  // Combine sin waves based on angle + seed
-  // Warp more for condensation (low stretch/radius), less for rain.
-  // For now apply globally.
-  float warp = sin(angle * 3.0 + v_seed * 10.0) * 0.1 + 
-               sin(angle * 5.0 - v_seed * 20.0) * 0.05 +
-               sin(angle * 7.0 + v_seed * 5.0) * 0.02;
+  // Raindrop shape: Sphere with stretch
+  p.y /= (1.0 + v_stretch * 0.5);
+  
+  // Taper for teardrop shape (trailing tail)
+  // If v_stretch > 0, we want the top (p.y > 0) to be thinner.
+  // Multiplying p.x by a factor > 1 makes effective width smaller.
+  // User dislike "bullet shape", so we reduce taper strength and randomize it
+  float taperStrength = 1.0 + sin(v_seed * 43.0) * 0.5; // Random taper 0.5..1.5
+  float taper = 1.0 + (p.y + 0.5) * v_stretch * taperStrength * 2.0; 
+  p.x *= taper;
+  
+  // --- Organic Shape Distortion (User Request) ---
+  // 1. Angular Waviness (not perfect circle)
+  // Use v_seed so every drop is different but STABLE (no spinning)
+  float angle = atan(p.y, p.x);
+  float seed = v_seed * 13.54;
+  
+  // Combine low-freq and high-freq sine waves to distort the edge
+  float wave = sin(angle * 3.0 + seed) * 0.04;     // Main shape wobble
+  wave += sin(angle * 7.0 - seed * 2.0) * 0.02;    // Finer detail
+  wave += sin(angle * 13.0 + seed * 5.0) * 0.01;   // Micro irregularities
+  
+  // 2. Alpha Erosion / Edge Roughness
+  // Simulate "imperfect wetting" by adding noise to the distance field
+  float noise = fract(sin(dot(v_uv * 10.0, vec2(12.9898, 78.233))) * 43758.5453);
+  float roughness = (noise - 0.5) * 0.03;
 
-  float shapeRadius = 1.0 + warp;
+  float d = length(p) + wave + roughness;
   
-  // SDF
-  float dist = radius / shapeRadius;
-
-  if (dist > 1.0) discard;
+  if (d > 0.48) discard; // Slightly smaller cutoff to account for distortion
   
-  vec3 N = vec3(v_uv, sqrt(1.0 - dist*dist));
+  // Normal mapping (Spherical + Distortion)
+  // We need to perturb the normal to match the new shape "feeling"
+  // z = sqrt(1 - x^2 - y^2)
+  float z = sqrt(max(0.0, 0.25 - d * d));
+  vec3 normal = normalize(vec3(p.x, p.y, z));
   
-  // Lighting
-  vec3 lightDir = normalize(vec3(-0.3, 0.8, 1.0));
-  float spec = pow(max(0.0, dot(N, lightDir)), 20.0); // Broader highlight
-  float shine = smoothstep(0.2, 1.0, spec);
+  // Add surface noise to normal (glass defects)
+  normal.xy += (noise - 0.5) * 0.1;
+  normal = normalize(normal);
   
-  // Rim (Shadow) - Stronger
-  float rim = smoothstep(0.7, 1.0, dist);
+  // Specular highlight
+  vec3 lightDir = normalize(vec3(0.5, 0.5, 1.0));
+  float spec = pow(max(dot(normal, lightDir), 0.0), 30.0);
   
-  // Alpha Composition
-  // Shine -> White, High Alpha
-  // Rim -> Black, Medium Alpha
-  // Body -> Transparent
+  // Mask for composition
+  float mask = smoothstep(0.48, 0.42, d);
   
-  // White Shine - Boosted Opacity
-  vec4 cShine = vec4(1.0, 1.0, 1.0, shine * 0.95);
-  
-  // Black Rim - Broader and Stronger
-  vec4 cRim = vec4(0.0, 0.0, 0.0, rim * 0.6);
-  
-  // Mix: Rim over Body (Empty), Shine over Rim
-  vec4 final = mix(vec4(0.0), cRim, cRim.a);
-  final = mix(final, cShine, cShine.a);
-  
-  // Edge soft clip
-  float edgeAlpha = 1.0 - smoothstep(0.95, 1.0, dist);
-  final.a *= edgeAlpha;
-  
-  fragColor = final;
+  // Pack normals: rg=normal.xy (0..1), b=spec, a=mask
+  fragColor = vec4(normal.xy * 0.5 + 0.5, spec, mask);
 }
 `;
 
@@ -788,6 +966,7 @@ layout(location=3) in vec2 i_props; // w, life
 
 uniform vec2 u_res;
 out float v_life;
+out vec2 v_localUV;
 
 void main() {
   // Line segment geometry gen
@@ -795,9 +974,6 @@ void main() {
   vec2 idir = normalize(vec2(-dir.y, dir.x));
   
   float w = i_props.x;
-  // mix based on pos.x (-0.5=p1, 0.5=p2)?? 
-  // Wait, we reused quad geom. 
-  // Let's assume input pos is -0.5..0.5
   
   vec2 p = mix(i_p1, i_p2, pos.y + 0.5);
   p += idir * pos.x * w;
@@ -806,18 +982,40 @@ void main() {
   gl_Position.y = -gl_Position.y;
   
   v_life = i_props.y;
+  v_localUV = pos; // -0.5 to 0.5
 }
 `;
 
 const fsTrail = `#version 300 es
 precision mediump float;
 in float v_life;
+in vec2 v_localUV;
+uniform int u_pass;
 out vec4 fragColor;
-
 void main() {
-  // Trail is a disruption mask 
-  float alpha = smoothstep(0.0, 0.2, v_life);
-  fragColor = vec4(0.0, 0.0, 1.0, alpha * 0.4); // Blue channel = refraction map?
+  float mask = smoothstep(0.0, 0.2, v_life);
+  if (u_pass == 0) {
+    fragColor = vec4(0.0, 0.0, 1.0, mask * 0.4);
+  } else {
+    // Normal/Distortion for trail
+    // 1. Cylinder profile for lens effect
+    float x = v_localUV.x * 2.0; // -1.0 to 1.0
+    
+    // Add wobble to the trail path
+    float wobble = sin(v_localUV.y * 10.0 + v_life * 5.0) * 0.2;
+    x += wobble;
+    
+    float z = sqrt(max(0.0, 1.0 - x*x));
+    vec3 normal = normalize(vec3(x, wobble, z));
+    
+    // 2. Specular
+    vec3 lightDir = normalize(vec3(0.5, 0.5, 1.0));
+    float spec = pow(max(dot(normal, lightDir), 0.0), 10.0) * mask;
+
+    // Pack: RG=Normal, B=Spec, A=Mask
+    // Increase mask opacity for visibility (0.3 -> 0.6)
+    fragColor = vec4(normal.xy * 0.5 + 0.5, spec, mask * 0.6);
+  }
 }
 `;
 
@@ -836,32 +1034,108 @@ const fsComposite = `#version 300 es
 precision highp float;
 in vec2 v_uv;
 uniform sampler2D u_texBG;
-uniform sampler2D u_texTrail;
+uniform sampler2D u_texDistort;
+uniform vec2 u_res;
+uniform vec2 u_bgScale;
+uniform float u_flash; // Flash intensity 0..1
+
 out vec4 fragColor;
 
 void main() {
-  vec2 u = v_uv;
-  u.y = 1.0 - u.y; // Texture coords flipped
+  vec2 uv = v_uv;
   
-  vec4 trail = texture(u_texTrail, u);
+  // Distort UV is direct (0..1) because FBO is rendered Upright
+  vec4 distort = texture(u_texDistort, uv);
+  vec2 normal = (distort.rg - 0.5) * 2.0;
+  float spec = distort.b;
+  float mask = distort.a;
   
-  // Apply visual distortion from trail
-  vec2 offset = vec2(0.0);
-  if (trail.a > 0.0) {
-     offset = vec2(sin(u.y*50.0)*0.002, 0.005) * trail.a;
+  // 1. Refraction Offset (Lens effect)
+  // 1. Refraction Offset (Lens effect)
+  // Increased strength for "dynamic shaping"
+  float strength = 0.12;
+  
+  // Chromatic Aberration: Different wavelengths bend differently
+  vec2 offsetR = normal * strength;
+  vec2 offsetG = normal * (strength * 1.03); 
+  vec2 offsetB = normal * (strength * 1.06); 
+  
+  // 2. Sample Background with Refraction + FLIP Y
+  // We flip Y for the background sample because Images are loaded top-down into memory bottom-up
+  // Sample R
+  vec2 bgUVR = vec2(uv.x, 1.0 - uv.y) + offsetR;
+  vec2 finalUVR = (bgUVR - 0.5) * u_bgScale + 0.5;
+  float rCol = texture(u_texBG, finalUVR).r;
+  
+  // Sample G (also used for Alpha/Base)
+  vec2 bgUVG = vec2(uv.x, 1.0 - uv.y) + offsetG;
+  vec2 finalUVG = (bgUVG - 0.5) * u_bgScale + 0.5;
+  vec4 bgBase = texture(u_texBG, finalUVG);
+  float gCol = bgBase.g;
+  
+  // Sample B
+  vec2 bgUVB = vec2(uv.x, 1.0 - uv.y) + offsetB;
+  vec2 finalUVB = (bgUVB - 0.5) * u_bgScale + 0.5;
+  float bCol = texture(u_texBG, finalUVB).b;
+  
+  // Combine Refracted Color (for drops)
+  vec3 refractedColor = vec3(rCol, gCol, bCol);
+  
+  // Base Background: Default to Transparent
+  // We do NOT want to draw the full opaque image, as it covers the DOM.
+  // We only want to draw the image *inside* the drops (refraction).
+  vec4 bg = vec4(0.0);
+
+  // --- FLASH EFFECT ---
+  // 1. Global flash (Lightning lights up the sky)
+  float flashAlpha = u_flash * 0.4;
+  vec3 flashRGB = vec3(0.8, 0.9, 1.0) * flashAlpha;
+  
+  bg.rgb += flashRGB;
+  bg.a = max(bg.a, flashAlpha); // Ensure flash is visible
+  
+  // 3. Highlight/Lighting on droplets
+  if (mask > 0.01) {
+    // Apply Refracted Image Color to the Drop
+    // Blend logic: we want to see the DOM through the drop (Transparency),
+    // but also see the refracted poster (color/shape).
+    // Scaling by 0.4 gives 40% Poster visibility, 60% DOM visibility.
+    // We check bgBase.a so we don't darken the clear/search page.
+    float contentAlpha = bgBase.a * 0.4;
+    
+    bg.rgb = refractedColor * contentAlpha;
+    // Set base alpha (Pre-multiplied)
+    bg.a = contentAlpha; 
+
+    // Boost specular massively during flash (Reflecting the light)
+    float activeSpec = spec + (u_flash * 2.5 * spec); 
+    
+    bg.rgb += activeSpec * 0.6;
+    bg.rgb += mask * 0.03;
+    
+    // Alpha Management:
+    // Mix in WHITE/CLEAR body color based on transparency
+    float alphaFactor = 1.0 - bg.a; 
+    
+    vec3 clearColor = vec3(0.9, 0.95, 1.0);
+    vec3 addedBody = clearColor * alphaFactor * mask * 0.15;
+    
+    bg.rgb += addedBody;
+    
+    // Ensure minimum shape visibility via alpha
+    float dropAlpha = mask * 0.1 + activeSpec; 
+    bg.a = max(bg.a, dropAlpha);
+    
+    // Boost contrast inside drop
+    bg.rgb = mix(bg.rgb, bg.rgb * 1.2, mask * 0.5);
   }
   
-  vec3 col = texture(u_texBG, u + offset).rgb;
+  // Final Safety for Premultiplied Alpha
+  float maxRGB = max(bg.r, max(bg.g, bg.b));
+  if (maxRGB > bg.a) {
+      bg.a = maxRGB;
+  }
   
-  // Transparency Logic:
-  // If we assume we are an OVERLAY, we want to be transparent 
-  // unless there is "disturbed glass" (trails/fog).
-  // However, pure opacity 0.0 looks invisible.
-  // We want a subtle glass tint + strong wetness.
-  
-  float wetness = trail.a;
-  float glassOpacity = 0.05 + wetness * 0.5; // Base subtle tint + wetness
-  
-  fragColor = vec4(col, glassOpacity);
+  fragColor = bg;
 }
 `;

@@ -1,4 +1,7 @@
-FROM golang:alpine AS builder
+# Build the standalone Go proxy binary.
+# Go 1.25.7 is a stable release; keep this pinned for reproducible builds.
+ARG GO_VERSION=1.25.7
+FROM golang:${GO_VERSION}-alpine AS builder
 WORKDIR /app
 COPY go.mod ./
 COPY *.go ./

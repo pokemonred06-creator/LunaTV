@@ -14,8 +14,10 @@ export interface CachedPageEntry {
 // 缓存配置
 const SEARCH_CACHE_TTL_MS = 10 * 60 * 1000; // 10分钟
 const CACHE_CLEANUP_INTERVAL_MS = 5 * 60 * 1000; // 5分钟清理一次
-const MAX_CACHE_SIZE = 1000; // 最大缓存条目数量
+const MAX_CACHE_SIZE = 1000; // 最大缓存条目数量（搜索）
+const MAX_DETAIL_CACHE_SIZE = 500; // 详情缓存上限
 const SEARCH_CACHE: Map<string, CachedPageEntry> = new Map();
+const DETAIL_CACHE: Map<string, CachedPageEntry> = new Map();
 
 // 自动清理定时器
 let cleanupTimer: NodeJS.Timeout | null = null;
@@ -24,7 +26,11 @@ let lastCleanupTime = 0;
 /**
  * 生成搜索缓存键：source + query + page
  */
-function makeSearchCacheKey(sourceKey: string, query: string, page: number): string {
+function makeSearchCacheKey(
+  sourceKey: string,
+  query: string,
+  page: number,
+): string {
   return `${sourceKey}::${query.trim()}::${page}`;
 }
 
@@ -34,7 +40,7 @@ function makeSearchCacheKey(sourceKey: string, query: string, page: number): str
 export function getCachedSearchPage(
   sourceKey: string,
   query: string,
-  page: number
+  page: number,
 ): CachedPageEntry | null {
   const key = makeSearchCacheKey(sourceKey, query, page);
   const entry = SEARCH_CACHE.get(key);
@@ -58,7 +64,7 @@ export function setCachedSearchPage(
   page: number,
   status: CachedPageStatus,
   data: SearchResult[],
-  pageCount?: number
+  pageCount?: number,
 ): void {
   // 惰性启动自动清理
   ensureAutoCleanupStarted();
@@ -90,10 +96,16 @@ function ensureAutoCleanupStarted(): void {
 /**
  * 智能清理过期的缓存条目
  */
-function performCacheCleanup(): { expired: number; total: number; sizeLimited: number } {
+function performCacheCleanup(): {
+  expired: number;
+  total: number;
+  sizeLimited: number;
+} {
   const now = Date.now();
   const keysToDelete: string[] = [];
+  const detailKeysToDelete: string[] = [];
   let sizeLimitedDeleted = 0;
+  let detailSizeLimitedDeleted = 0;
 
   // 1. 清理过期条目
   SEARCH_CACHE.forEach((entry, key) => {
@@ -101,9 +113,15 @@ function performCacheCleanup(): { expired: number; total: number; sizeLimited: n
       keysToDelete.push(key);
     }
   });
+  DETAIL_CACHE.forEach((entry, key) => {
+    if (entry.expiresAt <= now) {
+      detailKeysToDelete.push(key);
+    }
+  });
 
-  const expiredCount = keysToDelete.length;
-  keysToDelete.forEach(key => SEARCH_CACHE.delete(key));
+  const expiredCount = keysToDelete.length + detailKeysToDelete.length;
+  keysToDelete.forEach((key) => SEARCH_CACHE.delete(key));
+  detailKeysToDelete.forEach((key) => DETAIL_CACHE.delete(key));
 
   // 2. 如果缓存大小超限，清理最老的条目（LRU策略）
   if (SEARCH_CACHE.size > MAX_CACHE_SIZE) {
@@ -118,13 +136,60 @@ function performCacheCleanup(): { expired: number; total: number; sizeLimited: n
     }
   }
 
+  if (DETAIL_CACHE.size > MAX_DETAIL_CACHE_SIZE) {
+    const entries = Array.from(DETAIL_CACHE.entries());
+    entries.sort((a, b) => a[1].expiresAt - b[1].expiresAt);
+    const toRemove = DETAIL_CACHE.size - MAX_DETAIL_CACHE_SIZE;
+    for (let i = 0; i < toRemove; i++) {
+      DETAIL_CACHE.delete(entries[i][0]);
+      detailSizeLimitedDeleted++;
+    }
+  }
+
   lastCleanupTime = now;
 
   return {
     expired: expiredCount,
-    total: SEARCH_CACHE.size,
-    sizeLimited: sizeLimitedDeleted
+    total: SEARCH_CACHE.size + DETAIL_CACHE.size,
+    sizeLimited: sizeLimitedDeleted + detailSizeLimitedDeleted,
   };
+}
+
+function makeDetailCacheKey(sourceKey: string, id: string): string {
+  return `${sourceKey}::detail::${id}`;
+}
+
+export function getCachedDetail(
+  sourceKey: string,
+  id: string,
+): CachedPageEntry | null {
+  const key = makeDetailCacheKey(sourceKey, id);
+  const entry = DETAIL_CACHE.get(key);
+  if (!entry) return null;
+  if (entry.expiresAt <= Date.now()) {
+    DETAIL_CACHE.delete(key);
+    return null;
+  }
+  return entry;
+}
+
+export function setCachedDetail(
+  sourceKey: string,
+  id: string,
+  status: CachedPageStatus,
+  data: SearchResult[], // Detail is wrapped in array
+): void {
+  ensureAutoCleanupStarted();
+  const key = makeDetailCacheKey(sourceKey, id);
+  DETAIL_CACHE.set(key, {
+    expiresAt: Date.now() + SEARCH_CACHE_TTL_MS,
+    status,
+    data,
+  });
+  // Simplified cleanup trigger
+  if (Date.now() - lastCleanupTime > CACHE_CLEANUP_INTERVAL_MS) {
+    performCacheCleanup();
+  }
 }
 
 /**

@@ -3,7 +3,20 @@
 
 # Start Go proxy in background on port 8080
 echo "Starting Go proxy on :8080..."
-/app/goproxy -addr :8080 -config /app/data/db.json -dev &
+GOPROXY_ARGS="-addr :8080 -config /app/data/db.json"
+
+# Default to secure mode in production. Opt-in to dev mode via PROXY_DEV=true.
+if [ "${PROXY_DEV}" = "true" ]; then
+    echo "WARNING: PROXY_DEV=true, starting Go proxy in dev mode (no auth)."
+    /app/goproxy $GOPROXY_ARGS -dev &
+else
+    if [ -z "${PROXY_SECRET}" ]; then
+        echo "FATAL: PROXY_SECRET is not set. Refusing to start Go proxy without auth."
+        echo "Set PROXY_SECRET (recommended) or set PROXY_DEV=true (development only)."
+        exit 1
+    fi
+    /app/goproxy $GOPROXY_ARGS &
+fi
 GOPROXY_PID=$!
 
 # Give Go proxy time to start

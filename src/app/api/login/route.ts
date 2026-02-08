@@ -50,9 +50,10 @@ async function generateAuthCookie(
 
 export async function POST(req: NextRequest) {
   try {
-    console.log('[Login] Request received. Storage Type:', STORAGE_TYPE);
+    // console.log('[Login] Request received. Storage Type:', STORAGE_TYPE);
 
     // Check Env Vars Presence
+    /*
     console.log('[Login] Env Check:', {
       hasPassword: !!process.env.PASSWORD,
       passwordLen: process.env.PASSWORD?.length,
@@ -60,6 +61,7 @@ export async function POST(req: NextRequest) {
       next_public_storage_type: process.env.NEXT_PUBLIC_STORAGE_TYPE,
       disable_secure_cookies: process.env.DISABLE_SECURE_COOKIES,
     });
+    */
 
     // 本地 / localStorage 模式——仅校验固定密码
     if (STORAGE_TYPE === 'localstorage') {
@@ -83,21 +85,28 @@ export async function POST(req: NextRequest) {
       const body = await req.json();
       const { password, username } = body;
 
+      /*
       console.log('[Login] Body:', { username, passwordProvided: !!password });
 
       if (typeof password !== 'string' || !password) {
         console.log('[Login] Password missing or invalid type');
         return NextResponse.json({ error: '密码不能为空' }, { status: 400 });
       }
+      */
+      if (typeof password !== 'string' || !password) {
+        return NextResponse.json({ error: '密码不能为空' }, { status: 400 });
+      }
 
       // Check password first
       if (password !== envPassword) {
+        /*
         console.log(
           '[Login] Password mismatch. Provided len:',
           password.length,
           'Expected len:',
           envPassword.length,
         );
+        */
         return NextResponse.json(
           { ok: false, error: '密码错误' },
           { status: 401 },
@@ -166,12 +175,13 @@ export async function POST(req: NextRequest) {
     }
 
     // 数据库 / redis 模式——校验用户名并尝试连接数据库
-    console.log('[Login] Mode: DB/Redis');
     const { username, password } = await req.json();
+    /*
     console.log('[Login] Request Data:', {
       username,
       passwordProvided: !!password,
     });
+    */
 
     if (!username || typeof username !== 'string') {
       return NextResponse.json({ error: '用户名不能为空' }, { status: 400 });

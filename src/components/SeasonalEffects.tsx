@@ -8,6 +8,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
+import { createPortal } from 'react-dom';
 
 import {
   createRenderer,
@@ -20,7 +21,8 @@ import {
   TrailState,
 } from '@/effects/renderer/types';
 
-import PureSnow from './PureSnow';
+import MagicalButterfly from './MagicalButterfly';
+import PhysicsSnow, { type PosterBounds } from './PhysicsSnow';
 import { generateTextures } from './SeasonalEffectsHelpers';
 
 // -- Constants --
@@ -39,19 +41,9 @@ interface SeasonalEffectsProps {
   disableMobile?: boolean;
   enabled?: boolean;
   backgroundImageUrl?: string;
+  posterBounds?: PosterBounds[]; // Update to array
+  posterElements?: Map<string, HTMLElement>; // New: Direct DOM access
 }
-
-// -- Helpers --
-const isActiveSeason = (s: string): s is ActiveSeason =>
-  ['spring', 'summer', 'autumn', 'winter'].includes(s);
-
-const getCurrentSeason = (): ActiveSeason => {
-  const month = new Date().getMonth() + 1;
-  if (month >= 3 && month <= 5) return 'spring';
-  if (month >= 6 && month <= 8) return 'summer';
-  if (month >= 9 && month <= 11) return 'autumn';
-  return 'winter';
-};
 
 function useElementRect(element: HTMLElement | null) {
   const [rect, setRect] = useState<DOMRectReadOnly | null>(null);
@@ -65,7 +57,7 @@ function useElementRect(element: HTMLElement | null) {
       cancelAnimationFrame(raf);
       raf = requestAnimationFrame(() => setRect(r));
     });
-    console.log('[SeasonalEffects] Observing element:', element);
+
     ro.observe(element);
     return () => {
       cancelAnimationFrame(raf);
@@ -136,6 +128,8 @@ export const SeasonalEffects: React.FC<SeasonalEffectsProps> = ({
   intensity = 'normal',
   enabled = true,
   backgroundImageUrl,
+  posterBounds,
+  posterElements,
 }) => {
   const [mounted, setMounted] = useState(false);
   const [textures, setTextures] = useState<{
@@ -153,6 +147,7 @@ export const SeasonalEffects: React.FC<SeasonalEffectsProps> = ({
   // Ref for spawn accumulator to avoid React state updates in loop
   const spawnAccRef = useRef(0);
   const startTimeRef = useRef(0);
+  const lastForceResizeCheckRef = useRef(0);
 
   // Physics State
   const stateRef = useRef<RenderState>({
@@ -167,11 +162,17 @@ export const SeasonalEffects: React.FC<SeasonalEffectsProps> = ({
     backgroundImage: null,
     assets: {},
     time: 0,
+    flash: 0,
   });
 
   // -- Context/Path Hooks --
   const pathname = usePathname();
-  const isPlayerPage = pathname?.startsWith('/play/');
+  const isPlayerPage =
+    pathname === '/play' ||
+    pathname?.startsWith('/play/') ||
+    pathname === '/live' ||
+    pathname?.startsWith('/live/');
+  const [forceCanvas, setForceCanvas] = useState(false);
 
   // -- Media Query Hooks --
   const [prefersReduced, setPrefersReduced] = useState(false);
@@ -182,6 +183,21 @@ export const SeasonalEffects: React.FC<SeasonalEffectsProps> = ({
     const handler = (e: MediaQueryListEvent) => setPrefersReduced(e.matches);
     media.addEventListener('change', handler);
     return () => media.removeEventListener('change', handler);
+  }, []);
+
+  // -- Device Capability Detection (force Canvas2D on mobile/low-power) --
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const ua = navigator.userAgent || '';
+    const coarse = window.matchMedia
+      ? window.matchMedia('(pointer: coarse)').matches
+      : false;
+    const smallScreen = window.innerWidth < 900;
+    const mobile =
+      coarse ||
+      smallScreen ||
+      /Mobi|Android|iPhone|iPad|iPod|webOS|BlackBerry/i.test(ua);
+    setForceCanvas(mobile);
   }, []);
 
   // -- Season Logic --
@@ -217,18 +233,6 @@ export const SeasonalEffects: React.FC<SeasonalEffectsProps> = ({
 
   const shouldRun = resolvedSeason === 'summer';
 
-  // Debug: Monitor props
-  useEffect(() => {
-    if (shouldRun) {
-      console.log('[SeasonalEffects] Props:', {
-        activeSeason: resolvedSeason,
-        intensity,
-        enabled,
-        hasCanvas: !!canvasRef.current,
-      });
-    }
-  }, [resolvedSeason, intensity, enabled, shouldRun]);
-
   // -- Configuration Hook --
   const CONFIG = useMemo(() => {
     const cfg = {
@@ -243,10 +247,10 @@ export const SeasonalEffects: React.FC<SeasonalEffectsProps> = ({
       TRAIL_LIFE: 3.5,
       TRAIL_WIDTH: 3.0,
       GRAVITY_ACC: 450,
-      TERMINAL_VEL: 600,
+      TERMINAL_VEL: 1200, // Increased from 600
       GRAVITY_R: 12.0,
-      GRAVITY: 80,
-      TERM_V: 200,
+      GRAVITY: 150, // Increased from 80
+      TERM_V: 1000, // Increased from 200 (was the bottleneck)
       DRIFT: 50,
       WET_SCAN_RADIUS: 28,
       WET_SPRING: 55,
@@ -256,7 +260,7 @@ export const SeasonalEffects: React.FC<SeasonalEffectsProps> = ({
       TRAIL_SPAWN_DY: 4.0,
       TRAIL_DECAY: 0.55,
     };
-    console.log('[SeasonalEffects] Derived Config:', cfg);
+
     return cfg;
   }, [intensity]);
 
@@ -266,20 +270,6 @@ export const SeasonalEffects: React.FC<SeasonalEffectsProps> = ({
   }, [CONFIG]);
 
   const rect = useElementRect(hostEl);
-
-  // Debug: Check why initialization might stall
-  useEffect(() => {
-    if (shouldRun) {
-      console.log('[SeasonalEffects] Init Check:', {
-        shouldRun,
-        hasCanvas: !!canvasRef.current,
-        hasRect: !!rect,
-        rectWidth: rect?.width,
-        rectHeight: rect?.height,
-        hasHost: !!hostEl,
-      });
-    }
-  }, [shouldRun, rect, hostEl]);
 
   // Load BG
   useEffect(() => {
@@ -306,7 +296,19 @@ export const SeasonalEffects: React.FC<SeasonalEffectsProps> = ({
 
   // --- RENDER LOOP & INIT ---
   useEffect(() => {
-    if (!shouldRun || !canvasRef.current || !rect) return;
+    // Note: We don't block on !rect anymore, to allow init and then resize later
+    if (!shouldRun || !canvasRef.current) return;
+    const rectSafe = rect || {
+      width: 0,
+      height: 0,
+      top: 0,
+      left: 0,
+      bottom: 0,
+      right: 0,
+      x: 0,
+      y: 0,
+      toJSON: () => {},
+    };
 
     const canvas = canvasRef.current;
     let active = true;
@@ -319,14 +321,17 @@ export const SeasonalEffects: React.FC<SeasonalEffectsProps> = ({
     // but better to just use relative time in loop
     startTimeRef.current = performance.now();
 
-    createRenderer(canvas).then((renderer) => {
+    createRenderer(canvas, {
+      forceCanvas: forceCanvas || prefersReduced,
+      adaptive: true,
+    }).then((renderer) => {
       if (!active) return;
       rendererRef.current = renderer;
 
       const dpr = Math.min(2, window.devicePixelRatio || 1);
-      renderer.resize(rect.width, rect.height, dpr);
-      stateRef.current.width = rect.width;
-      stateRef.current.height = rect.height;
+      renderer.resize(rectSafe.width, rectSafe.height, dpr);
+      stateRef.current.width = rectSafe.width;
+      stateRef.current.height = rectSafe.height;
       stateRef.current.dpr = dpr;
 
       // Safe Context Restore Wiring
@@ -357,6 +362,31 @@ export const SeasonalEffects: React.FC<SeasonalEffectsProps> = ({
         if (document.hidden) {
           rafRef.current = requestAnimationFrame(loop);
           return;
+        }
+
+        // --- FORCE RESIZE (Fix Magnification) ---
+        // Ensure canvas resolution matches DOM 1:1 every frame
+        // Use getBoundingClientRect to account for potential CSS transforms
+        if (now - lastForceResizeCheckRef.current > 250) {
+          lastForceResizeCheckRef.current = now;
+          const rect = canvas.getBoundingClientRect();
+          const dpr = Math.min(2, window.devicePixelRatio || 1);
+          const targetW = Math.round(rect.width * dpr);
+          const targetH = Math.round(rect.height * dpr);
+
+          // Allow small tolerance (2px)
+          if (
+            targetW > 0 &&
+            targetH > 0 &&
+            (Math.abs(canvas.width - targetW) > 2 ||
+              Math.abs(canvas.height - targetH) > 2)
+          ) {
+            // console.log('[SeasonalEffects] Resizing to:', targetW, targetH);
+            renderer.resize(rect.width, rect.height, dpr);
+            stateRef.current.width = rect.width;
+            stateRef.current.height = rect.height;
+            stateRef.current.dpr = dpr;
+          }
         }
 
         quality.update();
@@ -409,7 +439,7 @@ export const SeasonalEffects: React.FC<SeasonalEffectsProps> = ({
                 : 3.0 + Math.random() * 4.0;
 
             drops.push({
-              x: Math.random() * w,
+              x: 20 + Math.random() * (w - 40), // Add margin to avoid edge clipping
               y: isRain ? -50 : Math.random() * h,
               r: r,
               vx: isRain ? (Math.random() - 0.5) * 50 : 0,
@@ -420,46 +450,8 @@ export const SeasonalEffects: React.FC<SeasonalEffectsProps> = ({
               age: 0,
               falling: isRain,
               isRain: isRain,
+              trailY: 0,
             });
-          }
-        } else {
-          // ... Sprite Spawn Logic ...
-          const MAX_SPRITES = 150;
-          while (spawnAccRef.current >= 1 && sprites.length < MAX_SPRITES) {
-            spawnAccRef.current -= 1;
-            const size = 10 + Math.random() * 15;
-            const typeOffset =
-              resolvedSeason === 'autumn'
-                ? 4
-                : resolvedSeason === 'spring'
-                  ? 8
-                  : 0;
-            sprites.push({
-              x: Math.random() * w,
-              y: -50,
-              size: size,
-              rotation: Math.random() * Math.PI * 2,
-              vx: (Math.random() - 0.5) * 50, // Wind variation
-              vy: 50 + Math.random() * 100, // Fall speed
-              vr: (Math.random() - 0.5) * 2.0, // Rotation speed
-              type: typeOffset + Math.floor(Math.random() * 4), // Select correct texture from array
-              opacity: 0.8 + Math.random() * 0.2,
-            });
-          }
-
-          // Update Sprites
-          for (let i = sprites.length - 1; i >= 0; i--) {
-            const s = sprites[i];
-            s.x += s.vx * dt;
-            s.y += s.vy * dt;
-            s.rotation += s.vr * dt;
-            s.x += Math.sin(stateRef.current.time + s.type) * 20 * dt; // Sway
-
-            if (s.y > h + 50) {
-              // Wrap or Reset
-              s.y = -50;
-              s.x = Math.random() * w;
-            }
           }
         }
 
@@ -475,19 +467,28 @@ export const SeasonalEffects: React.FC<SeasonalEffectsProps> = ({
             const threshold = CONFIG.GRAVITY_R + d.seed * 5;
             if (d.r > threshold && d.age > 0.8) {
               d.falling = true;
-              d.vy = d.r * 2;
+              d.vy = 0; // Start from standstill, let gravity accelerate it
             }
           }
 
           if (d.falling) {
             const mass = Math.max(0.4, d.r / 6);
-            d.vy = Math.min(CONFIG.TERM_V, d.vy + CONFIG.GRAVITY * mass * dt);
 
-            const mainWander = Math.sin(d.y * 0.015 + d.seed * 10);
-            const localJitter = Math.sin(d.y * 0.08 + d.seed * 20);
+            // --- NEW: Hanging / Rivulet Speed Modulation ---
+            // Procedural "gravity" that occasionally pauses (hangs)
+            const speedMod = Math.max(
+              0.1,
+              Math.sin(d.y * 0.05 + d.seed * 50.0) * 0.5 + 0.5,
+            );
+            const gravityForce = CONFIG.GRAVITY * mass * speedMod;
+            d.vy = Math.min(CONFIG.TERM_V, d.vy + gravityForce * dt);
+
+            // --- NEW: Enhanced Zigzag Drift ---
+            const zigzagFrequency = 0.03 + d.seed * 0.02;
+            const zigzagAmplitude = CONFIG.DRIFT * 1.5;
             const targetVx =
-              (mainWander * 0.8 + localJitter * 0.2) * CONFIG.DRIFT;
-            d.vx += (targetVx - d.vx) * 3.0 * dt;
+              Math.sin(d.y * zigzagFrequency + d.seed * 20.0) * zigzagAmplitude;
+            d.vx += (targetVx - d.vx) * 4.0 * dt;
 
             // Wet Path Attraction
             let bestDx = 0;
@@ -532,27 +533,44 @@ export const SeasonalEffects: React.FC<SeasonalEffectsProps> = ({
             d.x += d.vx * dt;
             d.y += d.vy * dt;
 
-            if (d.x < 0) d.x = 0;
-            else if (d.x > w) d.x = w;
+            if (d.x < 20) d.x = 20;
+            else if (d.x > w - 20) d.x = w - 20;
 
             const speed = Math.hypot(d.vx, d.vy);
             d.stretch = Math.min(1, speed / 500);
 
-            if (d.y - oldY > CONFIG.TRAIL_SPAWN_DY) {
+            d.trailY = (d.trailY || 0) + (d.y - oldY);
+
+            if (d.trailY > CONFIG.TRAIL_SPAWN_DY && !d.isRain) {
+              const trailWidth = d.r * 0.65;
+              // Connect from Previous Trail End (CurrentY - AccumulatedY) to CurrentY
               trails.push({
-                x1: oldX,
-                y1: oldY,
+                x1: d.x - d.vx * dt * (d.trailY / (d.y - oldY || 1)), // Approx X backtrace
+                y1: d.y - d.trailY,
                 x2: d.x,
                 y2: d.y,
-                w: d.r * 0.65,
+                w: trailWidth,
                 life: 1,
               });
+
+              d.trailY = 0; // Reset accumulator
+
+              // Mass Loss: Drop shrinks as it leaves a trail
+              // Reduce radius slightly for every segment spawned
+              if (d.r > 1.5) {
+                d.r -= 0.05;
+              }
             }
 
+            // Recycle with variety
             if (d.y > h + 80) {
               d.y = -30 - Math.random() * 60;
-              d.x = Math.random() * w;
-              d.r = 0.8 + Math.random() * 1.4;
+              d.x = 20 + Math.random() * (w - 40); // Add margin here too
+              // Mix in small static-ish beads during recycle
+              const isBead = Math.random() > 0.6;
+              d.r = isBead
+                ? 1.0 + Math.random() * 1.5
+                : 2.0 + Math.random() * 3.0;
               d.vx = 0;
               d.vy = 0;
               d.falling = false;
@@ -592,12 +610,23 @@ export const SeasonalEffects: React.FC<SeasonalEffectsProps> = ({
                   const newR = Math.sqrt(wa + wb);
                   a.x = (a.x * wa + b.x * wb) / (wa + wb);
                   a.y = (a.y * wa + b.y * wb) / (wa + wb);
-                  a.vx = (a.vx * wa + b.vx * wb) / (wa + wb);
-                  a.vy = (a.vy * wa + b.vy * wb) / (wa + wb);
+                  // Collision Logic:
+                  // If hitting with high speed -> Continue falling (momentum).
+                  // If low speed -> Pause (surface tension).
+                  const incomingSpeed = Math.max(a.vy, b.vy);
+
+                  if (incomingSpeed > 300) {
+                    a.vy = incomingSpeed * 0.9; // Conserve most momentum
+                    a.vx = 0;
+                  } else {
+                    a.vx = 0;
+                    a.vy = 10; // Pause moment
+                  }
+
                   a.r = newR;
                   if (a.falling || b.falling) {
                     a.falling = true;
-                    a.vy += 20;
+                    // Removed vy += 20;
                   }
 
                   drops[j] = drops[drops.length - 1];
@@ -621,6 +650,20 @@ export const SeasonalEffects: React.FC<SeasonalEffectsProps> = ({
           if (trails[i].life <= 0) trails.splice(i, 1);
         }
         if (trails.length > 1500) trails.splice(0, trails.length - 1500);
+
+        // 5. Flash Logic (Thunder)
+        // Decay existing flash
+        if (stateRef.current.flash > 0) {
+          stateRef.current.flash *= 0.92; // Rapid decay
+          if (stateRef.current.flash < 0.01) stateRef.current.flash = 0;
+        }
+        // Random Trigger (approx every 30-40 seconds)
+        // 0.0005 at 60fps = ~1 flash every 33s
+        if (stateRef.current.flash === 0 && Math.random() < 0.0005) {
+          // Double flash pattern? Simple single flash for now.
+          stateRef.current.flash = 1.0;
+        }
+
         // --- PHYSICS UPDATE END ---
 
         renderer.render(stateRef.current);
@@ -641,11 +684,24 @@ export const SeasonalEffects: React.FC<SeasonalEffectsProps> = ({
       rendererRef.current?.destroy();
       rendererRef.current = null;
     };
-  }, [shouldRun, rect, resolvedSeason]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shouldRun, resolvedSeason]); // Intentionally exclude rect to prevent re-init loop
+
+  // New: Handle Resize separately without destroying renderer
+  useEffect(() => {
+    if (rendererRef.current && rect) {
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      rendererRef.current.resize(rect.width, rect.height, dpr);
+      stateRef.current.width = rect.width;
+      stateRef.current.height = rect.height;
+      stateRef.current.dpr = dpr;
+      // console.log('[SeasonalEffects] Resized:', rect.width, rect.height);
+    }
+  }, [rect]);
 
   if (!enabled || !mounted || resolvedSeason === 'off') return null;
 
-  return (
+  return createPortal(
     <div
       ref={setHostEl}
       className={`${CSS_PREFIX}-container`}
@@ -670,18 +726,21 @@ export const SeasonalEffects: React.FC<SeasonalEffectsProps> = ({
       )}
 
       {resolvedSeason !== 'summer' && (
-        <PureSnow
+        <PhysicsSnow
           mode={resolvedSeason}
           count={intensity === 'heavy' ? 150 : intensity === 'normal' ? 80 : 40}
-          textures={
-            resolvedSeason === 'autumn'
-              ? textures.leaves
-              : resolvedSeason === 'spring'
-                ? textures.petals
-                : textures.snow
-          }
+          posterBounds={posterBounds}
+          posterElements={posterElements}
         />
       )}
-    </div>
+
+      {resolvedSeason === 'spring' && (
+        <MagicalButterfly
+          count={intensity === 'heavy' ? 6 : intensity === 'normal' ? 4 : 2}
+          posterBounds={posterBounds}
+        />
+      )}
+    </div>,
+    document.body,
   );
 };

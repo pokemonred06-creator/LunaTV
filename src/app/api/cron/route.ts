@@ -9,11 +9,30 @@ import { SearchResult } from '@/lib/types';
 export const runtime = 'nodejs';
 
 export async function GET(request: NextRequest) {
-  console.log(request.url);
   try {
     console.log('Cron job triggered:', new Date().toISOString());
 
-    cronJob();
+    // Protect this endpoint: it is intentionally in middleware skip-list.
+    const expected = process.env.CRON_SECRET;
+    if (!expected) {
+      return NextResponse.json(
+        { success: false, message: 'CRON_SECRET is not configured' },
+        { status: 503 },
+      );
+    }
+
+    const token =
+      request.headers.get('x-cron-secret') ||
+      request.nextUrl.searchParams.get('token') ||
+      '';
+    if (token !== expected) {
+      return NextResponse.json(
+        { success: false, message: 'Unauthorized' },
+        { status: 401 },
+      );
+    }
+
+    await cronJob();
 
     return NextResponse.json({
       success: true,

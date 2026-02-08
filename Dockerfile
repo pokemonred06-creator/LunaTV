@@ -1,5 +1,5 @@
 # 使用官方 Node.js 镜像作为基础镜像
-FROM node:25-alpine AS base
+FROM node:22-alpine AS base
 
 # ===== Go Proxy Build Stage =====
 FROM golang:alpine AS go-builder
@@ -13,7 +13,9 @@ FROM base AS deps
 WORKDIR /app
 
 # 复制 package.json 和 lock 文件
-RUN npm install -g pnpm@latest
+ENV NPM_CONFIG_UPDATE_NOTIFIER=false
+ENV PNPM_DISABLE_SELF_UPDATE_CHECK=1
+RUN npm install -g pnpm@10.28.0
 COPY package.json pnpm-lock.yaml ./
 
 # Aggressively clean any pre-existing artifacts just in case
@@ -25,7 +27,9 @@ RUN pnpm install --no-frozen-lockfile
 # ===== Next.js Build Stage =====
 FROM base AS builder
 WORKDIR /app
-RUN npm install -g pnpm@latest
+ENV NPM_CONFIG_UPDATE_NOTIFIER=false
+ENV PNPM_DISABLE_SELF_UPDATE_CHECK=1
+RUN npm install -g pnpm@10.28.0
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
@@ -35,8 +39,9 @@ RUN rm -rf .next
 # 禁用 Next.js 遥测
 ENV NEXT_TELEMETRY_DISABLED=1
 # Add dummy env vars for build pass
-ARG USERNAME=admin
-ARG PASSWORD=admin
+# Add dummy env vars for build pass if needed, but avoid hardcoding sensitive defaults
+# ARG USERNAME
+# ARG PASSWORD
 
 # 构建
 RUN npm run build

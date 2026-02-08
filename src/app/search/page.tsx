@@ -833,6 +833,7 @@ function SearchPageClient() {
                                   : ''
                               }
                               type={type}
+                              desc={group[0]?.desc}
                             />
                           </div>
                         );
@@ -862,6 +863,7 @@ function SearchPageClient() {
                               year={item.year}
                               from='search'
                               type={epLen > 1 ? 'tv' : 'movie'}
+                              desc={item.desc}
                             />
                           </div>
                         );

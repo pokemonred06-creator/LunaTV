@@ -12,6 +12,19 @@ export async function calculateSignature(
   timestamp: number,
 ): Promise<string> {
   const secret = process.env.AUTH_SECRET || process.env.PASSWORD || '';
+
+  // Fail-fast: empty secret means signatures are trivially forgeable
+  if (!secret) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error(
+        'Fatal: AUTH_SECRET or PASSWORD must be set in production',
+      );
+    }
+    console.warn(
+      '[Auth] WARNING: No AUTH_SECRET or PASSWORD set. Signatures will be insecure.',
+    );
+  }
+
   const encoder = new TextEncoder();
   const key = await crypto.subtle.importKey(
     'raw',
@@ -70,18 +83,16 @@ async function parseAndVerifyAuthCookie(
       return null;
     }
 
-    // Strict Verification
-    if (signature && timestamp) {
-      const expected = await calculateSignature(username, role, timestamp);
-      if (!safeCompare(signature, expected)) {
-        console.warn('[Auth] Signature mismatch for user:', username);
-        // console.log('[Auth] Expected:', expected, 'Got:', signature);
-        return null;
-      }
-    } else {
-      // Optional: Reject unsigned cookies in strict mode
-      // return null;
-      // console.log('[Auth] Unsigned cookie allowed (legacy?)');
+    // Strict Verification - reject unsigned cookies
+    if (!signature || !timestamp) {
+      console.warn('[Auth] Unsigned cookie rejected for user:', username);
+      return null;
+    }
+
+    const expected = await calculateSignature(username, role, timestamp);
+    if (!safeCompare(signature, expected)) {
+      console.warn('[Auth] Signature mismatch for user:', username);
+      return null;
     }
 
     // console.log('[Auth] Verification Success:', username);
