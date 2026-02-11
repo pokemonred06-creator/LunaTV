@@ -1,3 +1,4 @@
+import { db } from '@/lib/db';
 import { SearchResult } from '@/lib/types';
 
 // 缓存状态类型
@@ -16,6 +17,8 @@ const SEARCH_CACHE_TTL_MS = 10 * 60 * 1000; // 10分钟
 const CACHE_CLEANUP_INTERVAL_MS = 5 * 60 * 1000; // 5分钟清理一次
 const MAX_CACHE_SIZE = 1000; // 最大缓存条目数量（搜索）
 const MAX_DETAIL_CACHE_SIZE = 500; // 详情缓存上限
+
+// 内存二级缓存 (L1 Cache)
 const SEARCH_CACHE: Map<string, CachedPageEntry> = new Map();
 const DETAIL_CACHE: Map<string, CachedPageEntry> = new Map();
 
@@ -31,57 +34,85 @@ function makeSearchCacheKey(
   query: string,
   page: number,
 ): string {
-  return `${sourceKey}::${query.trim()}::${page}`;
+  return `cache:search:${sourceKey}::${query.trim()}::${page}`;
 }
 
 /**
  * 获取缓存的搜索页面数据
  */
-export function getCachedSearchPage(
+export async function getCachedSearchPage(
   sourceKey: string,
   query: string,
   page: number,
-): CachedPageEntry | null {
+): Promise<CachedPageEntry | null> {
   const key = makeSearchCacheKey(sourceKey, query, page);
-  const entry = SEARCH_CACHE.get(key);
-  if (!entry) return null;
 
-  // 检查是否过期
-  if (entry.expiresAt <= Date.now()) {
+  // 1. L1 Cache (Memory)
+  const entry = SEARCH_CACHE.get(key);
+  if (entry) {
+    if (entry.expiresAt > Date.now()) {
+      return entry;
+    }
     SEARCH_CACHE.delete(key);
-    return null;
   }
 
-  return entry;
+  // 2. L2 Cache (Persistent DB)
+  try {
+    const dbValue = await db.get(key);
+    if (dbValue && typeof dbValue === 'object') {
+      const dbEntry = dbValue as CachedPageEntry;
+      if (dbEntry.expiresAt > Date.now()) {
+        // Backfill L1
+        SEARCH_CACHE.set(key, dbEntry);
+        return dbEntry;
+      }
+    }
+  } catch (err) {
+    console.error('[Cache] Redis read failed:', err);
+  }
+
+  return null;
 }
 
 /**
  * 设置缓存的搜索页面数据
  */
-export function setCachedSearchPage(
+export async function setCachedSearchPage(
   sourceKey: string,
   query: string,
   page: number,
   status: CachedPageStatus,
   data: SearchResult[],
   pageCount?: number,
-): void {
+): Promise<void> {
   // 惰性启动自动清理
   ensureAutoCleanupStarted();
 
-  // 惰性清理：每次写入时检查是否需要清理
   const now = Date.now();
-  if (now - lastCleanupTime > CACHE_CLEANUP_INTERVAL_MS) {
-    performCacheCleanup();
-  }
-
+  const expiresAt = now + SEARCH_CACHE_TTL_MS;
   const key = makeSearchCacheKey(sourceKey, query, page);
-  SEARCH_CACHE.set(key, {
-    expiresAt: now + SEARCH_CACHE_TTL_MS,
+  const entry: CachedPageEntry = {
+    expiresAt,
     status,
     data,
     pageCount,
-  });
+  };
+
+  // 1. Set L1
+  SEARCH_CACHE.set(key, entry);
+
+  // 2. Set L2 (Persistent DB)
+  try {
+    // TTL in seconds for Redis
+    await db.set(key, entry, Math.floor(SEARCH_CACHE_TTL_MS / 1000));
+  } catch (err) {
+    console.error('[Cache] Redis write failed:', err);
+  }
+
+  // 惰性清理：每次写入时检查是否需要清理 L1
+  if (now - lastCleanupTime > CACHE_CLEANUP_INTERVAL_MS) {
+    performCacheCleanup();
+  }
 }
 
 /**
@@ -94,7 +125,7 @@ function ensureAutoCleanupStarted(): void {
 }
 
 /**
- * 智能清理过期的缓存条目
+ * 智能清理过期的缓存条目 (仅清理 L1)
  */
 function performCacheCleanup(): {
   expired: number;
@@ -126,7 +157,6 @@ function performCacheCleanup(): {
   // 2. 如果缓存大小超限，清理最老的条目（LRU策略）
   if (SEARCH_CACHE.size > MAX_CACHE_SIZE) {
     const entries = Array.from(SEARCH_CACHE.entries());
-    // 按照过期时间排序，最早过期的在前面
     entries.sort((a, b) => a[1].expiresAt - b[1].expiresAt);
 
     const toRemove = SEARCH_CACHE.size - MAX_CACHE_SIZE;
@@ -156,38 +186,68 @@ function performCacheCleanup(): {
 }
 
 function makeDetailCacheKey(sourceKey: string, id: string): string {
-  return `${sourceKey}::detail::${id}`;
+  return `cache:detail:${sourceKey}::${id}`;
 }
 
-export function getCachedDetail(
+export async function getCachedDetail(
   sourceKey: string,
   id: string,
-): CachedPageEntry | null {
+): Promise<CachedPageEntry | null> {
   const key = makeDetailCacheKey(sourceKey, id);
+
+  // 1. L1
   const entry = DETAIL_CACHE.get(key);
-  if (!entry) return null;
-  if (entry.expiresAt <= Date.now()) {
+  if (entry) {
+    if (entry.expiresAt > Date.now()) {
+      return entry;
+    }
     DETAIL_CACHE.delete(key);
-    return null;
   }
-  return entry;
+
+  // 2. L2
+  try {
+    const dbValue = await db.get(key);
+    if (dbValue && typeof dbValue === 'object') {
+      const dbEntry = dbValue as CachedPageEntry;
+      if (dbEntry.expiresAt > Date.now()) {
+        DETAIL_CACHE.set(key, dbEntry);
+        return dbEntry;
+      }
+    }
+  } catch (err) {
+    console.error('[Cache] Redis read failed (detail):', err);
+  }
+
+  return null;
 }
 
-export function setCachedDetail(
+export async function setCachedDetail(
   sourceKey: string,
   id: string,
   status: CachedPageStatus,
   data: SearchResult[], // Detail is wrapped in array
-): void {
+): Promise<void> {
   ensureAutoCleanupStarted();
+  const now = Date.now();
+  const expiresAt = now + SEARCH_CACHE_TTL_MS;
   const key = makeDetailCacheKey(sourceKey, id);
-  DETAIL_CACHE.set(key, {
-    expiresAt: Date.now() + SEARCH_CACHE_TTL_MS,
+  const entry: CachedPageEntry = {
+    expiresAt,
     status,
     data,
-  });
-  // Simplified cleanup trigger
-  if (Date.now() - lastCleanupTime > CACHE_CLEANUP_INTERVAL_MS) {
+  };
+
+  // 1. L1
+  DETAIL_CACHE.set(key, entry);
+
+  // 2. L2
+  try {
+    await db.set(key, entry, Math.floor(SEARCH_CACHE_TTL_MS / 1000));
+  } catch (err) {
+    console.error('[Cache] Redis write failed (detail):', err);
+  }
+
+  if (now - lastCleanupTime > CACHE_CLEANUP_INTERVAL_MS) {
     performCacheCleanup();
   }
 }

@@ -30,7 +30,7 @@ async function searchWithCache(
   signal?: AbortSignal,
 ): Promise<{ results: SearchResult[]; pageCount?: number }> {
   // 1. Check Cache
-  const cached = getCachedSearchPage(apiSite.key, query, page);
+  const cached = await getCachedSearchPage(apiSite.key, query, page);
   if (cached) {
     if (cached.status === 'ok') {
       return { results: cached.data, pageCount: cached.pageCount };
@@ -63,7 +63,7 @@ async function searchWithCache(
 
     if (!response.ok) {
       if (response.status === 403) {
-        setCachedSearchPage(apiSite.key, query, page, 'forbidden', []);
+        await setCachedSearchPage(apiSite.key, query, page, 'forbidden', []);
       }
       return { results: [] };
     }
@@ -129,7 +129,14 @@ async function searchWithCache(
     );
 
     const pageCount = page === 1 ? data.pagecount || 1 : undefined;
-    setCachedSearchPage(apiSite.key, query, page, 'ok', results, pageCount);
+    await setCachedSearchPage(
+      apiSite.key,
+      query,
+      page,
+      'ok',
+      results,
+      pageCount,
+    );
     return { results, pageCount };
   } catch (error: any) {
     clearTimeout(timeoutId);
@@ -143,7 +150,7 @@ async function searchWithCache(
 
     // Only cache 'timeout' if it was the SYSTEM timeout (8s), NOT user cancellation
     if (isSystemError && !isUserAbort) {
-      setCachedSearchPage(apiSite.key, query, page, 'timeout', []);
+      await setCachedSearchPage(apiSite.key, query, page, 'timeout', []);
     }
 
     return { results: [] };
@@ -250,7 +257,7 @@ export async function getDetailFromApi(
   };
 
   // Check Cache First
-  const cached = getCachedDetail(apiSite.key, id);
+  const cached = await getCachedDetail(apiSite.key, id);
   if (cached && cached.status === 'ok' && cached.data.length > 0) {
     return cached.data[0];
   }
@@ -258,7 +265,7 @@ export async function getDetailFromApi(
   if (apiSite.detail) {
     // Note: handleSpecialSourceDetail could be cached inside itself, but we cache the result here too
     const res = await handleSpecialSourceDetail(id, apiSite);
-    setCachedDetail(apiSite.key, id, 'ok', [res]);
+    await setCachedDetail(apiSite.key, id, 'ok', [res]);
     return res;
   }
 
@@ -352,7 +359,7 @@ export async function getDetailFromApi(
     douban_id: videoDetail.vod_douban_id,
   };
 
-  setCachedDetail(apiSite.key, id, 'ok', [result]);
+  await setCachedDetail(apiSite.key, id, 'ok', [result]);
   return result;
 }
 

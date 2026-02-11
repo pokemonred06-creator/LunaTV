@@ -108,7 +108,7 @@ export async function getAuthInfoFromCookie(
   req: NextRequest,
 ): Promise<AuthInfo | null> {
   const raw = req.cookies.get('auth')?.value;
-  // if (!raw) console.log('[Auth] No "auth" cookie found in request.');
+  // No cookie found is normal for initial visits
   return raw ? await parseAndVerifyAuthCookie(raw) : null;
 }
 

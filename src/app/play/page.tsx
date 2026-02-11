@@ -5,7 +5,7 @@
 import Hls from 'hls.js';
 import { Heart } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import Player from 'video.js/dist/types/player';
 import 'videojs-mobile-ui';
 
@@ -148,7 +148,7 @@ function PlayPageClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { convert } = useLanguage();
-  const { setBackgroundImage, registerPosterFrame } = useSeasonalEffects();
+  const { setBackgroundImage } = useSeasonalEffects();
 
   // --- 基础状态 ---
   const [loading, setLoading] = useState(true);
@@ -218,16 +218,6 @@ function PlayPageClient() {
 
   // 核心播放器 Ref
   const playerRef = useRef<Player | null>(null);
-
-  const handlePosterRef = useCallback(
-    (el: HTMLDivElement | null) => registerPosterFrame('detail-poster', el),
-    [registerPosterFrame],
-  );
-
-  const handlePlayerRef = useCallback(
-    (el: HTMLDivElement | null) => registerPosterFrame('player', el),
-    [registerPosterFrame],
-  );
 
   const resumeTimeRef = useRef<number | null>(null);
   const lastSaveTimeRef = useRef<number>(0);
@@ -1088,7 +1078,7 @@ function PlayPageClient() {
   };
 
   const handleEnded = () => {
-    // FIX: Using State Logic here too for consistency
+    // 1. Handle TV Series (Multiple episodes in one source)
     if (
       detail &&
       detail.episodes &&
@@ -1097,7 +1087,31 @@ function PlayPageClient() {
       setTimeout(() => {
         handleEpisodeChange(currentEpisodeIndex + 2);
       }, 1000);
+      saveCurrentPlayProgress();
+      return;
     }
+
+    // 2. Handle Movies/Single Episodes (Maybe next source in availableSources?)
+    // If the title contains "Part 1" or similar, we might find "Part 2" in availableSources
+    const nextInQueue = availableSources.find(
+      (s) =>
+        s.source === currentSource &&
+        s.id !== currentId &&
+        (s.title.includes('2') ||
+          s.title.toLowerCase().includes('part') ||
+          s.title.toLowerCase().includes('集')),
+    );
+
+    if (nextInQueue) {
+      setTimeout(() => {
+        handleSourceChange(
+          nextInQueue.source,
+          nextInQueue.id,
+          nextInQueue.title,
+        );
+      }, 1500);
+    }
+
     saveCurrentPlayProgress();
   };
 
@@ -1314,7 +1328,7 @@ function PlayPageClient() {
             >
               <div className='relative w-full aspect-video lg:aspect-auto lg:h-full bg-black rounded-xl overflow-hidden shadow-2xl'>
                 {/* 核心播放器组件 */}
-                <div className='w-full h-full' ref={handlePlayerRef}>
+                <div className='w-full h-full'>
                   {debugEnabled && (
                     <div className='fixed top-20 left-20 z-50 bg-red-600 text-white p-4 font-bold text-xl border-4 border-yellow-400 pointer-events-none'>
                       DEBUG MODE ACTIVE
@@ -1347,8 +1361,24 @@ function PlayPageClient() {
 
                 {/* 加载遮罩 */}
                 {isVideoLoading && (
-                  <div className='absolute inset-0 bg-black/85 backdrop-blur-sm rounded-xl flex items-center justify-center z-500 transition-all duration-300 pointer-events-none'>
-                    <div className='text-center max-w-md mx-auto px-6'>
+                  <div
+                    className='absolute inset-0 bg-black/85 backdrop-blur-sm rounded-xl flex items-center justify-center z-500 transition-all duration-300 cursor-pointer active:scale-[0.99] select-none'
+                    onClick={() => {
+                      // GESTURE REFRESH: Clicking here gives us a fresh user gesture context
+                      // so the player can actually auto-play when the URL is ready.
+                      if (playerRef.current) {
+                        try {
+                          playerRef.current.play()?.catch(() => {});
+                        } catch {
+                          /* ignore */
+                        }
+                      }
+                      console.log(
+                        '[Gesture] Refreshing user context via loading mask click',
+                      );
+                    }}
+                  >
+                    <div className='text-center max-w-md mx-auto px-6 pointer-events-none'>
                       <div className='relative mb-8'>
                         <div className='relative mx-auto w-24 h-24 bg-linear-to-r from-green-500 to-emerald-600 rounded-2xl shadow-2xl flex items-center justify-center transform hover:scale-105 transition-transform duration-300'>
                           <div className='text-white text-4xl'>🎬</div>
@@ -1360,6 +1390,9 @@ function PlayPageClient() {
                           {videoLoadingStage === 'sourceChanging'
                             ? convert('🔄 切换播放源...')
                             : convert('🔄 视频加载中...')}
+                        </p>
+                        <p className='text-sm text-gray-400 opacity-60'>
+                          {convert('加载中，可点击此处保持唤醒...')}
                         </p>
                         {videoDesc && (
                           <div className='max-w-xs mx-auto overflow-hidden relative h-12 flex items-center'>
@@ -1444,10 +1477,7 @@ function PlayPageClient() {
           </div>
           <div className='hidden md:block md:col-span-1 md:order-first'>
             <div className='pl-0 py-4 pr-6'>
-              <div
-                ref={handlePosterRef}
-                className='relative bg-gray-300 dark:bg-gray-700 aspect-2/3 flex items-center justify-center rounded-xl overflow-hidden'
-              >
+              <div className='relative bg-gray-300 dark:bg-gray-700 aspect-2/3 flex items-center justify-center rounded-xl overflow-hidden'>
                 {videoCover ? (
                   <>
                     <img

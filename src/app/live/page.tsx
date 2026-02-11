@@ -122,7 +122,7 @@ const cleanEpgData = (programs: EpgProgram[]) => {
 const getProxiedLogoUrl = (logoUrl: string, sourceKey?: string) => {
   if (!logoUrl) return '';
   if (logoUrl.startsWith('/')) return logoUrl;
-  return `/api/proxy/logo?url=${encodeURIComponent(logoUrl)}&source=${sourceKey || ''}`;
+  return `/api/proxy/logo?url=${encodeURIComponent(logoUrl)}&moontv-source=${sourceKey || ''}`;
 };
 
 function useDebounce<T>(value: T, delay: number): T {
@@ -316,6 +316,7 @@ function usePlayerState(videoUrl: string, sourceKey?: string) {
       try {
         const checkUrl = `/api/live/precheck?url=${encodeURIComponent(debouncedUrl)}&moontv-source=${debouncedKey}`;
         const res = await fetch(checkUrl, { signal: controller.signal });
+        if (!res.ok) throw new Error(`Precheck failed with ${res.status}`);
         const data = await res.json();
 
         if (controller.signal.aborted) return;

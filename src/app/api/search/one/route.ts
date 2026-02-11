@@ -73,7 +73,7 @@ export async function GET(request: NextRequest) {
       );
     } else {
       return NextResponse.json(
-        { results: result },
+        { result },
         {
           headers: {
             'Cache-Control': `public, max-age=${cacheTime}, s-maxage=${cacheTime}`,

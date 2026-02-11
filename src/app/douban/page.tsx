@@ -46,7 +46,14 @@ const fetchDoubanDataInternal = async (
     const selectedCategory = customCategories.find(
       (cat) => cat.type === filters.primary && cat.query === filters.secondary,
     );
-    if (!selectedCategory) throw new Error('Category not found');
+    if (!selectedCategory) {
+      console.warn(
+        '[Douban] Category not found:',
+        filters.primary,
+        filters.secondary,
+      );
+      return { code: 200, message: 'category not found', list: [] };
+    }
 
     return getDoubanList({
       tag: selectedCategory.query,

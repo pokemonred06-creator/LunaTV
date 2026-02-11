@@ -57,10 +57,7 @@ export async function proxy(request: NextRequest) {
   const authInfo = await getAuthInfoFromCookie(request);
 
   if (!authInfo) {
-    console.log(
-      '[Proxy] Auth Failed in Middleware for:',
-      request.nextUrl.pathname,
-    );
+    // Auth failed
     return handleAuthFailure(request);
   }
 

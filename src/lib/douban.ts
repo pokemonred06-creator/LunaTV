@@ -49,57 +49,45 @@ async function getCachedData<T>(
 
   const now = Date.now();
 
-  // 1. 尝试从内存获取
+  // 1. Memory Check
   const memItem = memoryCache.get(key);
   if (memItem) {
     if (now - memItem.timestamp < cacheTime) {
-      console.log(
-        `[Douban Cache] Memory hit for ${key}. TTL: ${cacheTimeMinutes}m. Remaining: ${((cacheTime - (now - memItem.timestamp)) / 60000).toFixed(1)}m`,
-      );
       return memItem.data as T;
     }
-    console.log(`[Douban Cache] Memory expired for ${key}`);
     memoryCache.delete(key);
   }
 
-  // 2. 尝试从数据库获取
+  // 2. Persistent Storage Check
   try {
-    // 使用 db.get 替代 db.getCache
     const dbValue = await db.get(key);
     if (dbValue && typeof dbValue === 'string') {
       const dbItem = JSON.parse(dbValue) as CacheItem<T>;
-      if (dbItem && dbItem.timestamp) {
-        if (now - dbItem.timestamp < cacheTime) {
-          // 回写到内存
-          memoryCache.set(key, dbItem);
-          console.log(
-            `[Douban Cache] DB hit for ${key}. TTL: ${cacheTimeMinutes}m. Remaining: ${((cacheTime - (now - dbItem.timestamp)) / 60000).toFixed(1)}m`,
-          );
-          return dbItem.data;
-        }
-        console.log(`[Douban Cache] DB expired for ${key}`);
-        // db.deleteCache 不存在，且 set 会覆盖，这里可以选择不做操作或者设置过期值
-        // await db.set(key, null, 1); // 可选：主动清除
+      if (dbItem && dbItem.timestamp && now - dbItem.timestamp < cacheTime) {
+        // Backfill memory cache
+        memoryCache.set(key, dbItem);
+        return dbItem.data;
       }
     }
   } catch (error) {
-    console.error(`[Douban Cache] DB read error for ${key}:`, error);
+    console.error(`[Douban Cache] Storage read error:`, error);
   }
 
-  // 3. 重新获取
-  console.log(`[Douban Cache] Fetching fresh data for ${key}`);
+  // 3. Fetch Fresh
+  if (config.SiteConfig.DebugLogs) {
+    console.log(`[Douban Cache] Fetching fresh: ${key}`);
+  }
   const data = await fetchFn();
 
-  // 4. 写入缓存
+  // 4. Save Cache
   const timestamp = Date.now();
   const cacheItem = { data, timestamp };
   memoryCache.set(key, cacheItem);
   try {
-    // 使用 db.set 替代 db.setCache，并传入 ttl (秒)
-    // 注意：db.set 的 ttl 参数是可选的，这里传入 cacheTimeMinutes * 60
+    // Persistent storage with TTL
     await db.set(key, JSON.stringify(cacheItem), cacheTimeMinutes * 60);
   } catch (error) {
-    console.error(`[Douban Cache] DB write error for ${key}:`, error);
+    console.error(`[Douban Cache] Storage write error:`, error);
   }
 
   return data;
@@ -200,29 +188,27 @@ export async function fetchDoubanData<T>(
   url: string,
   ttlMinutes?: number,
 ): Promise<T> {
-  // Use a cache key based on the URL
-  const cacheKey = `douban_generic:${url}`;
+  const cacheKey = `douban_v3:${url}`;
   return getCachedData<T>(
     cacheKey,
     async () => {
       const config = await getConfig();
-      let targetUrl = url;
-
       const { DoubanProxyType, DoubanProxy } = config.SiteConfig;
 
+      let requestUrl = url;
+
       if (DoubanProxyType === 'custom' && DoubanProxy) {
-        targetUrl = DoubanProxy + encodeURIComponent(url);
+        requestUrl = DoubanProxy.includes('%s')
+          ? DoubanProxy.replace('%s', encodeURIComponent(url))
+          : DoubanProxy + encodeURIComponent(url);
+      } else if (DoubanProxyType === 'cmliussss-cdn-tencent') {
+        requestUrl =
+          'https://proxy-douban.cmliussss.net/' + encodeURIComponent(url);
       }
-      // Add other proxy types if known, for now custom is the main flexible one
 
-      // If using a proxy, we might need to adjust headers (e.g. host), but usually the proxy handles it.
-      // Ensure we still send User-Agent as some proxies forward it.
-
-      const response = await fetch(targetUrl, { headers: COMMON_HEADERS });
+      const response = await fetch(requestUrl, { headers: COMMON_HEADERS });
       if (!response.ok) {
-        throw new Error(
-          `Failed to fetch from ${targetUrl}: ${response.status} ${response.statusText}`,
-        );
+        throw new Error(`[Douban] HTTP ${response.status} for ${requestUrl}`);
       }
       return response.json();
     },

@@ -78,25 +78,12 @@ export async function GET(request: NextRequest) {
     tags.push(platform);
   }
 
-  const baseUrl = `https://m.douban.com/rexxar/api/v2/${kind}/recommend`;
-  const params = new URLSearchParams();
-  params.append('refresh', '0');
-  params.append('start', pageStart.toString());
-  params.append('count', pageLimit.toString());
-  params.append('selected_categories', JSON.stringify(selectedCategories));
-  params.append('uncollect', 'false');
-  params.append('score_range', '0,10');
-  params.append('tags', tags.join(','));
-  if (sort) {
-    params.append('sort', sort);
-  }
+  const doubanApiPath = `/rexxar/api/v2/${kind}/recommend?refresh=0&start=${pageStart}&count=${pageLimit}&selected_categories=${JSON.stringify(selectedCategories)}&uncollect=false&score_range=0,10&tags=${tags.join(',')}${sort ? `&sort=${sort}` : ''}`;
+  const target = `https://m.douban.com${doubanApiPath}`;
 
-  const target = `${baseUrl}?${params.toString()}`;
-  console.log(target);
   try {
-    const doubanData = await fetchDoubanData<DoubanRecommendApiResponse>(
-      target
-    );
+    const doubanData =
+      await fetchDoubanData<DoubanRecommendApiResponse>(target);
     const list = doubanData.items
       .filter((item) => item.type == 'movie' || item.type == 'tv')
       .map((item) => ({
@@ -125,7 +112,7 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     return NextResponse.json(
       { error: '获取豆瓣数据失败', details: (error as Error).message },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

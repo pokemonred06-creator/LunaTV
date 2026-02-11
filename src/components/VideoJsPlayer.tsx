@@ -10,6 +10,8 @@ import 'videojs-flvjs';
 
 import 'video.js/dist/video-js.css';
 
+import { useLanguage } from '@/components/LanguageProvider';
+
 // --- Types ---
 interface VideoJsPlayerProps {
   url: string;
@@ -131,6 +133,32 @@ const Icons = {
       style={{ width: '24px', height: '24px' }}
     >
       <path d='M11 17h2v-6h-2v6zm1-15C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zM11 9h2V7h-2v2z' />
+    </svg>
+  ),
+  Forward10: () => (
+    <svg
+      viewBox='0 0 24 24'
+      fill='currentColor'
+      style={{ width: '48px', height: '48px' }}
+    >
+      <path
+        d='M12 2c5.52 0 10 4.48 10 10s-4.48 10-10 10-10-4.48-10-10S6.48 2 12 2zm0 18c4.41 0 8-3.59 8-8s-3.59-8-8-8-8 3.59-8 8 3.59 8 8 8zm1-5h-2v-2h2v2zm0-4h-2V7h2v4z'
+        fill='none'
+      />
+      <path d='M10 8v8l6-4-6-4z' />
+    </svg>
+  ),
+  Replay10: () => (
+    <svg
+      viewBox='0 0 24 24'
+      fill='currentColor'
+      style={{ width: '48px', height: '48px' }}
+    >
+      <path
+        d='M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8-3.59 8 8 3.59 8 8 8zm-1-5h2v-2h-2v2zm0-4h2V7h-2v4z'
+        fill='none'
+      />
+      <path d='M14 8v8l-6-4 6-4z' />
     </svg>
   ),
 };
@@ -668,6 +696,7 @@ export default function VideoJsPlayer({
   videoJsOptions,
   reloadTrigger = 0,
 }: VideoJsPlayerProps) {
+  const { convert } = useLanguage();
   // --- Refs & State ---
   const containerRef = useRef<HTMLDivElement>(null);
   const videoWrapperRef = useRef<HTMLDivElement>(null);
@@ -696,7 +725,13 @@ export default function VideoJsPlayer({
   const [isPiPActive, setIsPiPActive] = useState(false);
   const [playerReady, setPlayerReady] = useState(false);
   const [techEpoch, setTechEpoch] = useState(0);
-  const [isFullscreen, setIsFullscreen] = useState(false); // Added missing state
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [autoplayBlocked, setAutoplayBlocked] = useState(false);
+  const [doubleTapFeedback, setDoubleTapFeedback] = useState<{
+    side: 'left' | 'right';
+    id: number;
+    text: string;
+  } | null>(null);
 
   const [gestureEl, setGestureEl] = useState<HTMLDivElement | null>(null);
   const setGestureNode = useCallback(
@@ -733,6 +768,10 @@ export default function VideoJsPlayer({
   const casEnabledRef = useRef(casEnabled);
   const isRotatedRef = useRef(isRotatedFullscreen);
 
+  // Double Click / Tap Logic
+  const lastTapRef = useRef({ time: 0, x: 0, y: 0 });
+  const singleTapTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
   useEffect(() => {
     if (debug) {
       if (typeof window !== 'undefined') {
@@ -741,15 +780,20 @@ export default function VideoJsPlayer({
           `[${new Date().toISOString()}] VideoJsPlayer MOUNTED`,
         );
       }
-      return () => {
-        if (typeof window !== 'undefined') {
-          (window as any).debugLogs = (window as any).debugLogs || [];
-          (window as any).debugLogs.push(
-            `[${new Date().toISOString()}] VideoJsPlayer UNMOUNTED`,
-          );
-        }
-      };
     }
+    return () => {
+      if (debug && typeof window !== 'undefined') {
+        (window as any).debugLogs = (window as any).debugLogs || [];
+        (window as any).debugLogs.push(
+          `[${new Date().toISOString()}] VideoJsPlayer UNMOUNTED`,
+        );
+      }
+      if (singleTapTimeoutRef.current)
+        clearTimeout(singleTapTimeoutRef.current);
+      if (uiInteractTimeoutRef.current)
+        clearTimeout(uiInteractTimeoutRef.current);
+      if (switchGuardRef.current) clearTimeout(switchGuardRef.current);
+    };
   }, [debug]);
 
   // Stats
@@ -799,7 +843,8 @@ export default function VideoJsPlayer({
       if (osc.start) osc.start(0);
       osc.stop(0.001); // Stop immediately
 
-      console.log('[Audio] Unlocked audio engine');
+      // Audio engine unlocked
+
       audioUnlockedRef.current = true;
     } catch (e) {
       console.warn('[Audio] Failed to unlock:', e);
@@ -817,19 +862,32 @@ export default function VideoJsPlayer({
 
   const tryPlayNow = useCallback(async () => {
     if (!mountedRef.current || !playerRef.current) return;
+    const p = playerRef.current;
+
+    // If already playing or switching, don't force it yet
+    if (!p.paused()) {
+      setAutoplayBlocked(false);
+      return;
+    }
+
     try {
-      await playerRef.current.play();
+      await p.play();
+      setAutoplayBlocked(false);
+      // Autoplay success
     } catch (e) {
-      if (debug)
-        console.warn('[Player] Initial play failed, retrying in 500ms...', e);
-      setTimeout(() => {
-        if (!mountedRef.current) return;
-        if (playerRef.current?.paused()) {
-          playerRef.current.play()?.catch(() => {
-            /* silent fail */
-          });
+      if (debug) console.warn('[Player] Autoplay BLOCKED or failed:', e);
+
+      // Retry once after a short delay (sometimes helpful for race conditions)
+      setTimeout(async () => {
+        if (!mountedRef.current || !p || !p.paused()) return;
+        try {
+          await p.play();
+          setAutoplayBlocked(false);
+        } catch {
+          // If still failing, it's likely a real browser restriction
+          setAutoplayBlocked(true);
         }
-      }, 500);
+      }, 1000);
     }
   }, [debug]);
 
@@ -1150,7 +1208,8 @@ export default function VideoJsPlayer({
       playsinline: true,
       userActions: { click: false, doubleClick: false },
       html5: {
-        vhs: { overrideNative: false, xhr: { withCredentials: false } },
+        vhs: { overrideNative: true, xhr: { withCredentials: false } },
+        hls: { overrideNative: true },
       },
       ...videoJsOptions,
     }) as unknown as VideoJsPlayerInstance;
@@ -1381,7 +1440,7 @@ export default function VideoJsPlayer({
         setControlsVisible(false);
     }, 3000);
   };
-  const uiInteractTimeoutRef = useRef<number | null>(null);
+  const uiInteractTimeoutRef = useRef<any>(null);
 
   const displayTime = seekingTime ?? currentTime;
   const progressPercent = duration > 0 ? (displayTime / duration) * 100 : 0;
@@ -1408,19 +1467,120 @@ export default function VideoJsPlayer({
       <div
         ref={setGestureNode}
         className='tap-layer'
-        onClick={() => {
+        onClick={(e) => {
           unlockAudio();
-          if (settingsOpen) {
-            setSettingsOpen(false);
-            return;
+          // NOTE: We do NOT stopPropagation here unless we handle double-tap
+          // to verify it doesn't break other things. But generally it should be fine.
+
+          const now = Date.now();
+          const rect = e.currentTarget.getBoundingClientRect();
+          const x = e.clientX - rect.left;
+          const y = e.clientY - rect.top;
+          const w = rect.width;
+
+          // Determine zone:
+          // Left 35% -> Rewind
+          // Right 35% -> Forward
+          // Middle 30% -> Toggle Controls
+          let isLeft = false;
+          let isRight = false;
+
+          // Handle rotated fullscreen mechanics if needed, currently assumes standard orientation for logic
+          // If rotated, w/h are swapped visually but the element is rotated with CSS transform?
+          // If CSS transform is used on container, clientX/Y are still correct relative to viewport,
+          // but getBoundingClientRect accounts for transform.
+          // Let's rely on visual percentages.
+          if (x < w * 0.35) isLeft = true;
+          else if (x > w * 0.65) isRight = true;
+
+          const timeDiff = now - lastTapRef.current.time;
+          const xDiff = Math.abs(x - lastTapRef.current.x);
+          const yDiff = Math.abs(y - lastTapRef.current.y);
+
+          // Double tap threshold: 300ms and reasonable distance
+          if (timeDiff < 300 && xDiff < 50 && yDiff < 50) {
+            // DOUBLE TAP DETECTED
+            if (singleTapTimeoutRef.current) {
+              clearTimeout(singleTapTimeoutRef.current);
+              singleTapTimeoutRef.current = null;
+            }
+
+            if (isLeft) {
+              // Rewind 10s
+              const newTime = Math.max(0, currentTime - 10);
+              setCurrentTime(newTime);
+              playerRef.current?.currentTime(newTime);
+              setDoubleTapFeedback({
+                side: 'left',
+                id: now,
+                text: '-10s',
+              });
+            } else if (isRight) {
+              // Forward 10s
+              const newTime = Math.min(duration, currentTime + 10);
+              setCurrentTime(newTime);
+              playerRef.current?.currentTime(newTime);
+              setDoubleTapFeedback({
+                side: 'right',
+                id: now,
+                text: '+10s',
+              });
+            } else {
+              // Center double tap - maybe just toggle controls immediately or ignore?
+              // Let's just toggle controls strictly if it was pending, but we cleared it.
+              // If we want double tapping center to toggle controls faster, we can call toggle.
+              // But usually center double tap is Play/Pause (IG/TikTok style) or Zoom.
+              // Providing no specific action for center double tap means it effectively cancels the single tap toggle.
+              // Let's force toggle for center to be responsive.
+              const newState = !controlsVisible;
+              setControlsVisible(newState);
+              if (newState) handleInteraction();
+            }
+
+            // Reset last tap so 3rd tap doesn't trigger another double tap immediately relative to 2nd
+            // (Unless we want triple tap support, but standard is pairs)
+            lastTapRef.current = { time: 0, x: 0, y: 0 };
+          } else {
+            // SINGLE TAP
+            lastTapRef.current = { time: now, x, y };
+
+            // Debounce toggle to wait for potential second tap
+            if (singleTapTimeoutRef.current)
+              clearTimeout(singleTapTimeoutRef.current);
+
+            singleTapTimeoutRef.current = setTimeout(() => {
+              if (settingsOpen) {
+                setSettingsOpen(false);
+                return;
+              }
+              const newState = !controlsVisible;
+              setControlsVisible(newState);
+              if (newState) handleInteraction();
+              else if (uiInteractTimeoutRef.current)
+                clearTimeout(uiInteractTimeoutRef.current);
+              singleTapTimeoutRef.current = null;
+            }, 250);
           }
-          const newState = !controlsVisible;
-          setControlsVisible(newState);
-          if (newState) handleInteraction();
-          else if (uiInteractTimeoutRef.current)
-            clearTimeout(uiInteractTimeoutRef.current);
         }}
       />
+
+      {/* Double Tap Feedback Overlay */}
+      {doubleTapFeedback && (
+        <div
+          key={doubleTapFeedback.id}
+          className={`double-tap-feedback ${doubleTapFeedback.side}`}
+          onAnimationEnd={() => setDoubleTapFeedback(null)}
+        >
+          <div className='feedback-icon'>
+            {doubleTapFeedback.side === 'left' ? (
+              <Icons.Replay10 />
+            ) : (
+              <Icons.Forward10 />
+            )}
+          </div>
+          <div className='feedback-text'>{doubleTapFeedback.text}</div>
+        </div>
+      )}
 
       {seekingTime !== null && (
         <div className='seek-overlay-container'>
@@ -1471,7 +1631,19 @@ export default function VideoJsPlayer({
         </div>
 
         <div className='absolute inset-0 flex items-center justify-center pointer-events-none'>
-          {!isPlaying && controlsVisible && (
+          {autoplayBlocked && (
+            <div
+              className='z-50 px-6 py-3 bg-green-600/90 text-white rounded-full font-bold shadow-2xl pointer-events-auto cursor-pointer animate-bounce border-2 border-white/20 backdrop-blur-md'
+              onClick={() => {
+                unlockAudio();
+                playerRef.current?.play()?.catch(() => {});
+                setAutoplayBlocked(false);
+              }}
+            >
+              {convert('🔇 浏览器已拦截，请点击此处开始播放')}
+            </div>
+          )}
+          {!isPlaying && controlsVisible && !autoplayBlocked && (
             <div
               className='w-16 h-16 bg-black/40 rounded-full flex items-center justify-center backdrop-blur-sm pointer-events-auto cursor-pointer hover:scale-110 transition-transform'
               onClick={togglePlay}
@@ -1712,4 +1884,11 @@ const CSS = `
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes slideUp { from { transform: translateY(10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 .videojs-rotated-fullscreen { position: fixed !important; width: 100vh !important; width: 100dvh !important; height: 100vw !important; top: 50% !important; left: 50% !important; transform: translate(-50%, -50%) rotate(90deg) !important; z-index: 99999 !important; background: #000 !important; }
+.double-tap-feedback { position: absolute; top: 0; bottom: 0; width: 35%; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 20; color: rgba(255, 255, 255, 0.9); pointer-events: none; background: rgba(255, 255, 255, 0.1); animation: fadeOut 0.6s ease-out forwards; backdrop-filter: blur(2px); }
+.double-tap-feedback.left { left: 0; border-top-right-radius: 50% 10%; border-bottom-right-radius: 50% 10%; background: radial-gradient(circle at left, rgba(255,255,255,0.2) 0%, transparent 70%); }
+.double-tap-feedback.right { right: 0; border-top-left-radius: 50% 10%; border-bottom-left-radius: 50% 10%; background: radial-gradient(circle at right, rgba(255,255,255,0.2) 0%, transparent 70%); }
+.feedback-icon { width: 48px; height: 48px; margin-bottom: 8px; animation: scalePulse 0.4s ease-out; }
+.feedback-text { font-size: 14px; font-weight: 700; opacity: 0.9; }
+@keyframes fadeOut { 0% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes scalePulse { 0% { transform: scale(0.5); opacity: 0; } 50% { transform: scale(1.2); opacity: 1; } 100% { transform: scale(1); opacity: 1; } }
 `;

@@ -13,23 +13,10 @@ const nextConfig = {
   // Proxy routes to Go server.
   // Note: Next.js loads rewrites at build time, so runtime env toggles may not apply.
   // Default to enabled (can be disabled explicitly via ENABLE_GO_PROXY=false).
-  async rewrites() {
-    const goProxyUrl = process.env.GO_PROXY_URL || 'http://127.0.0.1:8080';
-    const useGoProxy = process.env.ENABLE_GO_PROXY !== 'false';
-
-    if (!useGoProxy) return [];
-
-    return [
-      {
-        source: '/api/proxy/:path*',
-        destination: `${goProxyUrl}/api/proxy/:path*`,
-      },
-      {
-        source: '/api/image-proxy',
-        destination: `${goProxyUrl}/api/image-proxy`,
-      },
-    ];
-  },
+  // Proxy routes to Go server.
+  // REMOVED: Next.js rewrites cause [DEP0060] DeprecationWarning (util._extend).
+  // We now rely on the Node.js Route Handlers in src/app/api/proxy/[type]/route.ts
+  // async rewrites() { ... }
 
   // Uncoment to add domain whitelist
   images: {

@@ -32,18 +32,16 @@ async function generateAuthCookie(
   const effectiveUsername = username || 'admin';
   authData.username = effectiveUsername;
 
-  if (process.env.PASSWORD) {
-    // Sign the username + role + timestamp using the password as secret
-    const timestamp = Date.now();
-    const signature = await calculateSignature(
-      effectiveUsername,
-      authData.role,
-      timestamp,
-    );
-
-    authData.signature = signature;
-    authData.timestamp = timestamp;
-  }
+  // Always sign cookies so server-side verification stays consistent.
+  // calculateSignature internally uses AUTH_SECRET || PASSWORD.
+  const timestamp = Date.now();
+  const signature = await calculateSignature(
+    effectiveUsername,
+    authData.role,
+    timestamp,
+  );
+  authData.signature = signature;
+  authData.timestamp = timestamp;
 
   return encodeURIComponent(JSON.stringify(authData));
 }

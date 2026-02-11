@@ -336,12 +336,27 @@ export class FileStorage
 
   // ---------- Generic Cache ----------
   async get(key: string): Promise<any> {
-    return this.data[key] || null;
+    const val = this.data[key];
+    if (val && typeof val === 'object' && val.__expires) {
+      if (Date.now() > val.__expires) {
+        delete this.data[key];
+        this.save();
+        return null;
+      }
+      return val.value;
+    }
+    return val || null;
   }
 
   async set(key: string, value: any, ttl?: number): Promise<void> {
-    this.data[key] = value;
+    if (ttl) {
+      this.data[key] = {
+        value,
+        __expires: Date.now() + ttl * 1000,
+      };
+    } else {
+      this.data[key] = value;
+    }
     this.save();
-    // TTL is not implemented for local file storage in this simple version
   }
 }

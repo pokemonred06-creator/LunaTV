@@ -142,9 +142,7 @@ export class WebGL2Renderer implements Renderer {
     }
     this.gl = gl;
     this.extMinMax = gl.getExtension('EXT_color_buffer_float');
-    console.log('[WebGL2] Context created. Extensions:', {
-      extMinMax: !!this.extMinMax,
-    });
+    console.info('[WebGL2] Context created, float support:', !!this.extMinMax);
 
     this.programDrop = this.createProgram(vsDrop, fsDrop);
     this.programTrail = this.createProgram(vsTrail, fsTrail);

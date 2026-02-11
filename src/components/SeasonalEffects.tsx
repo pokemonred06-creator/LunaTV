@@ -22,7 +22,7 @@ import {
 } from '@/effects/renderer/types';
 
 import MagicalButterfly from './MagicalButterfly';
-import PhysicsSnow, { type PosterBounds } from './PhysicsSnow';
+import PhysicsSnow from './PhysicsSnow';
 import { generateTextures } from './SeasonalEffectsHelpers';
 
 // -- Constants --
@@ -41,8 +41,6 @@ interface SeasonalEffectsProps {
   disableMobile?: boolean;
   enabled?: boolean;
   backgroundImageUrl?: string;
-  posterBounds?: PosterBounds[]; // Update to array
-  posterElements?: Map<string, HTMLElement>; // New: Direct DOM access
 }
 
 function useElementRect(element: HTMLElement | null) {
@@ -128,8 +126,6 @@ export const SeasonalEffects: React.FC<SeasonalEffectsProps> = ({
   intensity = 'normal',
   enabled = true,
   backgroundImageUrl,
-  posterBounds,
-  posterElements,
 }) => {
   const [mounted, setMounted] = useState(false);
   const [textures, setTextures] = useState<{
@@ -566,16 +562,25 @@ export const SeasonalEffects: React.FC<SeasonalEffectsProps> = ({
             if (d.y > h + 80) {
               d.y = -30 - Math.random() * 60;
               d.x = 20 + Math.random() * (w - 40); // Add margin here too
-              // Mix in small static-ish beads during recycle
+
+              // FIX: Re-roll rain/condense state to ensure continuous rain
+              const isRain = Math.random() < 0.8;
+              d.isRain = isRain;
+              d.falling = isRain; // Immediately fall if it's rain
+
+              // Mix in small static-ish beads during recycling (if not rain)
               const isBead = Math.random() > 0.6;
-              d.r = isBead
-                ? 1.0 + Math.random() * 1.5
-                : 2.0 + Math.random() * 3.0;
-              d.vx = 0;
-              d.vy = 0;
-              d.falling = false;
+              const r = isRain
+                ? 1.5 + Math.random() * 2.5
+                : isBead
+                  ? 1.0 + Math.random() * 1.5
+                  : 2.0 + Math.random() * 3.0;
+
+              d.r = r;
+              d.vx = isRain ? (Math.random() - 0.5) * 50 : 0;
+              d.vy = isRain ? 600 + Math.random() * 200 : 0;
               d.age = 0;
-              d.stretch = 0;
+              d.stretch = isRain ? 1.0 : 0;
             }
           } else {
             d.stretch *= Math.exp(-2.0 * dt);
@@ -727,17 +732,14 @@ export const SeasonalEffects: React.FC<SeasonalEffectsProps> = ({
 
       {resolvedSeason !== 'summer' && (
         <PhysicsSnow
-          mode={resolvedSeason}
-          count={intensity === 'heavy' ? 150 : intensity === 'normal' ? 80 : 40}
-          posterBounds={posterBounds}
-          posterElements={posterElements}
+          mode={resolvedSeason as 'spring' | 'autumn' | 'winter'}
+          count={CONFIG.MAX_DROPS}
         />
       )}
 
       {resolvedSeason === 'spring' && (
         <MagicalButterfly
           count={intensity === 'heavy' ? 6 : intensity === 'normal' ? 4 : 2}
-          posterBounds={posterBounds}
         />
       )}
     </div>,

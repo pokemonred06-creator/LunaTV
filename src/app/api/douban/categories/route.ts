@@ -36,67 +36,36 @@ export async function GET(request: Request) {
   if (!kind || !category || !type) {
     return NextResponse.json(
       { error: '缺少必要参数: kind 或 category 或 type' },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
   if (!['tv', 'movie'].includes(kind)) {
     return NextResponse.json(
       { error: 'kind 参数必须是 tv 或 movie' },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
   if (pageLimit < 1 || pageLimit > 100) {
     return NextResponse.json(
       { error: 'pageSize 必须在 1-100 之间' },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
   if (pageStart < 0) {
     return NextResponse.json(
       { error: 'pageStart 不能小于 0' },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
-  // 获取配置
-  const config = await getConfig();
-  const doubanProxyType = config.SiteConfig.DoubanProxyType;
-  const doubanProxy = config.SiteConfig.DoubanProxy;
-
-  let targetBaseUrl = `https://m.douban.com`;
-  let useProxy = false;
-  let finalProxyUrl = '';
-
-  switch (doubanProxyType) {
-    case 'cmliussss-cdn-tencent':
-      targetBaseUrl = `https://m.douban.cmliussss.net`;
-      break;
-    case 'cmliussss-cdn-ali':
-      targetBaseUrl = `https://m.douban.cmliussss.com`;
-      break;
-    case 'custom':
-      useProxy = true;
-      finalProxyUrl = doubanProxy;
-      break;
-    case 'direct':
-    default:
-      // Direct access from server
-      break;
-  }
-
   const doubanApiPath = `/rexxar/api/v2/subject/recent_hot/${kind}?start=${pageStart}&limit=${pageLimit}&category=${category}&type=${type}`;
-  let target = `${targetBaseUrl}${doubanApiPath}`;
-
-  // If using a custom proxy, append the original target URL to the proxy URL
-  if (useProxy && finalProxyUrl) {
-    target = `${finalProxyUrl}${encodeURIComponent(target)}`;
-  }
+  const target = `https://m.douban.com${doubanApiPath}`;
 
   try {
-    // 调用豆瓣 API
+    // 调用豆瓣 API (fetchDoubanData internally handles the proxy)
     const doubanData = await fetchDoubanData<DoubanCategoryApiResponse>(target);
 
     // 转换数据格式
@@ -114,6 +83,8 @@ export async function GET(request: Request) {
       list: list,
     };
 
+    // 获取配置
+    const config = await getConfig(); // Get full config
     const cacheTime = config.SiteConfig.SiteInterfaceCacheTime || 7200; // Use SiteInterfaceCacheTime
     return NextResponse.json(response, {
       headers: {
@@ -126,7 +97,7 @@ export async function GET(request: Request) {
   } catch (error) {
     return NextResponse.json(
       { error: '获取豆瓣数据失败', details: (error as Error).message },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
