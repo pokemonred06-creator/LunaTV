@@ -304,7 +304,7 @@ function PlayPageClient() {
   useEffect(() => {
     if (!isVideoLoading || !videoUrl) return;
 
-    let timeoutId: number | null = window.setTimeout(() => {
+    const timeoutId = window.setTimeout(() => {
       console.warn('Video loading timeout - clearing loading state');
       setIsVideoLoading(false);
 
@@ -404,35 +404,8 @@ function PlayPageClient() {
       });
     }, 15000);
 
-    const onSuccess = () => {
-      if (timeoutId) window.clearTimeout(timeoutId);
-      timeoutId = null;
-      setIsVideoLoading(false);
-    };
-
-    const onFail = () => {
-      if (timeoutId) window.clearTimeout(timeoutId);
-      timeoutId = null;
-      setIsVideoLoading(false);
-    };
-
-    const vDoc = document.querySelector('video');
-    if (vDoc) {
-      vDoc.addEventListener('loadedmetadata', onSuccess);
-      vDoc.addEventListener('canplay', onSuccess);
-      vDoc.addEventListener('error', onFail);
-      vDoc.addEventListener('stalled', () => {
-        console.warn('video stalled');
-      });
-    }
-
     return () => {
       if (timeoutId) window.clearTimeout(timeoutId);
-      if (vDoc) {
-        vDoc.removeEventListener('loadedmetadata', onSuccess);
-        vDoc.removeEventListener('canplay', onSuccess);
-        vDoc.removeEventListener('error', onFail);
-      }
     };
   }, [
     isVideoLoading,
@@ -1683,6 +1656,7 @@ function PlayPageClient() {
                     onReady={handlePlayerReady}
                     onTimeUpdate={handleTimeUpdate}
                     onEnded={handleEnded}
+                    onLoadedMetadata={() => setIsVideoLoading(false)}
                     onPlay={() => setIsVideoLoading(false)}
                     onError={(err: any) => {
                       if (process.env.NODE_ENV !== 'production') {

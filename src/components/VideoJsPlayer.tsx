@@ -31,6 +31,7 @@ interface VideoJsPlayerProps {
   onError?: (error: unknown) => void;
   onPlay?: () => void;
   onPause?: () => void;
+  onLoadedMetadata?: () => void;
   onNextEpisode?: () => void;
   hasNextEpisode?: boolean;
   skipIntroTime?: number;
@@ -707,6 +708,7 @@ export default function VideoJsPlayer({
   onError,
   onPlay,
   onPause,
+  onLoadedMetadata,
   onNextEpisode,
   hasNextEpisode = false,
   skipIntroTime = 0,
@@ -785,6 +787,7 @@ export default function VideoJsPlayer({
     onError,
     onPlay,
     onPause,
+    onLoadedMetadata,
   });
   const mountedRef = useRef(true);
   const controlsVisibleRef = useRef(controlsVisible);
@@ -900,7 +903,7 @@ export default function VideoJsPlayer({
 
     try {
       await p.play();
-      setAutoplayBlocked(false);
+      if (mountedRef.current) setAutoplayBlocked(false);
       // Autoplay success
     } catch (e) {
       if (debug) console.warn('[Player] Autoplay BLOCKED or failed:', e);
@@ -975,8 +978,17 @@ export default function VideoJsPlayer({
       onError,
       onPlay,
       onPause,
+      onLoadedMetadata,
     };
-  }, [onReady, onTimeUpdate, onEnded, onError, onPlay, onPause]);
+  }, [
+    onReady,
+    onTimeUpdate,
+    onEnded,
+    onError,
+    onPlay,
+    onPause,
+    onLoadedMetadata,
+  ]);
   useEffect(() => {
     configRef.current = { enableSkip, skipIntroTime, skipOutroTime, autoPlay };
   }, [enableSkip, skipIntroTime, skipOutroTime, autoPlay]);
@@ -1303,6 +1315,7 @@ export default function VideoJsPlayer({
       if (!mountedRef.current) return;
       const d = player.duration() || 0;
       if (Number.isFinite(d) && d > 0) setDuration(d);
+      callbacksRef.current.onLoadedMetadata?.();
     });
     player.on('durationchange', () => {
       if (!mountedRef.current) return;

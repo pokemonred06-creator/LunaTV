@@ -21,7 +21,7 @@
       "ImageCacheTTL": 30,
       "SeasonalEffects": {
         "enabled": true,
-        "season": "spring",
+        "season": "auto",
         "intensity": "light"
       }
     },
@@ -8686,5 +8686,56 @@
       "pageCount": 1
     },
     "__expires": 1771743023187
+  },
+  "cache:detail:暴风资源::48547": {
+    "value": {
+      "expiresAt": 1771743176918,
+      "status": "ok",
+      "data": [
+        {
+          "id": "48547",
+          "title": "永生战士 Sisu",
+          "poster": "https://img.bfzypic.com/upload/vod/20230510-1/b98ac10a2d13c91bff9119702223159f.jpg",
+          "episodes": [
+            "https://c1.rrcdnbf6.com/video/yongshengzhanshiSisu/HD/index.m3u8"
+          ],
+          "episodes_titles": ["HD"],
+          "source": "暴风资源",
+          "source_name": "暴风资源",
+          "class": "动作,战争",
+          "year": "2022",
+          "desc": "当一名在拉普兰荒野当中发现黄金的前士兵试图将战利品带入城市时，一名率领纳粹士兵的残忍党卫军军官则挡在了他的面前....",
+          "type_name": "动作片",
+          "douban_id": 35603786
+        }
+      ]
+    },
+    "__expires": 1771743176918
+  },
+  "cache:search:暴风资源::永生战士 Sisu::1": {
+    "value": {
+      "expiresAt": 1771743364267,
+      "status": "ok",
+      "data": [
+        {
+          "id": "48547",
+          "title": "永生战士 Sisu",
+          "poster": "https://img.bfzypic.com/upload/vod/20230510-1/b98ac10a2d13c91bff9119702223159f.jpg",
+          "episodes": [
+            "https://c1.rrcdnbf6.com/video/yongshengzhanshiSisu/HD/index.m3u8"
+          ],
+          "episodes_titles": ["HD"],
+          "source": "暴风资源",
+          "source_name": "暴风资源",
+          "class": "动作,战争",
+          "year": "2022",
+          "desc": "当一名在拉普兰荒野当中发现黄金的前士兵试图将战利品带入城市时，一名率领纳粹士兵的残忍党卫军军官则挡在了他的面前....",
+          "type_name": "动作片",
+          "douban_id": 35603786
+        }
+      ],
+      "pageCount": 1
+    },
+    "__expires": 1771743364267
   }
 }
