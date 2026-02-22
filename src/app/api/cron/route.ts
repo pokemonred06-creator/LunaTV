@@ -117,7 +117,7 @@ async function refreshConfig() {
       try {
         JSON.parse(decodedContent);
       } catch (e) {
-        throw new Error('配置文件格式错误，请检查 JSON 语法');
+        throw new Error('配置文件格式错误，请检查 JSON 语法', { cause: e });
       }
       config.ConfigFile = decodedContent;
       config.ConfigSubscription.LastCheck = new Date().toISOString();

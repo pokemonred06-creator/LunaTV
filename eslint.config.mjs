@@ -37,7 +37,7 @@ export default tseslint.config(
   ...tseslint.configs.recommended,
 
   // Prettier Config (via compat, as it's a config, not just a plugin)
-  ...compat.extends("prettier"),
+  ...compat.extends('prettier'),
 
   // Main App Configuration
   {
@@ -162,5 +162,5 @@ export default tseslint.config(
       '@typescript-eslint/no-var-requires': 'off',
       'no-undef': 'off',
     },
-  }
+  },
 );

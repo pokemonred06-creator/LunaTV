@@ -1,3 +1,4 @@
+import { getCacheTime } from '@/lib/config';
 import { db } from '@/lib/db';
 import { SearchResult } from '@/lib/types';
 
@@ -13,17 +14,50 @@ export interface CachedPageEntry {
 }
 
 // 缓存配置
-const SEARCH_CACHE_TTL_MS = 10 * 60 * 1000; // 10分钟
 const CACHE_CLEANUP_INTERVAL_MS = 5 * 60 * 1000; // 5分钟清理一次
 const MAX_CACHE_SIZE = 1000; // 最大缓存条目数量（搜索）
 const MAX_DETAIL_CACHE_SIZE = 500; // 详情缓存上限
+
+// Cache TTL follows the admin "SiteInterfaceCacheTime" setting (seconds).
+// Use a short in-module cache to avoid repeated config reads on hot paths.
+const DEFAULT_SEARCH_CACHE_TTL_SECONDS = 10 * 60; // Legacy fallback (10 minutes)
+const MIN_SEARCH_CACHE_TTL_SECONDS = 10; // Prevent accidental 0/negative TTLs
+const MAX_SEARCH_CACHE_TTL_SECONDS = 7 * 24 * 60 * 60; // 7 days safety cap
+const TTL_REFRESH_INTERVAL_MS = 30_000;
+let cachedTtlSeconds = DEFAULT_SEARCH_CACHE_TTL_SECONDS;
+let cachedTtlUpdatedAt = 0;
+
+function clampTtlSeconds(input: unknown): number {
+  const n = Number(input);
+  if (!Number.isFinite(n)) return DEFAULT_SEARCH_CACHE_TTL_SECONDS;
+  return Math.max(
+    MIN_SEARCH_CACHE_TTL_SECONDS,
+    Math.min(MAX_SEARCH_CACHE_TTL_SECONDS, Math.floor(n)),
+  );
+}
+
+async function getSearchCacheTtlSeconds(): Promise<number> {
+  const now = Date.now();
+  if (now - cachedTtlUpdatedAt < TTL_REFRESH_INTERVAL_MS)
+    return cachedTtlSeconds;
+  try {
+    const ttl = await getCacheTime();
+    cachedTtlSeconds = clampTtlSeconds(ttl);
+    cachedTtlUpdatedAt = now;
+  } catch {
+    // Keep the previous cached value on transient failures.
+    cachedTtlSeconds = clampTtlSeconds(cachedTtlSeconds);
+    cachedTtlUpdatedAt = now;
+  }
+  return cachedTtlSeconds;
+}
 
 // 内存二级缓存 (L1 Cache)
 const SEARCH_CACHE: Map<string, CachedPageEntry> = new Map();
 const DETAIL_CACHE: Map<string, CachedPageEntry> = new Map();
 
 // 自动清理定时器
-let cleanupTimer: NodeJS.Timeout | null = null;
+let cleanupTimer: ReturnType<typeof setTimeout> | null = null;
 let lastCleanupTime = 0;
 
 /**
@@ -89,7 +123,8 @@ export async function setCachedSearchPage(
   ensureAutoCleanupStarted();
 
   const now = Date.now();
-  const expiresAt = now + SEARCH_CACHE_TTL_MS;
+  const ttlSeconds = await getSearchCacheTtlSeconds();
+  const expiresAt = now + ttlSeconds * 1000;
   const key = makeSearchCacheKey(sourceKey, query, page);
   const entry: CachedPageEntry = {
     expiresAt,
@@ -103,8 +138,8 @@ export async function setCachedSearchPage(
 
   // 2. Set L2 (Persistent DB)
   try {
-    // TTL in seconds for Redis
-    await db.set(key, entry, Math.floor(SEARCH_CACHE_TTL_MS / 1000));
+    // TTL in seconds for Redis / KV storage
+    await db.set(key, entry, ttlSeconds);
   } catch (err) {
     console.error('[Cache] Redis write failed:', err);
   }
@@ -229,7 +264,8 @@ export async function setCachedDetail(
 ): Promise<void> {
   ensureAutoCleanupStarted();
   const now = Date.now();
-  const expiresAt = now + SEARCH_CACHE_TTL_MS;
+  const ttlSeconds = await getSearchCacheTtlSeconds();
+  const expiresAt = now + ttlSeconds * 1000;
   const key = makeDetailCacheKey(sourceKey, id);
   const entry: CachedPageEntry = {
     expiresAt,
@@ -242,7 +278,7 @@ export async function setCachedDetail(
 
   // 2. L2
   try {
-    await db.set(key, entry, Math.floor(SEARCH_CACHE_TTL_MS / 1000));
+    await db.set(key, entry, ttlSeconds);
   } catch (err) {
     console.error('[Cache] Redis write failed (detail):', err);
   }

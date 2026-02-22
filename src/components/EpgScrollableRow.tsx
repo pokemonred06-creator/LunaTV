@@ -1,7 +1,5 @@
-/* eslint-disable react-hooks/exhaustive-deps */
-
 import { Clock, Target, Tv } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { formatTimeToHHMM, parseCustomTimeFormat } from '@/lib/time';
 
@@ -26,31 +24,22 @@ export default function EpgScrollableRow({
   const [isHovered, setIsHovered] = useState(false);
   const [currentPlayingIndex, setCurrentPlayingIndex] = useState<number>(-1);
 
-  // 处理滚轮事件，实现横向滚动
-  const handleWheel = (e: WheelEvent) => {
-    if (isHovered && containerRef.current) {
-      e.preventDefault(); // 阻止默认的竖向滚动
-
-      const container = containerRef.current;
-      const scrollAmount = e.deltaY * 4; // 增加滚动速度
-
-      // 根据滚轮方向进行横向滚动
-      container.scrollBy({
-        left: scrollAmount,
-        behavior: 'smooth',
-      });
-    }
-  };
-
-  // 阻止页面竖向滚动
-  const preventPageScroll = (e: WheelEvent) => {
-    if (isHovered) {
-      e.preventDefault();
-    }
-  };
+  // 判断节目是否正在播放
+  const isCurrentlyPlaying = useCallback(
+    (program: EpgProgram) => {
+      try {
+        const start = parseCustomTimeFormat(program.start);
+        const end = parseCustomTimeFormat(program.end);
+        return currentTime >= start && currentTime < end;
+      } catch {
+        return false;
+      }
+    },
+    [currentTime],
+  );
 
   // 自动滚动到正在播放的节目
-  const scrollToCurrentProgram = () => {
+  const scrollToCurrentProgram = useCallback(() => {
     if (containerRef.current) {
       const currentProgramIndex = programs.findIndex((program) =>
         isCurrentlyPlaying(program),
@@ -76,7 +65,36 @@ export default function EpgScrollableRow({
         }
       }
     }
-  };
+  }, [isCurrentlyPlaying, programs]);
+
+  // 处理滚轮事件，实现横向滚动
+  const handleWheel = useCallback(
+    (e: WheelEvent) => {
+      if (isHovered && containerRef.current) {
+        e.preventDefault(); // 阻止默认的竖向滚动
+
+        const container = containerRef.current;
+        const scrollAmount = e.deltaY * 4; // 增加滚动速度
+
+        // 根据滚轮方向进行横向滚动
+        container.scrollBy({
+          left: scrollAmount,
+          behavior: 'smooth',
+        });
+      }
+    },
+    [isHovered],
+  );
+
+  // 阻止页面竖向滚动
+  const preventPageScroll = useCallback(
+    (e: WheelEvent) => {
+      if (isHovered) {
+        e.preventDefault();
+      }
+    },
+    [isHovered],
+  );
 
   useEffect(() => {
     if (isHovered) {
@@ -93,7 +111,7 @@ export default function EpgScrollableRow({
       document.removeEventListener('wheel', preventPageScroll);
       document.removeEventListener('wheel', handleWheel);
     };
-  }, [isHovered]);
+  }, [handleWheel, isHovered, preventPageScroll]);
 
   // 组件加载后自动滚动到正在播放的节目
   useEffect(() => {
@@ -108,7 +126,7 @@ export default function EpgScrollableRow({
     }, 100);
 
     return () => clearTimeout(timer);
-  }, [programs, currentTime]);
+  }, [currentTime, isCurrentlyPlaying, programs, scrollToCurrentProgram]);
 
   // 定时刷新正在播放状态
   useEffect(() => {
@@ -133,22 +151,11 @@ export default function EpgScrollableRow({
     }, 60000); // 60秒 = 1分钟
 
     return () => clearInterval(interval);
-  }, [programs, currentTime, currentPlayingIndex]);
+  }, [currentPlayingIndex, currentTime, programs, scrollToCurrentProgram]);
 
   // 格式化时间显示
   const formatTime = (timeString: string) => {
     return formatTimeToHHMM(timeString);
-  };
-
-  // 判断节目是否正在播放
-  const isCurrentlyPlaying = (program: EpgProgram) => {
-    try {
-      const start = parseCustomTimeFormat(program.start);
-      const end = parseCustomTimeFormat(program.end);
-      return currentTime >= start && currentTime < end;
-    } catch {
-      return false;
-    }
   };
 
   // 加载中状态

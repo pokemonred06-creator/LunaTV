@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTheme } from 'next-themes';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth/client';
@@ -48,63 +48,7 @@ const useScrollLock = (isLocked: boolean) => {
   }, [isLocked]);
 };
 
-// 2. Robust LocalStorage Hook (SSR Safe + Cross-Tab Sync)
-function useLocalStorage<T>(
-  key: string,
-  initialValue: T,
-): [T, (value: T | ((val: T) => T)) => void] {
-  // Lazy initialization to avoid hydration mismatch
-  const readValue = useCallback((): T => {
-    if (typeof window === 'undefined') return initialValue;
-    try {
-      const item = window.localStorage.getItem(key);
-      return item ? (JSON.parse(item) as T) : initialValue;
-    } catch (error) {
-      console.warn(`Error reading localStorage key "${key}":`, error);
-      return initialValue;
-    }
-  }, [initialValue, key]);
-
-  const [storedValue, setStoredValue] = useState<T>(initialValue);
-
-  // Sync state with local storage on mount
-  useEffect(() => {
-    setStoredValue(readValue());
-  }, [readValue]);
-
-  // Sync across tabs
-  useEffect(() => {
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === key && e.newValue !== null) {
-        try {
-          setStoredValue(JSON.parse(e.newValue));
-        } catch {
-          /* ignore */
-        }
-      }
-    };
-    window.addEventListener('storage', handleStorageChange);
-    return () => window.removeEventListener('storage', handleStorageChange);
-  }, [key]);
-
-  const setValue = useCallback(
-    (value: T | ((val: T) => T)) => {
-      try {
-        const valueToStore =
-          value instanceof Function ? value(storedValue) : value;
-        setStoredValue(valueToStore);
-        if (typeof window !== 'undefined') {
-          window.localStorage.setItem(key, JSON.stringify(valueToStore));
-        }
-      } catch (error) {
-        console.warn(`Error setting localStorage key "${key}":`, error);
-      }
-    },
-    [key, storedValue],
-  );
-
-  return [storedValue, setValue];
-}
+import { useLocalStorage } from '@/hooks/useLocalStorage';
 
 // --- Types ---
 
@@ -280,6 +224,10 @@ const SettingsModal = ({
     'liveDirectConnect',
     false,
   );
+  const [debugConsole, setDebugConsole] = useLocalStorage(
+    'debugConsole',
+    false,
+  );
 
   useScrollLock(isOpen);
 
@@ -435,6 +383,12 @@ const SettingsModal = ({
               sub='需安装 Allow CORS 插件'
               checked={directLive}
               onChange={setDirectLive}
+            />
+            <ToggleItem
+              label='调试控制台'
+              sub='开启 Eruda 移动端控制台'
+              checked={debugConsole}
+              onChange={setDebugConsole}
             />
           </section>
         </div>

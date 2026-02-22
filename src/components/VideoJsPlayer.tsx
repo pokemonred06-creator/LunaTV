@@ -1,7 +1,14 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
 
-import Hls from 'hls.js';
+import type Hls from 'hls.js';
+type HlsType = any;
+
+declare global {
+  interface Window {
+    Hls: any;
+  }
+}
 import type { MutableRefObject } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import videojs from 'video.js';
@@ -29,7 +36,7 @@ interface VideoJsPlayerProps {
   skipIntroTime?: number;
   skipOutroTime?: number;
   enableSkip?: boolean;
-  customHlsLoader?: any;
+  customHlsLoaderFactory?: any;
   className?: string;
   debug?: boolean;
   seriesId?: string;
@@ -484,7 +491,10 @@ const useCasShader = (
   useEffect(() => {
     if (typeof document === 'undefined') return;
     const cleanup = () => {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
       const res = resourcesRef.current;
       if (res.gl) {
         const gl = res.gl;
@@ -497,6 +507,7 @@ const useCasShader = (
         if (res.fS) gl.deleteShader(res.fS);
         if (res.b) gl.deleteBuffer(res.b);
         if (res.tx) gl.deleteTexture(res.tx);
+        gl.getExtension('WEBGL_lose_context')?.loseContext();
         resourcesRef.current = {
           p: null,
           vS: null,
@@ -537,6 +548,14 @@ const useCasShader = (
       if (!tech || !tech.parentElement) return;
       if (tech.dataset.casActive && tech.dataset.casOwner !== ownerRef.current)
         return;
+
+      const staleCanvases = document.querySelectorAll(
+        'canvas[data-cas-canvas]',
+      );
+      staleCanvases.forEach((node) => {
+        if (node === canvasRef.current) return;
+        node.remove();
+      });
 
       const canvas = document.createElement('canvas');
       canvas.dataset.casCanvas = '1';
@@ -623,6 +642,11 @@ const useCasShader = (
           cleanup();
           return;
         }
+        // Skip frame if video has no data yet (prevents WebGL INVALID_VALUE: no video)
+        if (tech.readyState < 2 || tech.videoWidth === 0) {
+          rafRef.current = requestAnimationFrame(loop);
+          return;
+        }
         if (
           canvas.width !== tech.videoWidth ||
           canvas.height !== tech.videoHeight
@@ -688,7 +712,7 @@ export default function VideoJsPlayer({
   skipIntroTime = 0,
   skipOutroTime = 0,
   enableSkip = false,
-  customHlsLoader,
+  customHlsLoaderFactory,
   className = '',
   debug = false,
   seriesId = 'global',
@@ -807,6 +831,10 @@ export default function VideoJsPlayer({
     const techEl = p.tech?.(true)?.el?.();
     if (techEl instanceof HTMLVideoElement) return techEl;
     return p.el()?.querySelector('video') as HTMLVideoElement | null;
+  }, []);
+
+  const reportPlaybackError = useCallback((error: unknown) => {
+    callbacksRef.current.onError?.(error);
   }, []);
 
   const formatTime = (s: number) => {
@@ -990,10 +1018,9 @@ export default function VideoJsPlayer({
       let proxyUrl = sourceUrl;
       if (!sourceUrl.includes('/api/proxy/')) {
         proxyUrl = `/api/proxy/m3u8?url=${encodeURIComponent(sourceUrl)}&allowCORS=false&moontv-source=${encodeURIComponent(seriesId || 'global')}`;
-      }
-
-      if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
-        clearNativeAutoplayListeners();
+      } else if (
+        getTechVideoEl()?.canPlayType('application/vnd.apple.mpegurl')
+      ) {
         videoEl.src = proxyUrl;
         try {
           videoEl.load();
@@ -1004,13 +1031,16 @@ export default function VideoJsPlayer({
         return;
       }
 
-      if (Hls.isSupported()) {
+      if (window.Hls?.isSupported()) {
         if (hlsRef.current) hlsRef.current.destroy();
-        const hls = new Hls({
+        const HlsClass = hlsRef.current?.constructor as HlsType;
+        const hls = new (HlsClass || window.Hls)({
           enableWorker: true,
           lowLatencyMode: isLive,
-          loader: customHlsLoader || Hls.DefaultConfig.loader,
-          xhrSetup: (xhr) => {
+          loader: customHlsLoaderFactory
+            ? customHlsLoaderFactory(HlsClass || window.Hls)
+            : (HlsClass || window.Hls)?.DefaultConfig?.loader,
+          xhrSetup: (xhr: any) => {
             xhr.withCredentials = false;
           },
         });
@@ -1019,21 +1049,30 @@ export default function VideoJsPlayer({
         hls.attachMedia(videoEl);
         // Ensure no native controls interfere
         videoEl.controls = false;
-        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        hls.on(window.Hls.Events.MANIFEST_PARSED, () => {
           if (configRef.current.autoPlay) tryPlayNow();
         });
 
         // FIX: HLS Error Handling & Sound Recovery
-        hls.on(Hls.Events.ERROR, (_event, data) => {
+        hls.on('hlsError', (_event: any, data: any) => {
           if (data.fatal) {
+            const errorPayload = {
+              code: 2,
+              type: data.type,
+              details: data.details,
+              fatal: data.fatal,
+              responseCode: data?.response?.code,
+              responseText: data?.response?.text,
+            };
+            reportPlaybackError(errorPayload);
             switch (data.type) {
-              case Hls.ErrorTypes.NETWORK_ERROR:
+              case 'networkError':
                 console.warn(
                   '[HLS] Fatal network error encountered, trying to recover',
                 );
                 hls.startLoad();
                 break;
-              case Hls.ErrorTypes.MEDIA_ERROR: {
+              case 'mediaError': {
                 console.warn(
                   '[HLS] Fatal media error encountered, trying to recover',
                 );
@@ -1063,11 +1102,12 @@ export default function VideoJsPlayer({
     },
     [
       seriesId,
-      customHlsLoader,
+      customHlsLoaderFactory,
       isLive,
       armAutoplay,
-      clearNativeAutoplayListeners,
+      getTechVideoEl,
       tryPlayNow,
+      reportPlaybackError,
     ],
   );
 
@@ -1099,7 +1139,7 @@ export default function VideoJsPlayer({
     // Otherwise, rely on Video.js (VHS or Native) to handle it via player.src()
     // Only use manual HLS if we have a custom loader (e.g. P2P)
     // Otherwise, rely on Video.js (VHS or Native) to handle it via player.src()
-    if (isHls && customHlsLoader) {
+    if (isHls && customHlsLoaderFactory) {
       // FIX: Force stop previous playback synchronously
       try {
         const v = getTechVideoEl();
@@ -1184,7 +1224,7 @@ export default function VideoJsPlayer({
     armAutoplay,
     clearNativeAutoplayListeners,
     seriesId,
-    customHlsLoader,
+    customHlsLoaderFactory,
   ]);
 
   useEffect(() => {
@@ -1225,7 +1265,15 @@ export default function VideoJsPlayer({
     };
     player.on('loadedmetadata', clearSwitching);
     player.on('canplay', clearSwitching);
-    player.on('error', clearSwitching);
+    player.on('error', () => {
+      clearSwitching();
+      const err = player.error();
+      reportPlaybackError({
+        code: Number(err?.code || 0) || 0,
+        message: err?.message || 'Player error',
+        raw: err,
+      });
+    });
 
     player.on('playing', () => {
       if (mountedRef.current) {
@@ -1332,7 +1380,7 @@ export default function VideoJsPlayer({
         handleFullscreenChange,
       );
     };
-  }, [playerRef]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [playerRef, reportPlaybackError]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // FIX: Stall Detection & Recovery
   useEffect(() => {

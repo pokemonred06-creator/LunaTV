@@ -135,7 +135,7 @@ async function generateSuggestions(
     }
 
     // 根据匹配程度确定类型
-    let type: 'exact' | 'related' | 'suggestion' = 'related';
+    let type: 'exact' | 'related' | 'suggestion';
     if (score >= 2.0) {
       type = 'exact';
     } else if (score >= 1.5) {

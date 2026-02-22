@@ -18,7 +18,7 @@ const BLOCKED_RANGES_IPV4 = [
   '192.0.0.0/24',
   '192.0.2.0/24',
   '192.168.0.0/16',
-  '198.18.0.0/15',
+  // '198.18.0.0/15', // Allowed for Clash FakeIP routes
   '224.0.0.0/4',
   '240.0.0.0/4',
 ];
@@ -107,7 +107,7 @@ export async function GET(request: NextRequest) {
     Accept: 'image/*,*/*;q=0.8',
   };
 
-  // Douban blocks direct hotlink fetches and often returns 418. Use referer + mirror/proxy.
+  // Douban blocks direct hotlink fetches and often returns 418. Use referer + optional custom proxy.
   if (targetUrl.includes('doubanio.com')) {
     upstreamHeaders['Referer'] = 'https://movie.douban.com/';
 
@@ -119,25 +119,9 @@ export async function GET(request: NextRequest) {
       if (proxyType === 'custom' && proxyBase) {
         // proxyBase is expected to be a prefix like "https://example.com/?url=".
         targetUrl = `${proxyBase}${encodeURIComponent(targetUrl)}`;
-      } else {
-        // Mirror fallback (public CDN mirror for douban images)
-        targetUrl = targetUrl.replace(
-          /img\d*\.doubanio\.com/gi,
-          'img.doubanio.cmliussss.net',
-        );
-        if (targetUrl.startsWith('http://')) {
-          targetUrl = targetUrl.replace('http://', 'https://');
-        }
       }
     } catch {
-      // If config fails, still try mirror fallback.
-      targetUrl = targetUrl.replace(
-        /img\d*\.doubanio\.com/gi,
-        'img.doubanio.cmliussss.net',
-      );
-      if (targetUrl.startsWith('http://')) {
-        targetUrl = targetUrl.replace('http://', 'https://');
-      }
+      // Ignore config load errors and use original douban URL with referer.
     }
   }
 

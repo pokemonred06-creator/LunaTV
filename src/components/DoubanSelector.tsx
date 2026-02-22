@@ -197,14 +197,15 @@ const DoubanSelector: React.FC<DoubanSelectorProps> = ({
       window.addEventListener('resize', handleResize);
       return () => window.removeEventListener('resize', handleResize);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     type,
     currentPrimary,
+    currentConfig.defaultSecondary,
+    primaryOptions,
+    secondaryOptions,
     secondarySelection,
     showSecondary,
     updateIndicatorPosition,
-    // Note: options arrays removed from deps as they are derived from stable config + type
   ]);
 
   // 5. Scroll to Active Item (Secondary Only)

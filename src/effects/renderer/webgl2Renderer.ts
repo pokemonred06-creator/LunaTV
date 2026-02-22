@@ -102,6 +102,7 @@ export class WebGL2Renderer implements Renderer {
     deleteFBO(this.fbo2);
     deleteFBO(this.fboDistort);
 
+    gl.getExtension('WEBGL_lose_context')?.loseContext();
     this.gl = null;
     this.programDrop = null;
     this.programTrail = null;

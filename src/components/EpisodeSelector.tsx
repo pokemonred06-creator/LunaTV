@@ -76,7 +76,6 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
   // Refs for async safety
   const attemptedSourcesRef = useRef<Set<string>>(new Set());
   const videoInfoMapRef = useRef<Map<string, VideoInfo>>(new Map());
-  const fetchRunIdRef = useRef(0);
 
   useEffect(() => {
     attemptedSourcesRef.current = attemptedSources;
@@ -116,11 +115,9 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
   // FIX: Always auto-switch page when value changes externally
   useEffect(() => {
     const newPage = Math.floor((value - 1) / episodesPerPage);
-    if (activeTab === 'episodes' && newPage !== currentPage) {
-      setCurrentPage(newPage);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value, episodesPerPage]);
+    if (activeTab !== 'episodes') return;
+    setCurrentPage((prev) => (prev === newPage ? prev : newPage));
+  }, [activeTab, episodesPerPage, value]);
 
   const displayPage = useMemo(() => {
     if (descending) return pageCount - 1 - currentPage;
@@ -195,7 +192,7 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
   useEffect(() => {
     if (!optimizationEnabled || activeTab !== 'sources') return;
 
-    const runId = ++fetchRunIdRef.current;
+    let cancelled = false;
     const ac = new AbortController();
 
     const runSpeedTests = async () => {
@@ -207,9 +204,9 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
       if (pendingSources.length === 0) return;
 
       for (const source of pendingSources) {
-        if (runId !== fetchRunIdRef.current) return;
+        if (cancelled) return;
         await getVideoInfo(source, ac.signal);
-        if (runId !== fetchRunIdRef.current) return;
+        if (cancelled) return;
         await new Promise((resolve) => setTimeout(resolve, 0));
       }
     };
@@ -217,8 +214,7 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
     runSpeedTests();
 
     return () => {
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-      fetchRunIdRef.current++;
+      cancelled = true;
       ac.abort();
     };
   }, [activeTab, sortedSources, getVideoInfo, optimizationEnabled]);

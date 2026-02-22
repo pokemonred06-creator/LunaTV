@@ -18,6 +18,10 @@ interface ApiSearchItem {
   type_name?: string;
 }
 
+function isPlayableM3u8(url: string): boolean {
+  return /\.m3u8(?:$|[?#])/i.test(url.trim());
+}
+
 /**
  * 通用的带缓存搜索函数
  */
@@ -93,7 +97,7 @@ async function searchWithCache(
             const episode_title_url = title_url.split('$');
             if (
               episode_title_url.length === 2 &&
-              episode_title_url[1].endsWith('.m3u8')
+              isPlayableM3u8(episode_title_url[1])
             ) {
               matchTitles.push(episode_title_url[0]);
               matchEpisodes.push(episode_title_url[1]);
@@ -324,7 +328,7 @@ export async function getDetailFromApi(
         const episode_title_url = title_url.split('$');
         if (
           episode_title_url.length === 2 &&
-          episode_title_url[1].endsWith('.m3u8')
+          isPlayableM3u8(episode_title_url[1])
         ) {
           matchTitles.push(episode_title_url[0]);
           matchEpisodes.push(episode_title_url[1]);

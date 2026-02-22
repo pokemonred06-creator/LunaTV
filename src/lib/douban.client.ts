@@ -185,7 +185,9 @@ export async function fetchDoubanCategories(
         }),
       );
     }
-    throw new Error(`获取豆瓣分类数据失败: ${(error as Error).message}`);
+    throw new Error(`获取豆瓣分类数据失败: ${(error as Error).message}`, {
+      cause: error,
+    });
   }
 }
 
@@ -317,7 +319,9 @@ export async function fetchDoubanList(
         }),
       );
     }
-    throw new Error(`获取豆瓣分类数据失败: ${(error as Error).message}`);
+    throw new Error(`获取豆瓣分类数据失败: ${(error as Error).message}`, {
+      cause: error,
+    });
   }
 }
 
@@ -473,6 +477,8 @@ async function fetchDoubanRecommends(
       list: list,
     };
   } catch (error) {
-    throw new Error(`获取豆瓣推荐数据失败: ${(error as Error).message}`);
+    throw new Error(`获取豆瓣推荐数据失败: ${(error as Error).message}`, {
+      cause: error,
+    });
   }
 }

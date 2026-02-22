@@ -1,6 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import he from 'he';
-import Hls from 'hls.js';
 
 function getDoubanImageProxyConfig(): {
   proxyType:
@@ -31,6 +30,12 @@ function getDoubanImageProxyConfig(): {
  */
 export function processImageUrl(originalUrl: string): string {
   if (!originalUrl) return originalUrl;
+
+  // Enforce same-origin image loading for all remote URLs to avoid browser CORS
+  // failures on poster domains that disallow cross-origin embedding.
+  if (/^https?:\/\//i.test(originalUrl)) {
+    return `/api/image-proxy?url=${encodeURIComponent(originalUrl)}`;
+  }
 
   // Domains known to block CORS - always proxy these
   const corsBlockedDomains = ['dytt-img.com', 'tyyswimg.com', 'vip.lz-cdn'];
@@ -185,127 +190,142 @@ async function getVideoResolutionWithHls(m3u8Url: string): Promise<{
   pingTime: number;
 }> {
   return new Promise((resolve, reject) => {
-    const video = document.createElement('video');
-    video.muted = true;
-    video.preload = 'metadata';
+    (async () => {
+      // Always use same-origin proxy for speed tests to avoid browser CORS blocks.
+      const testUrl =
+        /^https?:\/\//i.test(m3u8Url) && !m3u8Url.includes('/api/proxy/')
+          ? `/api/proxy/m3u8?url=${encodeURIComponent(m3u8Url)}&moontv-source=global`
+          : m3u8Url;
 
-    // 测量网络延迟
-    const pingStart = performance.now();
-    let pingTime = 0;
+      const video = document.createElement('video');
+      video.muted = true;
+      video.preload = 'metadata';
+      const pingStart = performance.now();
+      let pingTime = 0;
 
-    fetch(m3u8Url, { method: 'HEAD', mode: 'no-cors' })
-      .then(() => {
-        pingTime = performance.now() - pingStart;
-      })
-      .catch(() => {
-        pingTime = performance.now() - pingStart;
-      });
-
-    const hls = new Hls();
-
-    // 设置超时处理
-    const timeout = setTimeout(() => {
-      hls.destroy();
-      video.remove();
-      reject(new Error('Timeout loading video metadata'));
-    }, 5000);
-
-    video.onerror = () => {
-      clearTimeout(timeout);
-      hls.destroy();
-      video.remove();
-      reject(new Error('Failed to load video metadata'));
-    };
-
-    let actualLoadSpeed = '未知';
-    let hasSpeedCalculated = false;
-    let hasMetadataLoaded = false;
-    let fragmentStartTime = 0;
-
-    const checkAndResolve = () => {
-      if (
-        hasMetadataLoaded &&
-        (hasSpeedCalculated || actualLoadSpeed !== '未知')
-      ) {
-        clearTimeout(timeout);
-        const width = video.videoWidth;
-        if (width && width > 0) {
-          hls.destroy();
-          video.remove();
-
-          const quality =
-            width >= 3840
-              ? '4K'
-              : width >= 2560
-                ? '2K'
-                : width >= 1920
-                  ? '1080p'
-                  : width >= 1280
-                    ? '720p'
-                    : width >= 854
-                      ? '480p'
-                      : 'SD';
-
-          resolve({
-            quality,
-            loadSpeed: actualLoadSpeed,
-            pingTime: Math.round(pingTime),
-          });
-        } else {
-          resolve({
-            quality: '未知',
-            loadSpeed: actualLoadSpeed,
-            pingTime: Math.round(pingTime),
-          });
-        }
+      let HlsModule;
+      try {
+        HlsModule = await import('hls.js');
+      } catch (e) {
+        reject(new Error('Failed to load hls.js'));
+        return;
       }
-    };
+      const Hls = HlsModule.default;
+      const hls = new Hls();
 
-    hls.on(Hls.Events.FRAG_LOADING, () => {
-      fragmentStartTime = performance.now();
-    });
+      // 设置超时处理
+      const timeout = setTimeout(() => {
+        hls.destroy();
+        video.remove();
+        reject(new Error('Timeout loading video metadata'));
+      }, 5000);
 
-    hls.on(Hls.Events.FRAG_LOADED, (event: any, data: any) => {
-      if (
-        fragmentStartTime > 0 &&
-        data &&
-        data.payload &&
-        !hasSpeedCalculated
-      ) {
-        const loadTime = performance.now() - fragmentStartTime;
-        const size = data.payload.byteLength || 0;
-
-        if (loadTime > 0 && size > 0) {
-          const speedKBps = size / 1024 / (loadTime / 1000);
-
-          if (speedKBps >= 1024) {
-            actualLoadSpeed = `${(speedKBps / 1024).toFixed(1)} MB/s`;
-          } else {
-            actualLoadSpeed = `${speedKBps.toFixed(1)} KB/s`;
-          }
-          hasSpeedCalculated = true;
-          checkAndResolve();
-        }
-      }
-    });
-
-    hls.loadSource(m3u8Url);
-    hls.attachMedia(video);
-
-    hls.on(Hls.Events.ERROR, (event: any, data: any) => {
-      console.error('HLS错误:', data);
-      if (data.fatal) {
+      video.onerror = () => {
         clearTimeout(timeout);
         hls.destroy();
         video.remove();
-        reject(new Error(`HLS播放失败: ${data.type}`));
-      }
-    });
+        reject(new Error('Failed to load video metadata'));
+      };
 
-    video.onloadedmetadata = () => {
-      hasMetadataLoaded = true;
-      checkAndResolve();
-    };
+      let actualLoadSpeed = '未知';
+      let hasSpeedCalculated = false;
+      let hasMetadataLoaded = false;
+      let fragmentStartTime = 0;
+
+      const checkAndResolve = () => {
+        if (
+          hasMetadataLoaded &&
+          (hasSpeedCalculated || actualLoadSpeed !== '未知')
+        ) {
+          clearTimeout(timeout);
+          const width = video.videoWidth;
+          if (width && width > 0) {
+            hls.destroy();
+            video.remove();
+
+            const quality =
+              width >= 3840
+                ? '4K'
+                : width >= 2560
+                  ? '2K'
+                  : width >= 1920
+                    ? '1080p'
+                    : width >= 1280
+                      ? '720p'
+                      : width >= 854
+                        ? '480p'
+                        : 'SD';
+
+            resolve({
+              quality,
+              loadSpeed: actualLoadSpeed,
+              pingTime: Math.round(pingTime),
+            });
+          } else {
+            resolve({
+              quality: '未知',
+              loadSpeed: actualLoadSpeed,
+              pingTime: Math.round(pingTime),
+            });
+          }
+        }
+      };
+
+      hls.on(Hls.Events.FRAG_LOADING, () => {
+        if (pingTime <= 0) {
+          pingTime = performance.now() - pingStart;
+        }
+        fragmentStartTime = performance.now();
+      });
+
+      hls.on(Hls.Events.FRAG_LOADED, (event: any, data: any) => {
+        if (
+          fragmentStartTime > 0 &&
+          data &&
+          data.payload &&
+          !hasSpeedCalculated
+        ) {
+          const loadTime = performance.now() - fragmentStartTime;
+          const size = data.payload.byteLength || 0;
+
+          if (loadTime > 0 && size > 0) {
+            const speedKBps = size / 1024 / (loadTime / 1000);
+
+            if (speedKBps >= 1024) {
+              actualLoadSpeed = `${(speedKBps / 1024).toFixed(1)} MB/s`;
+            } else {
+              actualLoadSpeed = `${speedKBps.toFixed(1)} KB/s`;
+            }
+            hasSpeedCalculated = true;
+            checkAndResolve();
+          }
+        }
+      });
+
+      hls.loadSource(testUrl);
+      hls.attachMedia(video);
+
+      hls.on(Hls.Events.ERROR, (event: any, data: any) => {
+        if (data.fatal) {
+          if (process.env.NODE_ENV !== 'production') {
+            console.warn(
+              '[SpeedTest] HLS fatal error:',
+              data.type,
+              data.details,
+            );
+          }
+          clearTimeout(timeout);
+          hls.destroy();
+          video.remove();
+          reject(new Error(`HLS speed test failed: ${data.type}`));
+        }
+      });
+
+      video.onloadedmetadata = () => {
+        hasMetadataLoaded = true;
+        checkAndResolve();
+      };
+    })();
   });
 }
 

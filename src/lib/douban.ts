@@ -40,12 +40,15 @@ async function getCachedData<T>(
   ttlMinutes?: number, // Optional TTL override, defaults to config
 ): Promise<T> {
   const config = await getConfig();
-  // Use provided TTL or config TTL or default to 1 day (1440 minutes)
-  const cacheTimeMinutes =
+  // Cache TTL follows the admin "SiteInterfaceCacheTime" setting (seconds).
+  // A per-call override is still supported via `ttlMinutes` for legacy call sites.
+  const siteCacheSeconds =
+    Number(config.SiteConfig.SiteInterfaceCacheTime) || 7200;
+  const cacheTimeSeconds =
     ttlMinutes !== undefined
-      ? ttlMinutes
-      : config.SiteConfig.DoubanDataCacheTTL || 1440;
-  const cacheTime = cacheTimeMinutes * 60 * 1000; // Convert to ms
+      ? Math.max(1, Math.floor(ttlMinutes * 60))
+      : Math.max(1, Math.floor(siteCacheSeconds));
+  const cacheTime = cacheTimeSeconds * 1000; // Convert to ms
 
   const now = Date.now();
 
@@ -61,9 +64,21 @@ async function getCachedData<T>(
   // 2. Persistent Storage Check
   try {
     const dbValue = await db.get(key);
-    if (dbValue && typeof dbValue === 'string') {
-      const dbItem = JSON.parse(dbValue) as CacheItem<T>;
-      if (dbItem && dbItem.timestamp && now - dbItem.timestamp < cacheTime) {
+    let dbItem: CacheItem<T> | null = null;
+
+    if (typeof dbValue === 'string') {
+      try {
+        dbItem = JSON.parse(dbValue) as CacheItem<T>;
+      } catch {
+        dbItem = null;
+      }
+    } else if (dbValue && typeof dbValue === 'object') {
+      // Some storage adapters JSON-parse values on read.
+      dbItem = dbValue as CacheItem<T>;
+    }
+
+    if (dbItem && typeof dbItem.timestamp === 'number') {
+      if (now - dbItem.timestamp < cacheTime) {
         // Backfill memory cache
         memoryCache.set(key, dbItem);
         return dbItem.data;
@@ -85,7 +100,7 @@ async function getCachedData<T>(
   memoryCache.set(key, cacheItem);
   try {
     // Persistent storage with TTL
-    await db.set(key, JSON.stringify(cacheItem), cacheTimeMinutes * 60);
+    await db.set(key, JSON.stringify(cacheItem), cacheTimeSeconds);
   } catch (error) {
     console.error(`[Douban Cache] Storage write error:`, error);
   }
@@ -99,6 +114,87 @@ const COMMON_HEADERS: HeadersInit = {
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
   Referer: 'https://movie.douban.com/',
 };
+
+type DoubanProxyMode =
+  | 'direct'
+  | 'cmliussss-cdn-tencent'
+  | 'cmliussss-cdn-ali'
+  | 'custom';
+
+function applyCustomDoubanProxy(
+  targetUrl: string,
+  customProxy: string,
+): string | null {
+  if (!customProxy) return null;
+  return customProxy.includes('%s')
+    ? customProxy.replace('%s', encodeURIComponent(targetUrl))
+    : customProxy + encodeURIComponent(targetUrl);
+}
+
+function convertDoubanHost(
+  targetUrl: string,
+  provider: 'tencent' | 'ali',
+): string | null {
+  try {
+    const u = new URL(targetUrl);
+    if (u.hostname === 'movie.douban.com') {
+      u.hostname =
+        provider === 'tencent'
+          ? 'movie.douban.cmliussss.net'
+          : 'movie.douban.cmliussss.com';
+      return u.toString();
+    }
+    if (u.hostname === 'm.douban.com') {
+      u.hostname =
+        provider === 'tencent'
+          ? 'm.douban.cmliussss.net'
+          : 'm.douban.cmliussss.com';
+      return u.toString();
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function buildDoubanRequestCandidates(
+  targetUrl: string,
+  proxyType: DoubanProxyMode,
+  customProxy: string,
+): string[] {
+  const candidates: string[] = [];
+  const add = (url: string | null) => {
+    if (url && !candidates.includes(url)) candidates.push(url);
+  };
+
+  const direct = targetUrl;
+  const tencentCdn = convertDoubanHost(targetUrl, 'tencent');
+  const aliCdn = convertDoubanHost(targetUrl, 'ali');
+  const custom = applyCustomDoubanProxy(targetUrl, customProxy);
+
+  switch (proxyType) {
+    case 'custom':
+      add(custom);
+      break;
+    case 'cmliussss-cdn-tencent':
+      add(tencentCdn);
+      break;
+    case 'cmliussss-cdn-ali':
+      add(aliCdn);
+      break;
+    case 'direct':
+    default:
+      add(direct);
+      break;
+  }
+
+  // Resilient fallback chain for unstable mirrors.
+  add(direct);
+  add(tencentCdn);
+  add(aliCdn);
+
+  return candidates;
+}
 
 export async function searchDouban(keyword: string): Promise<DoubanSubject[]> {
   // 移除这一层缓存，因为 searchDouban 结果通常比较容易变动，或者使用较短的缓存时间
@@ -195,22 +291,27 @@ export async function fetchDoubanData<T>(
       const config = await getConfig();
       const { DoubanProxyType, DoubanProxy } = config.SiteConfig;
 
-      let requestUrl = url;
+      const candidates = buildDoubanRequestCandidates(
+        url,
+        (DoubanProxyType as DoubanProxyMode) || 'direct',
+        DoubanProxy || '',
+      );
 
-      if (DoubanProxyType === 'custom' && DoubanProxy) {
-        requestUrl = DoubanProxy.includes('%s')
-          ? DoubanProxy.replace('%s', encodeURIComponent(url))
-          : DoubanProxy + encodeURIComponent(url);
-      } else if (DoubanProxyType === 'cmliussss-cdn-tencent') {
-        requestUrl =
-          'https://proxy-douban.cmliussss.net/' + encodeURIComponent(url);
+      let lastError: string | null = null;
+      for (const requestUrl of candidates) {
+        try {
+          const response = await fetch(requestUrl, { headers: COMMON_HEADERS });
+          if (!response.ok) {
+            lastError = `[Douban] HTTP ${response.status} for ${requestUrl}`;
+            continue;
+          }
+          return (await response.json()) as T;
+        } catch (error) {
+          lastError = `[Douban] fetch failed for ${requestUrl}: ${(error as Error).message}`;
+        }
       }
 
-      const response = await fetch(requestUrl, { headers: COMMON_HEADERS });
-      if (!response.ok) {
-        throw new Error(`[Douban] HTTP ${response.status} for ${requestUrl}`);
-      }
-      return response.json();
+      throw new Error(lastError || `[Douban] all upstreams failed for ${url}`);
     },
     ttlMinutes,
   );

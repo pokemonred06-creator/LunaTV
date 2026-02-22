@@ -1,5 +1,3 @@
-/* eslint-disable react-hooks/exhaustive-deps */
-
 'use client';
 
 import React, { useEffect, useState } from 'react';
@@ -31,14 +29,13 @@ const WeekdaySelector: React.FC<WeekdaySelectorProps> = ({
     return weekdayMap[today];
   };
 
-  const [selectedWeekday, setSelectedWeekday] = useState<string>(
-    getTodayWeekday()
-  );
+  const [selectedWeekday, setSelectedWeekday] =
+    useState<string>(getTodayWeekday());
 
   // 组件初始化时通知父组件默认选中的星期
   useEffect(() => {
     onWeekdayChange(getTodayWeekday());
-  }, []); // 只在组件挂载时执行一次
+  }, [onWeekdayChange]);
 
   return (
     <div

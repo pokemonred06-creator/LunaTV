@@ -5,6 +5,7 @@ import './globals.css';
 
 import { getConfig } from '@/lib/config';
 
+import { DebugConsole } from '../components/DebugConsole';
 import { GlobalErrorIndicator } from '../components/GlobalErrorIndicator';
 import { LanguageProvider } from '../components/LanguageProvider';
 import { SeasonalEffectsProvider } from '../components/SeasonalEffectsProvider';
@@ -134,6 +135,7 @@ export default async function RootLayout({
               <SiteProvider siteName={siteName} announcement={announcement}>
                 {children}
                 <GlobalErrorIndicator />
+                <DebugConsole />
               </SiteProvider>
             </SeasonalEffectsProvider>
           </LanguageProvider>

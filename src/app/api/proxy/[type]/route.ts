@@ -7,6 +7,24 @@ import { getConfig } from '@/lib/config';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+// Some IPTV/VOD providers serve HLS on non-standard ports (e.g. :777). We still
+// keep SSRF protections (public IP-only), but allow a small, configurable port
+// set for legitimate streams.
+const DEFAULT_ALLOWED_PORTS = [80, 443, 777, 999, 8000, 8080, 8443, 8888];
+function buildAllowedPorts(): Set<number> {
+  const ports = new Set<number>(DEFAULT_ALLOWED_PORTS);
+  const raw = process.env.PROXY_ALLOWED_PORTS;
+  if (!raw) return ports;
+  for (const part of raw.split(/[,\s]+/g)) {
+    const n = Number(part.trim());
+    if (!Number.isFinite(n)) continue;
+    const p = Math.floor(n);
+    if (p >= 1 && p <= 65535) ports.add(p);
+  }
+  return ports;
+}
+const ALLOWED_PORTS = buildAllowedPorts();
+
 const BLOCKED_RANGES_IPV4 = [
   '0.0.0.0/8',
   '10.0.0.0/8',
@@ -17,7 +35,7 @@ const BLOCKED_RANGES_IPV4 = [
   '192.0.0.0/24',
   '192.0.2.0/24',
   '192.168.0.0/16',
-  '198.18.0.0/15',
+  // '198.18.0.0/15', // Allowed for Clash FakeIP routes
   '224.0.0.0/4',
   '240.0.0.0/4',
 ];
@@ -52,6 +70,11 @@ async function validateSafeUrl(urlStr: string) {
   try {
     const u = new URL(urlStr);
     if (!['http:', 'https:'].includes(u.protocol)) return false;
+    if (u.username || u.password) return false;
+
+    const port = u.port ? Number(u.port) : u.protocol === 'https:' ? 443 : 80;
+    if (!ALLOWED_PORTS.has(port)) return false;
+
     const ipType = net.isIP(u.hostname);
     // Server is IPv4-only: reject literal IPv6 targets.
     if (ipType === 6) return false;
@@ -60,11 +83,10 @@ async function validateSafeUrl(urlStr: string) {
     if (!addrs.length) return false;
 
     // IPv4-only policy:
-    // - allow when at least one public IPv4 exists
-    // - reject if no IPv4 records are present
+    // TOCTOU Fix: allow ONLY if ALL IPv4 answers are public.
     const ipv4Addrs = addrs.filter((a) => a.family === 4);
     if (!ipv4Addrs.length) return false;
-    return ipv4Addrs.some((a) => !isBlockedIp(a.address));
+    return ipv4Addrs.every((a) => !isBlockedIp(a.address));
   } catch {
     return false;
   }
@@ -86,9 +108,10 @@ async function fetchWithValidatedRedirects(
       if (!loc) return res;
       try {
         current = new URL(loc, current).toString();
-        continue;
-      } catch {
-        throw new Error('Invalid redirect');
+      } catch (e: unknown) {
+        // Explicitly type error argument
+        const error = e as Error;
+        throw new Error(`Invalid redirect: ${error.message}`, { cause: e });
       }
     }
     return res;
@@ -96,10 +119,66 @@ async function fetchWithValidatedRedirects(
   throw new Error('Too many redirects');
 }
 
+async function fetchWithRetries(
+  initialUrl: string,
+  init: RequestInit,
+  maxHops = 5,
+  retries = 2,
+  perAttemptTimeoutMs = 12000,
+) {
+  let lastErr: unknown = null;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const timeoutController = new AbortController();
+    const timeoutId = setTimeout(
+      () => timeoutController.abort(),
+      perAttemptTimeoutMs,
+    );
+    const parentSignal = init.signal;
+    let onAbort: (() => void) | null = null;
+    if (parentSignal) {
+      onAbort = () => timeoutController.abort();
+      parentSignal.addEventListener('abort', onAbort, { once: true });
+    }
+
+    try {
+      return await fetchWithValidatedRedirects(
+        initialUrl,
+        {
+          ...init,
+          signal: timeoutController.signal,
+        },
+        maxHops,
+      );
+    } catch (err) {
+      lastErr = err;
+      if (attempt >= retries) throw err;
+      await new Promise((resolve) => setTimeout(resolve, 150 * (attempt + 1)));
+    } finally {
+      clearTimeout(timeoutId);
+      if (parentSignal && onAbort) {
+        parentSignal.removeEventListener('abort', onAbort);
+      }
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error('Fetch failed');
+}
+
 function proxyTypeForUrl(url: string): string {
   const path = new URL(url).pathname.toLowerCase();
   if (path.endsWith('.m3u8')) return 'm3u8';
   return 'ts'; // .ts, .aac, .key, etc. → stream directly
+}
+
+function toHttpFallbackUrl(urlStr: string): string | null {
+  try {
+    const u = new URL(urlStr);
+    if (u.protocol !== 'https:') return null;
+    u.protocol = 'http:';
+    if (u.port === '443') u.port = '';
+    return u.toString();
+  } catch {
+    return null;
+  }
 }
 
 function rewriteM3U8(
@@ -174,34 +253,149 @@ export async function GET(request: NextRequest, props: ProxyParams) {
     sourceConfig?.ua ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
-  const upstreamHeaders: Record<string, string> = {
-    'User-Agent': ua,
-    Accept: '*/*',
+  const buildHeaders = (target: URL): Record<string, string> => {
+    const headers: Record<string, string> = {
+      'User-Agent': ua,
+      Accept: '*/*',
+    };
+
+    if (request.headers.get('range'))
+      headers['Range'] = request.headers.get('range')!;
+
+    const raw = target.toString();
+    if (raw.includes('huya') || raw.includes('douzhicloud'))
+      headers['Referer'] = 'https://www.huya.com/';
+    else if (raw.includes('douyin'))
+      headers['Referer'] = 'https://live.douyin.com/';
+    else headers['Referer'] = target.origin + '/';
+
+    return headers;
   };
 
-  if (request.headers.get('range'))
-    upstreamHeaders['Range'] = request.headers.get('range')!;
+  let activeUrl = upstreamUrl;
+  let upstreamHeaders: Record<string, string> = buildHeaders(activeUrl);
+  const httpFallbackUrl = toHttpFallbackUrl(urlParam);
+  let triedHttpFallback = false;
 
-  if (urlParam.includes('huya') || urlParam.includes('douzhicloud'))
-    upstreamHeaders['Referer'] = 'https://www.huya.com/';
-  else if (urlParam.includes('douyin'))
-    upstreamHeaders['Referer'] = 'https://live.douyin.com/';
-  else if (!upstreamHeaders['Referer'])
-    upstreamHeaders['Referer'] = upstreamUrl.origin + '/';
-
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 12000);
+  const timeoutMs = type === 'm3u8' ? 15000 : 20000;
 
   try {
-    const upstreamRes = await fetchWithValidatedRedirects(
-      urlParam,
-      {
-        headers: upstreamHeaders,
-        cache: 'no-store',
-        signal: controller.signal,
-      },
-      5,
-    );
+    let upstreamRes: Response;
+    try {
+      upstreamRes = await fetchWithRetries(
+        activeUrl.toString(),
+        {
+          headers: upstreamHeaders,
+          cache: 'no-store',
+        },
+        5,
+        2,
+        timeoutMs,
+      );
+    } catch {
+      // Some providers have broken TLS chains from container trust stores,
+      // but still serve valid HTTP streams. Retry once over HTTP.
+      if (!httpFallbackUrl) throw new Error('Initial upstream fetch failed');
+      triedHttpFallback = true;
+      activeUrl = new URL(httpFallbackUrl);
+      upstreamHeaders = buildHeaders(activeUrl);
+      upstreamRes = await fetchWithRetries(
+        activeUrl.toString(),
+        {
+          headers: upstreamHeaders,
+          cache: 'no-store',
+        },
+        5,
+        2,
+        timeoutMs,
+      );
+    }
+
+    // Multi-stage retry for 403 rejections (often due to anti-hotlinking)
+    if (upstreamRes.status === 403) {
+      const retryStrategies: Record<string, string | undefined>[] = [
+        // 1. Try without Referer
+        { Referer: undefined },
+        // 2. Try with Mobile UA (often has different/looser blocklists) + No Referer
+        {
+          'User-Agent':
+            'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+          Referer: undefined,
+        },
+        // 3. Try spoofing Origin to match upstream origin
+        {
+          Origin: upstreamUrl.origin,
+          Referer: upstreamUrl.origin + '/',
+        },
+      ];
+
+      for (const strategy of retryStrategies) {
+        const nextHeaders: Record<string, string> = { ...upstreamHeaders };
+        for (const [k, v] of Object.entries(strategy)) {
+          if (v === undefined) {
+            delete nextHeaders[k];
+          } else {
+            nextHeaders[k] = v;
+          }
+        }
+
+        upstreamRes = await fetchWithRetries(
+          activeUrl.toString(),
+          {
+            headers: nextHeaders,
+            cache: 'no-store',
+          },
+          5,
+          1,
+          timeoutMs,
+        );
+        if (upstreamRes.ok) break;
+      }
+    }
+
+    // If HTTPS responds with 5xx, try HTTP once before giving up.
+    if (
+      upstreamRes.status >= 500 &&
+      !triedHttpFallback &&
+      httpFallbackUrl &&
+      activeUrl.protocol === 'https:'
+    ) {
+      triedHttpFallback = true;
+      activeUrl = new URL(httpFallbackUrl);
+      upstreamHeaders = buildHeaders(activeUrl);
+      upstreamRes = await fetchWithRetries(
+        activeUrl.toString(),
+        {
+          headers: upstreamHeaders,
+          cache: 'no-store',
+        },
+        5,
+        2,
+        timeoutMs,
+      );
+    }
+
+    // If HTTPS responds with 403, try HTTP once before giving up.
+    if (
+      upstreamRes.status === 403 &&
+      !triedHttpFallback &&
+      httpFallbackUrl &&
+      activeUrl.protocol === 'https:'
+    ) {
+      triedHttpFallback = true;
+      activeUrl = new URL(httpFallbackUrl);
+      upstreamHeaders = buildHeaders(activeUrl);
+      upstreamRes = await fetchWithRetries(
+        activeUrl.toString(),
+        {
+          headers: upstreamHeaders,
+          cache: 'no-store',
+        },
+        5,
+        2,
+        timeoutMs,
+      );
+    }
 
     if (!upstreamRes.ok) {
       return new NextResponse(`Upstream HTTP ${upstreamRes.status}`, {
@@ -223,10 +417,23 @@ export async function GET(request: NextRequest, props: ProxyParams) {
     }
 
     // M3U8: rewrite segments
-    if (type === 'm3u8' && urlParam.includes('.m3u8')) {
-      const text = await upstreamRes.text();
+    if (type === 'm3u8') {
+      const playlistProbe = upstreamRes.clone();
+      const text = await playlistProbe.text();
       if (!text.includes('#EXTM3U')) {
-        return new NextResponse(`Not an m3u8 playlist`, { status: 415 });
+        // Fallback to raw passthrough for non-standard sources
+        // (some providers return unconventional manifests/content-types).
+        const fallbackHeaders = new Headers();
+        fallbackHeaders.set('Access-Control-Allow-Origin', '*');
+        const ct =
+          upstreamRes.headers.get('content-type') || 'application/octet-stream';
+        fallbackHeaders.set('content-type', ct);
+        const cl = upstreamRes.headers.get('content-length');
+        if (cl) fallbackHeaders.set('content-length', cl);
+        return new NextResponse(upstreamRes.body, {
+          status: upstreamRes.status,
+          headers: fallbackHeaders,
+        });
       }
 
       const proxiedUrl = new URL(request.url);
@@ -239,7 +446,7 @@ export async function GET(request: NextRequest, props: ProxyParams) {
       return new NextResponse(rewritten, {
         status: 200,
         headers: {
-          'content-type': 'application/vnd.apple.mpegurl; charset=utf-8',
+          'content-type': 'application/vnd.apple.mpegurl',
           'cache-control': 'no-store',
           'Access-Control-Allow-Origin': '*',
         },
@@ -249,11 +456,11 @@ export async function GET(request: NextRequest, props: ProxyParams) {
     // Default: stream body (flv, ts, etc.)
     const responseHeaders = new Headers();
     responseHeaders.set('Access-Control-Allow-Origin', '*');
+    responseHeaders.set('Accept-Ranges', 'bytes');
     [
       'content-type',
       'content-length',
       'content-range',
-      'accept-ranges',
       'cache-control',
       'expires',
       'etag',
@@ -269,12 +476,15 @@ export async function GET(request: NextRequest, props: ProxyParams) {
   } catch (e: unknown) {
     const error = e as Error;
     const isAbort = error.name === 'AbortError';
+    const isBlocked = error.message?.includes('SSRF Blocked');
     console.error('[Proxy Error]', error.message, urlParam);
     return new NextResponse(
-      isAbort ? 'Upstream timeout' : 'Proxy fetch failed',
-      { status: isAbort ? 502 : 500 },
+      isAbort
+        ? 'Upstream timeout'
+        : isBlocked
+          ? 'Blocked upstream target'
+          : 'Proxy fetch failed',
+      { status: isAbort ? 502 : isBlocked ? 403 : 502 },
     );
-  } finally {
-    clearTimeout(timeoutId);
   }
 }

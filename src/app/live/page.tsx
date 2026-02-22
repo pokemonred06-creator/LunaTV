@@ -10,7 +10,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import type Player from 'video.js/dist/types/player';
+import Player from 'video.js/dist/types/player';
 import 'videojs-flvjs';
 
 import {
@@ -474,6 +474,9 @@ function LivePageClient() {
   const [activeTab, setActiveTab] = useState<'channels' | 'sources'>(
     'channels',
   );
+  const [selectedChannels, setSelectedChannels] = useState<{
+    [category: string]: Record<string, unknown>;
+  }>({});
   const [selectedGroup, setSelectedGroup] = useState<string>('');
   const [playerFocused, setPlayerFocused] = useState(false);
   const [isSwitchingSource, setIsSwitchingSource] = useState(false);
@@ -559,10 +562,10 @@ function LivePageClient() {
     setActiveTab('channels');
   };
 
-  const handleChannelChange = (c: LiveChannel) => {
-    if (isSwitchingSource || c.id === currentChannel?.id) return;
-    setCurrentChannel(c);
-    scrollToChannel(c.id);
+  const handleChannelSelect = (channel: LiveChannel) => {
+    if (isSwitchingSource || channel.id === currentChannel?.id) return;
+    setCurrentChannel(channel);
+    scrollToChannel(channel.id);
   };
 
   const handleGroupChange = (g: string) => {
@@ -858,7 +861,7 @@ function LivePageClient() {
                   {groupKeys.map((g) => (
                     <button
                       key={g}
-                      ref={(el) => {
+                      ref={(el: HTMLButtonElement | null) => {
                         if (el) groupButtonRefs.current.set(g, el);
                         else groupButtonRefs.current.delete(g);
                       }}
@@ -891,7 +894,7 @@ function LivePageClient() {
                       <button
                         key={c.id}
                         data-channel-id={c.id}
-                        onClick={() => handleChannelChange(c)}
+                        onClick={() => handleChannelSelect(c)}
                         className={`w-full text-left p-2 rounded-lg flex items-center gap-3 transition-all ${c.id === currentChannel?.id ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 ring-1 ring-blue-200 dark:ring-blue-800' : 'hover:bg-gray-50 dark:hover:bg-gray-800'}`}
                       >
                         <div className='w-8 h-8 bg-gray-100 dark:bg-gray-800 rounded-md overflow-hidden shrink-0 flex items-center justify-center'>

@@ -17,6 +17,7 @@ ENV NPM_CONFIG_UPDATE_NOTIFIER=false
 ENV PNPM_DISABLE_SELF_UPDATE_CHECK=1
 RUN npm install -g pnpm@10.28.0
 COPY package.json pnpm-lock.yaml ./
+COPY patches ./patches
 
 # Aggressively clean any pre-existing artifacts just in case
 RUN rm -rf node_modules .next

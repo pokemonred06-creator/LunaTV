@@ -2,8 +2,8 @@
 
 'use client';
 
-import Hls from 'hls.js';
 import { Heart } from 'lucide-react';
+import dynamic from 'next/dynamic';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useRef, useState } from 'react';
 import Player from 'video.js/dist/types/player';
@@ -30,7 +30,10 @@ import { useLanguage } from '@/components/LanguageProvider';
 import PageLayout from '@/components/PageLayout';
 import { ScrollableDescription } from '@/components/ScrollableDescription';
 import { useSeasonalEffects } from '@/components/SeasonalEffectsProvider';
-import VideoJsPlayer from '@/components/VideoJsPlayer';
+
+const VideoJsPlayer = dynamic(() => import('@/components/VideoJsPlayer'), {
+  ssr: false,
+}) as any;
 
 // -----------------------------------------------------------------------------
 // 类型定义
@@ -114,29 +117,42 @@ function filterAdsFromM3U8(m3u8Content: string): string {
   return filteredLines.join('\n');
 }
 
-class CustomHlsJsLoader extends Hls.DefaultConfig.loader {
-  constructor(config: any) {
-    super(config);
-    const load = this.load.bind(this);
-    this.load = function (context: any, config: any, callbacks: any) {
-      if (
-        (context as any).type === 'manifest' ||
-        (context as any).type === 'level'
-      ) {
-        const onSuccess = callbacks.onSuccess;
-        callbacks.onSuccess = function (
-          response: any,
-          stats: any,
-          context: any,
+function createCustomHlsJsLoader(HlsClass: any) {
+  return class CustomHlsJsLoader extends HlsClass.DefaultConfig.loader {
+    constructor(config: any) {
+      super(config);
+      const load = this.load.bind(this);
+      this.load = function (context: any, config: any, callbacks: any) {
+        if (
+          (context as any).type === 'manifest' ||
+          (context as any).type === 'level'
         ) {
-          if (response.data && typeof response.data === 'string') {
-            response.data = filterAdsFromM3U8(response.data);
-          }
-          return onSuccess(response, stats, context, null);
-        };
-      }
-      load(context, config, callbacks);
-    };
+          const onSuccess = callbacks.onSuccess;
+          callbacks.onSuccess = function (
+            response: any,
+            stats: any,
+            context: any,
+          ) {
+            if (response.data && typeof response.data === 'string') {
+              response.data = filterAdsFromM3U8(response.data);
+            }
+            return onSuccess(response, stats, context, null);
+          };
+        }
+        load(context, config, callbacks);
+      };
+    }
+  };
+}
+
+function getOptimizationEnabledFromStorage(): boolean {
+  if (typeof window === 'undefined') return true;
+  const raw = localStorage.getItem('enableOptimization');
+  if (raw === null) return true;
+  try {
+    return Boolean(JSON.parse(raw));
+  } catch {
+    return true;
   }
 }
 
@@ -174,7 +190,9 @@ function PlayPageClient() {
   const [blockAdEnabled, setBlockAdEnabled] = useState<boolean>(true);
   const blockAdEnabledRef = useRef(blockAdEnabled);
 
-  const [optimizationEnabled, setOptimizationEnabled] = useState<boolean>(true);
+  const [optimizationEnabled, setOptimizationEnabled] = useState<boolean>(() =>
+    getOptimizationEnabledFromStorage(),
+  );
   const optimizationEnabledRef = useRef(optimizationEnabled);
 
   const [debugEnabled, setDebugEnabled] = useState(false);
@@ -221,7 +239,13 @@ function PlayPageClient() {
 
   const resumeTimeRef = useRef<number | null>(null);
   const lastSaveTimeRef = useRef<number>(0);
+  const saveErrorCountRef = useRef<number>(0);
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
+  const sourceFailCountRef = useRef<Record<string, number>>({});
+  const sourceFailoverLockRef = useRef(false);
+  const episodeProbeCacheRef = useRef<Record<string, boolean>>({});
+  const sourceScoreMapRef = useRef<Record<string, number>>({});
+  const sourceRankOrderRef = useRef<string[]>([]);
 
   // --- UI 状态 ---
   const [availableSources, setAvailableSources] = useState<SearchResult[]>([]);
@@ -281,10 +305,125 @@ function PlayPageClient() {
     if (!isVideoLoading) return;
     const timeoutId = setTimeout(() => {
       console.warn('Video loading timeout - clearing loading state');
-      setIsVideoLoading(false);
+
+      const episodeIdx = currentEpisodeIndexRef.current;
+      if (sourceFailoverLockRef.current) {
+        setIsVideoLoading(false);
+        return;
+      }
+
+      sourceFailoverLockRef.current = true;
+      void (async () => {
+        const pickCandidates = (sources: SearchResult[]) =>
+          sources.filter((s) => {
+            if (
+              s.source === currentSourceRef.current &&
+              s.id === currentIdRef.current
+            )
+              return false;
+            if (!s.episodes || episodeIdx >= s.episodes.length) return false;
+            const candidateKey = `${s.source}|${s.id}|${episodeIdx}`;
+            return (sourceFailCountRef.current[candidateKey] || 0) < 2;
+          });
+
+        let candidates = pickCandidates(availableSources);
+        if (candidates.length === 0) {
+          const query = (
+            searchTitleRef.current ||
+            videoTitleRef.current ||
+            ''
+          ).trim();
+          if (query) {
+            try {
+              const res = await fetch(
+                `/api/search?q=${encodeURIComponent(query)}`,
+                {
+                  cache: 'no-store',
+                },
+              );
+              if (res.ok) {
+                const data = (await res.json()) as { results?: SearchResult[] };
+                const rawResults = Array.isArray(data.results)
+                  ? data.results
+                  : [];
+                const normalizedTitle = videoTitleRef.current
+                  ?.replaceAll(' ', '')
+                  .toLowerCase();
+                const normalizedSearchTitle = searchTitleRef.current
+                  ?.replaceAll(' ', '')
+                  .toLowerCase();
+                const normalizedYear = (videoYearRef.current || '')
+                  .trim()
+                  .toLowerCase();
+                const refreshedResults = rawResults.filter((result) => {
+                  const normalizedResultTitle = result.title
+                    .replaceAll(' ', '')
+                    .toLowerCase();
+                  const titleOk =
+                    !normalizedTitle ||
+                    normalizedResultTitle === normalizedTitle ||
+                    (!!normalizedSearchTitle &&
+                      normalizedResultTitle === normalizedSearchTitle);
+                  const yearOk = normalizedYear
+                    ? result.year.toLowerCase() === normalizedYear
+                    : true;
+                  const typeOk =
+                    searchType === 'tv'
+                      ? result.episodes.length > 1
+                      : searchType === 'movie'
+                        ? result.episodes.length === 1
+                        : true;
+                  return titleOk && yearOk && typeOk;
+                });
+
+                if (refreshedResults.length > 0) {
+                  setAvailableSources(refreshedResults);
+                  candidates = pickCandidates(refreshedResults);
+                }
+              }
+            } catch {
+              // Ignore search refresh errors and continue with current candidates.
+            }
+          }
+        }
+
+        if (candidates.length === 0) {
+          setIsVideoLoading(false);
+          return;
+        }
+
+        const rankedCandidates = sortSourcesByScore(candidates);
+        for (const candidate of rankedCandidates) {
+          const candidateEpisode = candidate.episodes?.[episodeIdx] || '';
+          const ok = await probeEpisodePlayable(
+            candidateEpisode,
+            candidate.source,
+            candidate.id,
+          );
+          if (!ok) continue;
+          await handleSourceChange(
+            candidate.source,
+            candidate.id,
+            candidate.title,
+          );
+          return;
+        }
+
+        setIsVideoLoading(false);
+      })().finally(() => {
+        setTimeout(() => {
+          sourceFailoverLockRef.current = false;
+        }, 1000);
+      });
     }, 15000);
     return () => clearTimeout(timeoutId);
-  }, [isVideoLoading, currentEpisodeIndex, videoUrl]);
+  }, [
+    isVideoLoading,
+    currentEpisodeIndex,
+    videoUrl,
+    availableSources,
+    searchType,
+  ]);
 
   // --- Effects: 初始化配置 ---
   useEffect(() => {
@@ -376,7 +515,7 @@ function PlayPageClient() {
   // --- Effect: Sync Background for Seasonal Effects ---
   useEffect(() => {
     if (videoCover) {
-      setBackgroundImage(videoCover);
+      setBackgroundImage(processImageUrl(videoCover));
     }
     return () => {
       setBackgroundImage(null);
@@ -436,6 +575,80 @@ function PlayPageClient() {
     return Math.round(score * 100) / 100;
   };
 
+  const parseSpeedToKBps = (speedStr: string): number => {
+    if (speedStr === '未知' || speedStr === '测量中...') return 0;
+    const match = speedStr.match(/^([\d.]+)\s*(KB\/s|MB\/s)$/);
+    if (!match) return 0;
+    const value = parseFloat(match[1]);
+    if (!Number.isFinite(value) || value <= 0) return 0;
+    return match[2] === 'MB/s' ? value * 1024 : value;
+  };
+
+  const rankSourceResults = (
+    results: Array<{
+      source: SearchResult;
+      testResult: { quality: string; loadSpeed: string; pingTime: number };
+    }>,
+  ) => {
+    if (results.length === 0) return [];
+
+    const validSpeeds = results
+      .map((result) => parseSpeedToKBps(result.testResult.loadSpeed))
+      .filter((speed) => speed > 0);
+    const maxSpeed = validSpeeds.length > 0 ? Math.max(...validSpeeds) : 1024;
+
+    const validPings = results
+      .map((result) => result.testResult.pingTime)
+      .filter((ping) => ping > 0);
+    const minPing = validPings.length > 0 ? Math.min(...validPings) : 50;
+    const maxPing = validPings.length > 0 ? Math.max(...validPings) : 1000;
+
+    const ranked = results.map((result) => ({
+      ...result,
+      score: calculateSourceScore(
+        result.testResult,
+        maxSpeed,
+        minPing,
+        maxPing,
+      ),
+    }));
+
+    ranked.sort((a, b) => b.score - a.score);
+    return ranked;
+  };
+
+  const sortSourcesByScore = (sources: SearchResult[]): SearchResult[] => {
+    if (sources.length <= 1) return sources;
+
+    const scoreMap = sourceScoreMapRef.current;
+    const rankOrder = sourceRankOrderRef.current;
+    const rankIndexMap = new Map(rankOrder.map((k, i) => [k, i]));
+
+    return [...sources].sort((a, b) => {
+      const aKey = `${a.source}-${a.id}`;
+      const bKey = `${b.source}-${b.id}`;
+
+      const aScoreRaw = scoreMap[aKey];
+      const bScoreRaw = scoreMap[bKey];
+      const aHasScore = Number.isFinite(aScoreRaw);
+      const bHasScore = Number.isFinite(bScoreRaw);
+      const aScore = aHasScore ? Number(aScoreRaw) : 0;
+      const bScore = bHasScore ? Number(bScoreRaw) : 0;
+
+      if (aHasScore && bHasScore && aScore !== bScore) return bScore - aScore;
+      if (aHasScore !== bHasScore) return aHasScore ? -1 : 1;
+
+      const aRank = rankIndexMap.get(aKey);
+      const bRank = rankIndexMap.get(bKey);
+      const aHasRank = typeof aRank === 'number';
+      const bHasRank = typeof bRank === 'number';
+      if (aHasRank && bHasRank && aRank !== bRank) return aRank - bRank;
+      if (aHasRank !== bHasRank) return aHasRank ? -1 : 1;
+
+      return 0;
+    });
+  };
+
   const preferBestSource = async (
     sources: SearchResult[],
     signal?: AbortSignal,
@@ -443,7 +656,9 @@ function PlayPageClient() {
     if (sources.length === 1) return sources[0];
     if (signal?.aborted) return sources[0];
 
-    const MAX_CONCURRENT = 12;
+    const MAX_CONCURRENT = 3;
+    const MAX_TEST_SOURCES = 6;
+    const candidates = sources.slice(0, MAX_TEST_SOURCES);
 
     type TestResult =
       | {
@@ -461,8 +676,14 @@ function PlayPageClient() {
           console.warn(`播放源 ${source.source_name} 没有可用的播放地址`);
           return { status: 'error', source };
         }
-        const episodeUrl =
-          source.episodes.length > 1 ? source.episodes[1] : source.episodes[0];
+        const episodeIdx = Math.max(
+          0,
+          Math.min(
+            currentEpisodeIndexRef.current || 0,
+            source.episodes.length - 1,
+          ),
+        );
+        const episodeUrl = source.episodes[episodeIdx] || source.episodes[0];
 
         const testResult = await getVideoResolutionFromM3u8(episodeUrl, {
           signal,
@@ -498,7 +719,7 @@ function PlayPageClient() {
       return results;
     };
 
-    const taskList = sources.map((source) => () => testSource(source));
+    const taskList = candidates.map((source) => () => testSource(source));
     const allResults = await runWithConcurrencyLimit(taskList, MAX_CONCURRENT);
 
     if (!signal?.aborted) {
@@ -540,41 +761,21 @@ function PlayPageClient() {
 
     if (successfulResults.length === 0) {
       console.warn('所有播放源测速都失败，使用第一个播放源');
+      sourceScoreMapRef.current = {};
+      sourceRankOrderRef.current = [];
       return sources[0];
     }
 
-    const validSpeeds = successfulResults
-      .map((result) => {
-        const speedStr = result.testResult.loadSpeed;
-        if (speedStr === '未知' || speedStr === '测量中...') return 0;
-        const match = speedStr.match(/^([\d.]+)\s*(KB\/s|MB\/s)$/);
-        if (!match) return 0;
-        const value = parseFloat(match[1]);
-        const unit = match[2];
-        return unit === 'MB/s' ? value * 1024 : value;
-      })
-      .filter((speed) => speed > 0);
-
-    const maxSpeed = validSpeeds.length > 0 ? Math.max(...validSpeeds) : 1024;
-
-    const validPings = successfulResults
-      .map((result) => result.testResult.pingTime)
-      .filter((ping) => ping > 0);
-
-    const minPing = validPings.length > 0 ? Math.min(...validPings) : 50;
-    const maxPing = validPings.length > 0 ? Math.max(...validPings) : 1000;
-
-    const resultsWithScore = successfulResults.map((result) => ({
-      ...result,
-      score: calculateSourceScore(
-        result.testResult,
-        maxSpeed,
-        minPing,
-        maxPing,
-      ),
-    }));
-
-    resultsWithScore.sort((a, b) => b.score - a.score);
+    const resultsWithScore = rankSourceResults(successfulResults);
+    sourceScoreMapRef.current = Object.fromEntries(
+      resultsWithScore.map((result) => [
+        `${result.source.source}-${result.source.id}`,
+        result.score,
+      ]),
+    );
+    sourceRankOrderRef.current = resultsWithScore.map(
+      (result) => `${result.source.source}-${result.source.id}`,
+    );
 
     if (process.env.NODE_ENV !== 'production') {
       console.log('播放源评分排序结果:');
@@ -585,7 +786,7 @@ function PlayPageClient() {
       });
     }
 
-    return resultsWithScore[0]?.source || sources[0];
+    return resultsWithScore[0]?.source || candidates[0] || sources[0];
   };
 
   useEffect(() => {
@@ -652,18 +853,37 @@ function PlayPageClient() {
 
     const initAll = async () => {
       try {
-        const isSameContext =
-          detailRef.current &&
-          detailRef.current.id === snap.currentId &&
-          detailRef.current.source === snap.currentSource &&
-          (!snap.videoYear ||
-            (detailRef.current.year || '').trim().toLowerCase() ===
-              snap.videoYear.trim().toLowerCase());
+        sourceScoreMapRef.current = {};
+        sourceRankOrderRef.current = [];
 
-        if (isSameContext) {
-          setLoading(false);
-          return;
-        }
+        const probeEpisodePlayableInInit = async (
+          episodeUrl: string,
+          sourceId: string,
+        ): Promise<boolean> => {
+          if (!episodeUrl) return false;
+          try {
+            const probeUrl = /^https?:\/\//i.test(episodeUrl)
+              ? `/api/proxy/m3u8?url=${encodeURIComponent(episodeUrl)}&moontv-source=${encodeURIComponent(sourceId || 'global')}`
+              : episodeUrl;
+            const controller = new AbortController();
+            const timeoutId = window.setTimeout(() => controller.abort(), 6000);
+            const res = await fetch(probeUrl, {
+              cache: 'no-store',
+              signal: controller.signal,
+            });
+            clearTimeout(timeoutId);
+            if (!res.ok) return false;
+            const ct = (res.headers.get('content-type') || '').toLowerCase();
+            const text = await res.text();
+            return (
+              ct.includes('mpegurl') ||
+              text.includes('#EXTM3U') ||
+              text.includes('#EXTINF')
+            );
+          } catch {
+            return false;
+          }
+        };
 
         if (
           !snap.currentSource &&
@@ -730,12 +950,54 @@ function PlayPageClient() {
         }
 
         if (
-          (!snap.currentSource || !snap.currentId || needPreferRef.current) &&
+          sourcesInfo.length > 1 &&
+          needPreferRef.current &&
           optimizationEnabledRef.current
         ) {
           setLoadingStage('preferring');
           setLoadingMessage('⚡ 正在优选最佳播放源...');
           detailData = await preferBestSource(sourcesInfo, ac.signal);
+        }
+
+        const preferredEpisodeIndex = Math.max(
+          0,
+          Math.min(
+            currentEpisodeIndexRef.current || 0,
+            (detailData.episodes?.length || 1) - 1,
+          ),
+        );
+        const primaryEpisodeUrl =
+          detailData.episodes?.[preferredEpisodeIndex] || '';
+        const primaryPlayable = await probeEpisodePlayableInInit(
+          primaryEpisodeUrl,
+          detailData.id,
+        );
+        if (!primaryPlayable) {
+          const rankedFallbackSources = sortSourcesByScore(sourcesInfo);
+          for (const source of rankedFallbackSources) {
+            if (
+              source.source === detailData.source &&
+              source.id === detailData.id
+            )
+              continue;
+            const idx = Math.max(
+              0,
+              Math.min(
+                preferredEpisodeIndex,
+                (source.episodes?.length || 1) - 1,
+              ),
+            );
+            const candidateEpisode = source.episodes?.[idx] || '';
+            if (!candidateEpisode) continue;
+            const ok = await probeEpisodePlayableInInit(
+              candidateEpisode,
+              source.id,
+            );
+            if (ok) {
+              detailData = source;
+              break;
+            }
+          }
         }
 
         if (!isMounted || ac.signal.aborted) return;
@@ -826,6 +1088,10 @@ function PlayPageClient() {
   }, [currentSource, currentId]);
 
   useEffect(() => {
+    sourceFailoverLockRef.current = false;
+  }, [currentSource, currentId, currentEpisodeIndex]);
+
+  useEffect(() => {
     const initSkipConfig = async () => {
       if (!currentSource || !currentId) return;
       try {
@@ -870,10 +1136,22 @@ function PlayPageClient() {
     )
       return;
 
-    const currentTime = player.currentTime();
-    const duration = player.duration();
+    const ct = player.currentTime();
+    const dur = player.duration();
 
-    if (!currentTime || currentTime < 1 || !duration) return;
+    // Explicit check for NaN/Invalid values and Narrow types
+    if (
+      typeof ct !== 'number' ||
+      !Number.isFinite(ct) ||
+      ct < 1 ||
+      typeof dur !== 'number' ||
+      !Number.isFinite(dur) ||
+      dur <= 0
+    )
+      return;
+
+    const currentTime: number = ct;
+    const duration: number = dur;
 
     try {
       await savePlayRecord(currentSourceRef.current, currentIdRef.current, {
@@ -891,8 +1169,15 @@ function PlayPageClient() {
         desc: videoDesc,
       });
       lastSaveTimeRef.current = Date.now();
+      saveErrorCountRef.current = 0; // Reset error count on success
     } catch (err) {
-      console.error('保存进度失败:', err);
+      saveErrorCountRef.current++;
+      // Only log errors sparingly to prevent console flooding
+      if (saveErrorCountRef.current <= 3) {
+        console.error('保存进度失败:', err);
+      }
+      // Still update lastSaveTime to honor the interval even on failure
+      lastSaveTimeRef.current = Date.now();
     }
   };
 
@@ -1000,6 +1285,9 @@ function PlayPageClient() {
       newUrl.searchParams.set('year', newDetail.year);
       window.history.replaceState({}, '', newUrl.toString());
 
+      // Bypass the full initialization since we are manually selecting the source
+      lastInitKeyRef.current = `${newSource}::${newId}::${searchTitleRef.current}::${newDetail.title || newTitle}::${searchType}::${newDetail.year}`;
+
       setVideoTitle(newDetail.title || newTitle);
       setVideoYear(newDetail.year);
       setVideoCover(newDetail.poster);
@@ -1012,6 +1300,46 @@ function PlayPageClient() {
     } catch (err) {
       setIsVideoLoading(false);
       setError(err instanceof Error ? err.message : '换源失败');
+    }
+  };
+
+  const probeEpisodePlayable = async (
+    episodeUrl: string,
+    source: string,
+    id: string,
+  ): Promise<boolean> => {
+    if (!episodeUrl) return false;
+    const cacheKey = `${source}|${id}|${episodeUrl}`;
+    if (cacheKey in episodeProbeCacheRef.current) {
+      return episodeProbeCacheRef.current[cacheKey];
+    }
+
+    try {
+      const probeUrl = /^https?:\/\//i.test(episodeUrl)
+        ? `/api/proxy/m3u8?url=${encodeURIComponent(episodeUrl)}&moontv-source=${encodeURIComponent(id || 'global')}`
+        : episodeUrl;
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(() => controller.abort(), 7000);
+      const res = await fetch(probeUrl, {
+        cache: 'no-store',
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      if (!res.ok) {
+        episodeProbeCacheRef.current[cacheKey] = false;
+        return false;
+      }
+      const ct = (res.headers.get('content-type') || '').toLowerCase();
+      const text = await res.text();
+      const playable =
+        ct.includes('mpegurl') ||
+        text.includes('#EXTM3U') ||
+        text.includes('#EXTINF');
+      episodeProbeCacheRef.current[cacheKey] = playable;
+      return playable;
+    } catch {
+      episodeProbeCacheRef.current[cacheKey] = false;
+      return false;
     }
   };
 
@@ -1337,21 +1665,151 @@ function PlayPageClient() {
                   <VideoJsPlayer
                     debug={debugEnabled}
                     url={videoUrl}
-                    poster={videoCover}
+                    poster={processImageUrl(videoCover)}
                     autoPlay={true}
                     onReady={handlePlayerReady}
                     onTimeUpdate={handleTimeUpdate}
                     onEnded={handleEnded}
                     onPlay={() => setIsVideoLoading(false)}
-                    onError={(err) => {
-                      console.error('Player error:', err);
+                    onError={(err: any) => {
+                      if (process.env.NODE_ENV !== 'production') {
+                        console.error('播放器报错:', err);
+                      }
+                      // The original logic for error handling and failover
                       setIsVideoLoading(false);
+                      const code =
+                        typeof err === 'object' && err !== null
+                          ? Number(
+                              (err as any).code ??
+                                (err as any).raw?.code ??
+                                (err as any).responseCode,
+                            )
+                          : NaN;
+                      const message =
+                        typeof err === 'object' && err !== null
+                          ? String(
+                              (err as any).message ||
+                                (err as any).details ||
+                                (err as any).responseText ||
+                                '',
+                            )
+                          : '';
+
+                      const retryableByCode = [2, 3, 4].includes(code);
+                      const retryableByMessage =
+                        /network|manifest|frag|timeout|forbidden|403|500|502|source/i.test(
+                          message.toLowerCase(),
+                        );
+                      if (!retryableByCode && !retryableByMessage) return;
+
+                      const episodeIdx = currentEpisodeIndex;
+                      const failKey = `${currentSource}|${currentId}|${episodeIdx}`;
+                      const nextCount =
+                        (sourceFailCountRef.current[failKey] || 0) + 1;
+                      sourceFailCountRef.current[failKey] = nextCount;
+
+                      // Trigger source failover as soon as we see a retryable error.
+                      if (nextCount < 1) return;
+                      if (sourceFailoverLockRef.current) return;
+                      sourceFailoverLockRef.current = true;
+                      void (async () => {
+                        const pickCandidates = (sources: SearchResult[]) =>
+                          sources.filter((s) => {
+                            if (
+                              s.source === currentSource &&
+                              s.id === currentId
+                            )
+                              return false;
+                            if (!s.episodes || episodeIdx >= s.episodes.length)
+                              return false;
+                            const candidateKey = `${s.source}|${s.id}|${episodeIdx}`;
+                            return (
+                              (sourceFailCountRef.current[candidateKey] || 0) <
+                              2
+                            );
+                          });
+
+                        let candidates = pickCandidates(availableSources);
+                        if (candidates.length === 0) {
+                          const query = (
+                            searchTitleRef.current ||
+                            videoTitleRef.current ||
+                            ''
+                          ).trim();
+                          if (query) {
+                            try {
+                              const res = await fetch(
+                                `/api/search?q=${encodeURIComponent(query)}`,
+                                { cache: 'no-store' },
+                              );
+                              if (res.ok) {
+                                const data = (await res.json()) as {
+                                  results?: SearchResult[];
+                                };
+                                const refreshedResults = Array.isArray(
+                                  data.results,
+                                )
+                                  ? data.results
+                                  : [];
+                                if (refreshedResults.length > 0) {
+                                  setAvailableSources(refreshedResults);
+                                  candidates = pickCandidates(refreshedResults);
+                                }
+                              }
+                            } catch {
+                              // Ignore refresh errors and continue.
+                            }
+                          }
+                        }
+
+                        if (candidates.length === 0) {
+                          setError(
+                            convert(
+                              '当前集所有播放源都不可用，请切换剧集或稍后重试',
+                            ),
+                          );
+                          setVideoUrl('');
+                          setIsVideoLoading(false);
+                          return;
+                        }
+
+                        const rankedCandidates = sortSourcesByScore(candidates);
+                        for (const candidate of rankedCandidates) {
+                          const candidateEpisode =
+                            candidate.episodes?.[episodeIdx] || '';
+                          const ok = await probeEpisodePlayable(
+                            candidateEpisode,
+                            candidate.source,
+                            candidate.id,
+                          );
+                          if (!ok) continue;
+
+                          await handleSourceChange(
+                            candidate.source,
+                            candidate.id,
+                            candidate.title,
+                          );
+                          return;
+                        }
+
+                        setError(
+                          convert(
+                            '当前集所有播放源都不可用，请切换剧集或稍后重试',
+                          ),
+                        );
+                        setVideoUrl('');
+                        setIsVideoLoading(false);
+                      })().finally(() => {
+                        setTimeout(() => {
+                          sourceFailoverLockRef.current = false;
+                        }, 1000);
+                      });
                     }}
                     enableSkip={skipConfigRef.current.enable}
                     skipIntroTime={skipConfigRef.current.intro_time}
                     skipOutroTime={skipConfigRef.current.outro_time}
-                    customHlsLoader={
-                      blockAdEnabled ? CustomHlsJsLoader : undefined
+                    customHlsLoaderFactory={
+                      blockAdEnabled ? createCustomHlsJsLoader : undefined
                     }
                     onNextEpisode={handleNextEpisode}
                     hasNextEpisode={currentEpisodeIndex < totalEpisodes - 1}

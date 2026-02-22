@@ -371,7 +371,7 @@ export class UpstashRedisStorage
       console.log('所有数据已清空');
     } catch (error) {
       console.error('清空数据失败:', error);
-      throw new Error('清空数据失败');
+      throw new Error('清空数据失败', { cause: error });
     }
   }
 
