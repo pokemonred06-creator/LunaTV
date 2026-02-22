@@ -300,17 +300,16 @@ function PlayPageClient() {
     videoYear,
   ]);
 
-  // --- Effect: Loading Timeout (15s fallback) ---
+  // --- Effect: Loading Timeout (Event Driven) ---
   useEffect(() => {
-    if (!isVideoLoading) return;
-    const timeoutId = setTimeout(() => {
+    if (!isVideoLoading || !videoUrl) return;
+
+    let timeoutId: number | null = window.setTimeout(() => {
       console.warn('Video loading timeout - clearing loading state');
+      setIsVideoLoading(false);
 
       const episodeIdx = currentEpisodeIndexRef.current;
-      if (sourceFailoverLockRef.current) {
-        setIsVideoLoading(false);
-        return;
-      }
+      if (sourceFailoverLockRef.current) return;
 
       sourceFailoverLockRef.current = true;
       void (async () => {
@@ -337,9 +336,7 @@ function PlayPageClient() {
             try {
               const res = await fetch(
                 `/api/search?q=${encodeURIComponent(query)}`,
-                {
-                  cache: 'no-store',
-                },
+                { cache: 'no-store' },
               );
               if (res.ok) {
                 const data = (await res.json()) as { results?: SearchResult[] };
@@ -355,6 +352,7 @@ function PlayPageClient() {
                 const normalizedYear = (videoYearRef.current || '')
                   .trim()
                   .toLowerCase();
+
                 const refreshedResults = rawResults.filter((result) => {
                   const normalizedResultTitle = result.title
                     .replaceAll(' ', '')
@@ -376,15 +374,12 @@ function PlayPageClient() {
                 }
               }
             } catch {
-              // Ignore search refresh errors and continue with current candidates.
+              // Ignore refresh errors
             }
           }
         }
 
-        if (candidates.length === 0) {
-          setIsVideoLoading(false);
-          return;
-        }
+        if (candidates.length === 0) return;
 
         const rankedCandidates = sortSourcesByScore(candidates);
         for (const candidate of rankedCandidates) {
@@ -402,15 +397,43 @@ function PlayPageClient() {
           );
           return;
         }
-
-        setIsVideoLoading(false);
       })().finally(() => {
         setTimeout(() => {
           sourceFailoverLockRef.current = false;
         }, 1000);
       });
     }, 15000);
-    return () => clearTimeout(timeoutId);
+
+    const onSuccess = () => {
+      if (timeoutId) window.clearTimeout(timeoutId);
+      timeoutId = null;
+      setIsVideoLoading(false);
+    };
+
+    const onFail = () => {
+      if (timeoutId) window.clearTimeout(timeoutId);
+      timeoutId = null;
+      setIsVideoLoading(false);
+    };
+
+    const vDoc = document.querySelector('video');
+    if (vDoc) {
+      vDoc.addEventListener('loadedmetadata', onSuccess);
+      vDoc.addEventListener('canplay', onSuccess);
+      vDoc.addEventListener('error', onFail);
+      vDoc.addEventListener('stalled', () => {
+        console.warn('video stalled');
+      });
+    }
+
+    return () => {
+      if (timeoutId) window.clearTimeout(timeoutId);
+      if (vDoc) {
+        vDoc.removeEventListener('loadedmetadata', onSuccess);
+        vDoc.removeEventListener('canplay', onSuccess);
+        vDoc.removeEventListener('error', onFail);
+      }
+    };
   }, [
     isVideoLoading,
     currentEpisodeIndex,

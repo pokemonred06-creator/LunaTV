@@ -504,7 +504,9 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
               className={origin === 'live' ? 'object-contain' : 'object-cover'}
               referrerPolicy='no-referrer'
               loading='lazy'
-              onLoadingComplete={() => setImageLoaded(true)}
+              onLoad={(e) => {
+                setImageLoaded(true);
+              }}
               onError={(e) => {
                 const img = e.target as HTMLImageElement;
                 if (!img.dataset.retried) {
