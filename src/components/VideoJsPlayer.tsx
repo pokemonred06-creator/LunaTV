@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
 
-import type Hls from 'hls.js';
+import Hls from 'hls.js';
 type HlsType = any;
 
 declare global {
@@ -1043,15 +1043,15 @@ export default function VideoJsPlayer({
         return;
       }
 
-      if (window.Hls?.isSupported()) {
+      if (Hls.isSupported()) {
         if (hlsRef.current) hlsRef.current.destroy();
-        const HlsClass = hlsRef.current?.constructor as HlsType;
-        const hls = new (HlsClass || window.Hls)({
+        const HlsClass = Hls as any;
+        const hls = new HlsClass({
           enableWorker: true,
           lowLatencyMode: isLive,
           loader: customHlsLoaderFactory
-            ? customHlsLoaderFactory(HlsClass || window.Hls)
-            : (HlsClass || window.Hls)?.DefaultConfig?.loader,
+            ? customHlsLoaderFactory(HlsClass)
+            : HlsClass.DefaultConfig?.loader,
           xhrSetup: (xhr: any) => {
             xhr.withCredentials = false;
           },
@@ -1061,7 +1061,7 @@ export default function VideoJsPlayer({
         hls.attachMedia(videoEl);
         // Ensure no native controls interfere
         videoEl.controls = false;
-        hls.on(window.Hls.Events.MANIFEST_PARSED, () => {
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
           if (configRef.current.autoPlay) tryPlayNow();
         });
 
