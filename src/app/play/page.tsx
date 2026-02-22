@@ -367,13 +367,7 @@ function PlayPageClient() {
                   const yearOk = normalizedYear
                     ? result.year.toLowerCase() === normalizedYear
                     : true;
-                  const typeOk =
-                    searchType === 'tv'
-                      ? result.episodes.length > 1
-                      : searchType === 'movie'
-                        ? result.episodes.length === 1
-                        : true;
-                  return titleOk && yearOk && typeOk;
+                  return titleOk && yearOk;
                 });
 
                 if (refreshedResults.length > 0) {
@@ -826,10 +820,6 @@ function PlayPageClient() {
             snap.videoTitle.replaceAll(' ', '').toLowerCase() &&
           (snap.videoYear
             ? result.year.toLowerCase() === snap.videoYear.toLowerCase()
-            : true) &&
-          (snap.searchType
-            ? (snap.searchType === 'tv' && result.episodes.length > 1) ||
-              (snap.searchType === 'movie' && result.episodes.length === 1)
             : true),
       );
       setAvailableSources(results);
