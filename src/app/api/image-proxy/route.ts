@@ -113,12 +113,18 @@ export async function GET(request: NextRequest) {
 
     try {
       const cfg = await getConfig();
-      const proxyType = cfg?.SiteConfig?.DoubanImageProxyType;
+      const proxyType =
+        cfg?.SiteConfig?.DoubanImageProxyType || 'cmliussss-cdn-tencent';
       const proxyBase = cfg?.SiteConfig?.DoubanImageProxy;
 
       if (proxyType === 'custom' && proxyBase) {
         // proxyBase is expected to be a prefix like "https://example.com/?url=".
         targetUrl = `${proxyBase}${encodeURIComponent(targetUrl)}`;
+      } else if (proxyType && proxyType.startsWith('cmliussss')) {
+        targetUrl = targetUrl.replace(
+          /img\d+\.doubanio\.com/g,
+          'img.doubanio.cmliussss.net',
+        );
       }
     } catch {
       // Ignore config load errors and use original douban URL with referer.
