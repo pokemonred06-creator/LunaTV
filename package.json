@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "pnpm gen:manifest && next dev -H 0.0.0.0",
+    "dev": "pnpm gen:manifest && next dev -H 0.0.0.0 --webpack",
     "build": "pnpm gen:manifest && next build --webpack",
     "start": "next start",
     "lint": "eslint .",
