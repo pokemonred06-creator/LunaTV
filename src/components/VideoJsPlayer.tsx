@@ -570,6 +570,7 @@ const useCasShader = (
         pointerEvents: 'none',
         zIndex: 2,
         objectFit: 'contain',
+        transition: 'none',
       });
       tech.parentElement.insertBefore(canvas, tech.nextSibling);
       canvasRef.current = canvas;
@@ -638,16 +639,35 @@ const useCasShader = (
       tech.dataset.casOwner = ownerRef.current;
       let first = true;
 
+      let inLoop = false;
       const loop = () => {
+        inLoop = false;
         if (!tech.isConnected || !canvas.isConnected) {
           cleanup();
           return;
         }
-        // Skip frame if video has no data yet (prevents WebGL INVALID_VALUE: no video)
-        if (tech.readyState < 2 || tech.videoWidth === 0) {
-          rafRef.current = requestAnimationFrame(loop);
+
+        // Schedule next frame
+        const scheduleNext = () => {
+          if (inLoop) return;
+          inLoop = true;
+          if ('requestVideoFrameCallback' in tech) {
+            (tech as any).requestVideoFrameCallback(loop);
+          } else {
+            rafRef.current = requestAnimationFrame(loop);
+          }
+        };
+
+        // Skip frame if video has no data yet
+        if (
+          tech.readyState < 2 ||
+          tech.videoWidth === 0 ||
+          tech.videoHeight === 0
+        ) {
+          scheduleNext();
           return;
         }
+
         if (
           canvas.width !== tech.videoWidth ||
           canvas.height !== tech.videoHeight
@@ -656,6 +676,7 @@ const useCasShader = (
           canvas.height = tech.videoHeight;
           gl.viewport(0, 0, canvas.width, canvas.height);
         }
+
         try {
           gl.texImage2D(
             gl.TEXTURE_2D,
@@ -672,14 +693,19 @@ const useCasShader = (
           if (uR) gl.uniform2f(uR, canvas.width, canvas.height);
           if (uS) gl.uniform1f(uS, 0.6);
           gl.drawArrays(gl.TRIANGLES, 0, 6);
-          rafRef.current = requestAnimationFrame(loop);
+          scheduleNext();
         } catch {
           failuresRef.current++;
           cleanup();
           if (failuresRef.current > 3) disableCas();
         }
       };
-      loop();
+
+      if ('requestVideoFrameCallback' in tech) {
+        (tech as any).requestVideoFrameCallback(loop);
+      } else {
+        loop();
+      }
     } catch (e) {
       console.warn('[CAS] Shader initialization failed:', e);
       cleanup();
@@ -1001,6 +1027,15 @@ export default function VideoJsPlayer({
     controlsVisibleRef,
     isRotatedRef,
   );
+  const disableCas = useCallback(() => {
+    setCasEnabled(false);
+    try {
+      localStorage.setItem('lunatv_cas_enabled', 'false');
+    } catch {
+      /* empty */
+    }
+  }, []);
+
   useCasShader(
     playerReady,
     casEnabled,
@@ -1008,14 +1043,7 @@ export default function VideoJsPlayer({
     isPiPActive,
     debug,
     techEpoch,
-    () => {
-      setCasEnabled(false);
-      try {
-        localStorage.setItem('lunatv_cas_enabled', 'false');
-      } catch {
-        /* empty */
-      }
-    },
+    disableCas,
   );
 
   const finalUrl = useMemo(() => {
@@ -1379,12 +1407,17 @@ export default function VideoJsPlayer({
       if (player) {
         try {
           if (!player.paused()) player.pause();
+          player.muted(true); // Ensure audio is cut
           player.src(''); // Clear source to release decoder
           player.load(); // Force unload
         } catch {
           /* ignore */
         }
         player.dispose();
+      }
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
       }
       playerRef.current = null;
       document.removeEventListener('fullscreenchange', handleFullscreenChange);

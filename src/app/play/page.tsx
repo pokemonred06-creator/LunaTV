@@ -883,57 +883,57 @@ function PlayPageClient() {
         }
 
         setError(null);
-        setLoading(true);
-        setLoadingStage(
-          snap.currentSource && snap.currentId ? 'fetching' : 'searching',
-        );
-        setLoadingMessage(
-          snap.currentSource && snap.currentId
-            ? '🎬 正在获取视频详情...'
-            : '🔍 正在搜索播放源...',
-        );
+        // --- NEW: Fast-Path Initialization Strategy ---
+        let sourcesInfo: SearchResult[] = [];
+        let detailData: SearchResult | null = null;
+        const targetSource = snap.currentSource;
+        const targetId = snap.currentId;
 
-        let sourcesInfo = await fetchSourcesData(
-          snap.searchTitle || snap.videoTitle,
-        );
+        if (targetSource && targetId && !needPreferRef.current) {
+          // 1. FAST PATH: We already know exactly what we want to play.
+          setLoadingStage('fetching');
+          setLoadingMessage('🎬 正在获取视频详情...');
 
-        if (
-          snap.currentSource &&
-          snap.currentId &&
-          !sourcesInfo.some(
-            (s) => s.source === snap.currentSource && s.id === snap.currentId,
-          )
-        ) {
-          sourcesInfo = await fetchSourceDetail(
-            snap.currentSource,
-            snap.currentId,
+          sourcesInfo = await fetchSourceDetail(targetSource, targetId);
+          if (sourcesInfo.length > 0) {
+            detailData = sourcesInfo[0];
+
+            // Spin off the heavy global search into the background silently
+            // to populate the right-side panel without blocking video playback.
+            if (snap.searchTitle || snap.videoTitle) {
+              fetchSourcesData(snap.searchTitle || snap.videoTitle).catch(
+                () => {
+                  // Ignore background search failures
+                },
+              );
+            }
+          }
+        } else {
+          // 2. SLOW PATH: We need to search all 12+ sites and auto-pick the best one.
+          setLoadingStage('searching');
+          setLoadingMessage('🔍 正在搜索播放源...');
+
+          sourcesInfo = await fetchSourcesData(
+            snap.searchTitle || snap.videoTitle,
           );
+
+          if (sourcesInfo.length > 0) {
+            detailData = sourcesInfo[0];
+          }
         }
 
-        if (sourcesInfo.length === 0) {
+        if (sourcesInfo.length === 0 || !detailData) {
           setError('未找到匹配结果');
           setLoading(false);
           return;
         }
 
-        // --- NEW: Set videoDesc early to show it during the "Preferring" phase ---
-        if (sourcesInfo[0].desc && !videoDesc) {
-          setVideoDesc(sourcesInfo[0].desc);
+        // --- Set videoDesc early to show it during the "Preferring" phase ---
+        if (detailData.desc && !videoDesc) {
+          setVideoDesc(detailData.desc);
         }
 
-        let detailData: SearchResult = sourcesInfo[0];
-
-        if (snap.currentSource && snap.currentId && !needPreferRef.current) {
-          const target = sourcesInfo.find(
-            (s) => s.source === snap.currentSource && s.id === snap.currentId,
-          );
-          if (!target) {
-            setError('未找到匹配结果');
-            setLoading(false);
-            return;
-          }
-          detailData = target;
-        }
+        // (Removed old target fallback block since we handle it in Fast Path now)
 
         if (
           sourcesInfo.length > 1 &&

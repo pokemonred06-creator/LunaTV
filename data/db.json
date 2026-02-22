@@ -8847,5 +8847,160 @@
       "pageCount": 1
     },
     "__expires": 1771745529366
+  },
+  "cache:detail:电影天堂资源::75579": {
+    "value": {
+      "expiresAt": 1771747411336,
+      "status": "ok",
+      "data": [
+        {
+          "id": "75579",
+          "title": "家弑服务",
+          "poster": "https://vip.dytt-img.com/upload/vod/20251222-1/240136900bd17183ddb6392e2a417ecd.jpg",
+          "episodes": [
+            "https://vip.dytt-tvs.com/20260203/10886_f2a13eea/index.m3u8"
+          ],
+          "episodes_titles": ["HD中字"],
+          "source": "电影天堂资源",
+          "source_name": "电影天堂资源",
+          "class": "惊悚",
+          "year": "2025",
+          "desc": "改编自芙蕾达·麦克法登的同名畅销小说。\n　　为生计挣扎的女子米莉（西德尼·斯维尼 Sydney Sweeney 饰）找到了一个新的开始，在一对看似完美且富有的夫妻妮娜（阿曼达·塞弗里德 Amanda Seyfried 饰）和安德鲁（布兰登·斯克莱纳 Brandon Sklenar 饰）的家中做家政。然而，米莉很快发现一家人的秘密比自己的要危险得多，这座豪宅背后上演着充满秘辛、丑闻、权力诱惑的游戏。",
+          "type_name": "恐怖片",
+          "douban_id": 36367195
+        }
+      ]
+    },
+    "__expires": 1771747411337
+  },
+  "cache:detail:电影天堂资源::79479": {
+    "value": {
+      "expiresAt": 1771747427007,
+      "status": "ok",
+      "data": [
+        {
+          "id": "79479",
+          "title": "生命树",
+          "poster": "https://vip.dytt-img.com/upload/vod/20260130-1/59fb3f90d9e134a6c3d04fb3882fa28a.webp",
+          "episodes": [
+            "https://vip.dytt-cinema.com/20260130/46840_5cc934df/index.m3u8",
+            "https://vip.dytt-cinema.com/20260130/46841_6e005448/index.m3u8",
+            "https://vip.dytt-cinema.com/20260130/46843_240aab87/index.m3u8",
+            "https://vip.dytt-cinema.com/20260130/46842_9d5f8027/index.m3u8",
+            "https://vip.dytt-cinema.com/20260131/46955_82fe1347/index.m3u8",
+            "https://vip.dytt-cinema.com/20260131/46956_4504e207/index.m3u8",
+            "https://vip.dytt-cinema.com/20260201/47195_dabdf0d0/index.m3u8",
+            "https://vip.dytt-cinema.com/20260201/47196_fa4008c2/index.m3u8",
+            "https://vip.dytt-cinema.com/20260202/47588_86f7d456/index.m3u8",
+            "https://vip.dytt-cinema.com/20260202/47589_e40084a1/index.m3u8",
+            "https://vip.dytt-tvs.com/20260203/10882_1eee58f7/index.m3u8",
+            "https://vip.dytt-tvs.com/20260203/10883_9f173dfe/index.m3u8",
+            "https://vip.dytt-cinema.com/20260204/47823_3fdf5b1f/index.m3u8",
+            "https://vip.dytt-cinema.com/20260204/47824_daa178b0/index.m3u8",
+            "https://vip.dytt-cinema.com/20260205/47948_4d750f26/index.m3u8",
+            "https://vip.dytt-cinema.com/20260205/47949_89f88e2b/index.m3u8",
+            "https://vip.dytt-cinema.com/20260206/48121_21c78909/index.m3u8",
+            "https://vip.dytt-cinema.com/20260206/48122_ced0c1a8/index.m3u8",
+            "https://vip.dytt-cinema.com/20260207/48228_4c6d00e8/index.m3u8",
+            "https://vip.dytt-cinema.com/20260207/48229_be935198/index.m3u8",
+            "https://vip.dytt-cinema.com/20260208/48381_055b74a8/index.m3u8",
+            "https://vip.dytt-cinema.com/20260208/48382_2188a2fe/index.m3u8",
+            "https://vip.dytt-cinema.com/20260209/48509_d384b897/index.m3u8",
+            "https://vip.dytt-cinema.com/20260209/48510_5804a7be/index.m3u8",
+            "https://vip.dytt-cinema.com/20260210/48665_73ce6453/index.m3u8",
+            "https://vip.dytt-cinema.com/20260210/48664_079bc08c/index.m3u8",
+            "https://vip.dytt-cinema.com/20260211/48796_9dc8c634/index.m3u8",
+            "https://vip.dytt-cinema.com/20260211/48795_c1d18eef/index.m3u8",
+            "https://vip.dytt-tvs.com/20260212/11808_6425d167/index.m3u8",
+            "https://vip.dytt-tvs.com/20260212/11809_d7ead549/index.m3u8",
+            "https://vip.dytt-cinema.com/20260213/49130_1d0ba3d7/index.m3u8",
+            "https://vip.dytt-cinema.com/20260213/49131_9908b7e0/index.m3u8",
+            "https://vip.dytt-cinema.com/20260214/49300_dd394007/index.m3u8",
+            "https://vip.dytt-cinema.com/20260214/49299_843966e7/index.m3u8",
+            "https://vip.dytt-cinema.com/20260215/49406_48388b43/index.m3u8",
+            "https://vip.dytt-cinema.com/20260215/49407_844a2a1b/index.m3u8",
+            "https://vip.dytt-cinema.com/20260215/49409_2771adc3/index.m3u8",
+            "https://vip.dytt-cinema.com/20260215/49410_074ab924/index.m3u8",
+            "https://vip.dytt-cinema.com/20260215/49411_8f066a7b/index.m3u8",
+            "https://vip.dytt-cinema.com/20260215/49412_9bad0257/index.m3u8"
+          ],
+          "episodes_titles": [
+            "第1集",
+            "第2集",
+            "第3集",
+            "第4集",
+            "第05集",
+            "第06集",
+            "第07集",
+            "第08集",
+            "第09集",
+            "第10集",
+            "第11集",
+            "第12集",
+            "第13集",
+            "第14集",
+            "第15集",
+            "第16集",
+            "第17集",
+            "第18集",
+            "第19集",
+            "第20集",
+            "第21集",
+            "第22集",
+            "第23集",
+            "第24集",
+            "第25集",
+            "第26集",
+            "第27集",
+            "第28集",
+            "第29集",
+            "第30集",
+            "第31集",
+            "第32集",
+            "第33集",
+            "第34集",
+            "第35集",
+            "第36集",
+            "第37集",
+            "第38集",
+            "第39集",
+            "第40集"
+          ],
+          "source": "电影天堂资源",
+          "source_name": "电影天堂资源",
+          "class": "剧情",
+          "year": "2026",
+          "desc": "上世纪九十年代，青海高原上的玛治县高度依赖农牧业，一度深陷贫困，其周边的无人区博拉木拉富含矿产和野生动物资源，大量的盗猎盗采分子为牟取暴利滥采滥杀。玛治县副县长多杰（胡歌 饰）在县长林培生（李光洁 饰）的支持下成立了巡山队，起初是为脱贫在无人区探矿，眼见藏羚羊被屠杀的惨状后，多杰将一切都倾注在环保上。而巡山队里的青年女警白菊（杨紫 饰）成了多杰命定的变数，她是援藏医生张勤勤（梅婷 饰）收养的遗孤，是白家敢闯敢拼的小女儿。白菊在亲临无人区之后迅速成长，与巡山队队员们成了莫逆之交，与报社记者邵云飞（张哲华 饰）相爱，众志成城以建立自然保护区，却在功成前夕经历了领袖多杰的失踪和巡山队的解散。十多年过去，博拉木拉重获宁静，煤矿盗采问题却让开发和环保的天平再次失衡，白菊与昔日爱人、旧友和手足家人重聚首，在新时代的环保路上一并追查着多杰失踪的真相，最终还英雄以清名，继续守护着青藏高原的绿水蓝天。",
+          "type_name": "国产剧",
+          "douban_id": 35424715
+        }
+      ]
+    },
+    "__expires": 1771747427007
+  },
+  "cache:detail:电影天堂资源::73542": {
+    "value": {
+      "expiresAt": 1771747537547,
+      "status": "ok",
+      "data": [
+        {
+          "id": "73542",
+          "title": "哈姆奈特",
+          "poster": "https://vip.dytt-img.com/upload/vod/20251205-1/a14a1bec804ed988b4d5dbaa48ca0310.jpg",
+          "episodes": [
+            "https://vip.dytt-tvs.com/20260203/10890_3047ee05/index.m3u8"
+          ],
+          "episodes_titles": ["HD中字"],
+          "source": "电影天堂资源",
+          "source_name": "电影天堂资源",
+          "class": "剧情,爱情,历史",
+          "year": "2025",
+          "desc": "影片改编自同名畅销小说，讲述启发莎士比亚最伟大的作品背后，那段不为人知的传奇爱情故事。\n　　威廉·莎士比亚（保罗·麦斯卡 Paul Mescal 饰）和妻子艾格尼丝（杰西·巴克利 Jessie Buckley 饰）11岁的儿子哈姆奈特染疫亡故，4年后莎士比亚以此为灵感，写出了后世传颂的《哈姆雷特》。",
+          "type_name": "爱情片",
+          "douban_id": 35618471
+        }
+      ]
+    },
+    "__expires": 1771747537547
   }
 }
