@@ -888,6 +888,7 @@ function PlayPageClient() {
         let detailData: SearchResult | null = null;
         const targetSource = snap.currentSource;
         const targetId = snap.currentId;
+        let backgroundSearchPromise: Promise<SearchResult[]> | null = null;
 
         if (targetSource && targetId && !needPreferRef.current) {
           // 1. FAST PATH: We already know exactly what we want to play.
@@ -901,11 +902,9 @@ function PlayPageClient() {
             // Spin off the heavy global search into the background silently
             // to populate the right-side panel without blocking video playback.
             if (snap.searchTitle || snap.videoTitle) {
-              fetchSourcesData(snap.searchTitle || snap.videoTitle).catch(
-                () => {
-                  // Ignore background search failures
-                },
-              );
+              backgroundSearchPromise = fetchSourcesData(
+                snap.searchTitle || snap.videoTitle,
+              ).catch(() => []);
             }
           }
         } else {
@@ -959,6 +958,17 @@ function PlayPageClient() {
           detailData.id,
         );
         if (!primaryPlayable) {
+          // If we took the Fast Path and it failed the probe, we must wait for the background search to finish
+          // so we have alternative sources to fall back to.
+          if (backgroundSearchPromise && sourcesInfo.length <= 1) {
+            setLoadingStage('preferring');
+            setLoadingMessage('⚡ 当前播放源失效，正在搜索备用源...');
+            const bgSources = await backgroundSearchPromise;
+            if (bgSources && bgSources.length > 0) {
+              sourcesInfo = bgSources;
+            }
+          }
+
           const rankedFallbackSources = sortSourcesByScore(sourcesInfo);
           for (const source of rankedFallbackSources) {
             if (
