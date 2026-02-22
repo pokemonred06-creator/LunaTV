@@ -1727,14 +1727,23 @@ export default function VideoJsPlayer({
         <div className='absolute inset-0 flex items-center justify-center pointer-events-none'>
           {autoplayBlocked && (
             <div
-              className='z-50 px-6 py-3 bg-green-600/90 text-white rounded-full font-bold shadow-2xl pointer-events-auto cursor-pointer animate-bounce border-2 border-white/20 backdrop-blur-md'
+              className='absolute inset-0 z-50 flex items-center justify-center bg-black/80 bg-cover bg-center bg-no-repeat pointer-events-auto cursor-pointer'
+              style={
+                poster
+                  ? {
+                      backgroundImage: `linear-gradient(rgba(0,0,0,0.4), rgba(0,0,0,0.4)), url(${poster})`,
+                    }
+                  : {}
+              }
               onClick={() => {
                 unlockAudio();
                 playerRef.current?.play()?.catch(() => {});
                 setAutoplayBlocked(false);
               }}
             >
-              {convert('🔇 浏览器已拦截，请点击此处开始播放')}
+              <div className='w-20 h-20 bg-white/20 rounded-full flex items-center justify-center backdrop-blur-md hover:scale-110 transition-transform border border-white/30 shadow-2xl'>
+                <div className='scale-[2] text-white ml-2'>{Icons.Play()}</div>
+              </div>
             </div>
           )}
           {!isPlaying && controlsVisible && !autoplayBlocked && (
