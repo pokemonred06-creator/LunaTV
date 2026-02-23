@@ -1183,11 +1183,17 @@ export default function VideoJsPlayer({
 
     const isHls =
       type === 'application/x-mpegURL' || finalUrl.includes('.m3u8');
-    const isFlv = type === 'video/x-flv' || finalUrl.includes('.flv');
-
-    // Only use manual HLS if we have a custom loader (e.g. P2P)
-    // Otherwise, rely on Video.js (VHS or Native) to handle it via player.src()
-    // Only use manual HLS if we have a custom loader (e.g. P2P)
+    const isFlv =
+      type === 'video/x-flv' ||
+      type === 'flv' ||
+      finalUrl.includes('.flv') ||
+      finalUrl.includes('/api/proxy/flv');
+    console.log('[VideoJsPlayer] Detect:', {
+      isHls,
+      isFlv,
+      type,
+      finalUrl: finalUrl.substring(0, 100),
+    });
     // Otherwise, rely on Video.js (VHS or Native) to handle it via player.src()
     if (isHls && customHlsLoaderFactory) {
       // FIX: Force stop previous playback synchronously
@@ -1296,9 +1302,9 @@ export default function VideoJsPlayer({
                 withCredentials: false,
               },
               {
-                enableWorker: false,
+                enableWorker: true,
                 enableStashBuffer: true,
-                stashInitialSize: 128 * 1024, // 128KB initial buffer
+                stashInitialSize: 64 * 1024, // 64KB for slightly more stability
                 lazyLoad: false,
                 autoCleanupSourceBuffer: true,
                 autoCleanupMaxBackwardDuration: 30,
@@ -1330,9 +1336,10 @@ export default function VideoJsPlayer({
                 /* ignore */
               }
               (window as any).__flvPlayer = null;
+              // 800ms delay to balance recovery and stability
               reconnectTimer = setTimeout(() => {
                 if (mountedRef.current) createPlayer();
-              }, 1000);
+              }, 800);
             });
 
             fp.on(flvjs.Events.ERROR, (errType: string, errDetail: string) => {
@@ -1353,7 +1360,7 @@ export default function VideoJsPlayer({
                 (window as any).__flvPlayer = null;
                 reconnectTimer = setTimeout(() => {
                   if (mountedRef.current) createPlayer();
-                }, 2000);
+                }, 500);
               }
             });
           };

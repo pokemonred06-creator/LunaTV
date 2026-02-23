@@ -317,16 +317,28 @@ export async function GET(request: NextRequest, props: ProxyParams) {
       triedHttpFallback = true;
       activeUrl = new URL(httpFallbackUrl);
       upstreamHeaders = buildHeaders(activeUrl);
-      upstreamRes = await fetchWithRetries(
-        activeUrl.toString(),
-        {
-          headers: upstreamHeaders,
-          cache: 'no-store',
-        },
-        5,
-        2,
-        timeoutMs,
-      );
+      if (!isLiveStream) {
+        upstreamRes = await fetchWithRetries(
+          activeUrl.toString(),
+          {
+            headers: upstreamHeaders,
+            cache: 'no-store',
+          },
+          5,
+          2,
+          timeoutMs,
+        );
+      } else {
+        upstreamRes = await fetchWithValidatedRedirects(
+          activeUrl.toString(),
+          {
+            headers: upstreamHeaders,
+            cache: 'no-store',
+            signal: request.signal,
+          },
+          5,
+        );
+      }
     }
 
     // Multi-stage retry for 403 rejections (often due to anti-hotlinking)
@@ -357,16 +369,28 @@ export async function GET(request: NextRequest, props: ProxyParams) {
           }
         }
 
-        upstreamRes = await fetchWithRetries(
-          activeUrl.toString(),
-          {
-            headers: nextHeaders,
-            cache: 'no-store',
-          },
-          5,
-          1,
-          timeoutMs,
-        );
+        if (!isLiveStream) {
+          upstreamRes = await fetchWithRetries(
+            activeUrl.toString(),
+            {
+              headers: nextHeaders,
+              cache: 'no-store',
+            },
+            5,
+            1,
+            timeoutMs,
+          );
+        } else {
+          upstreamRes = await fetchWithValidatedRedirects(
+            activeUrl.toString(),
+            {
+              headers: nextHeaders,
+              cache: 'no-store',
+              signal: request.signal,
+            },
+            5,
+          );
+        }
         if (upstreamRes.ok) break;
       }
     }
@@ -381,16 +405,28 @@ export async function GET(request: NextRequest, props: ProxyParams) {
       triedHttpFallback = true;
       activeUrl = new URL(httpFallbackUrl);
       upstreamHeaders = buildHeaders(activeUrl);
-      upstreamRes = await fetchWithRetries(
-        activeUrl.toString(),
-        {
-          headers: upstreamHeaders,
-          cache: 'no-store',
-        },
-        5,
-        2,
-        timeoutMs,
-      );
+      if (!isLiveStream) {
+        upstreamRes = await fetchWithRetries(
+          activeUrl.toString(),
+          {
+            headers: upstreamHeaders,
+            cache: 'no-store',
+          },
+          5,
+          2,
+          timeoutMs,
+        );
+      } else {
+        upstreamRes = await fetchWithValidatedRedirects(
+          activeUrl.toString(),
+          {
+            headers: upstreamHeaders,
+            cache: 'no-store',
+            signal: request.signal,
+          },
+          5,
+        );
+      }
     }
 
     // If HTTPS responds with 403, try HTTP once before giving up.
@@ -403,16 +439,29 @@ export async function GET(request: NextRequest, props: ProxyParams) {
       triedHttpFallback = true;
       activeUrl = new URL(httpFallbackUrl);
       upstreamHeaders = buildHeaders(activeUrl);
-      upstreamRes = await fetchWithRetries(
-        activeUrl.toString(),
-        {
-          headers: upstreamHeaders,
-          cache: 'no-store',
-        },
-        5,
-        2,
-        timeoutMs,
-      );
+      if (!isLiveStream) {
+        upstreamRes = await fetchWithRetries(
+          activeUrl.toString(),
+          {
+            headers: upstreamHeaders,
+            cache: 'no-store',
+          },
+          5,
+          2,
+          timeoutMs,
+        );
+      } else {
+        // Live streams use client signal, no timeout
+        upstreamRes = await fetchWithValidatedRedirects(
+          activeUrl.toString(),
+          {
+            headers: upstreamHeaders,
+            cache: 'no-store',
+            signal: request.signal,
+          },
+          5,
+        );
+      }
     }
 
     if (!upstreamRes.ok) {
