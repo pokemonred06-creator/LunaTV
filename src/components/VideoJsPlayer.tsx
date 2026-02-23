@@ -1175,6 +1175,12 @@ export default function VideoJsPlayer({
 
     clearNativeAutoplayListeners();
 
+    // Clean up any previous direct flv.js player
+    if (playerRef.current && (playerRef.current as any).__flvCleanup) {
+      (playerRef.current as any).__flvCleanup();
+      (playerRef.current as any).__flvCleanup = null;
+    }
+
     const isHls =
       type === 'application/x-mpegURL' || finalUrl.includes('.m3u8');
     const isFlv = type === 'video/x-flv' || finalUrl.includes('.flv');
@@ -1227,40 +1233,186 @@ export default function VideoJsPlayer({
         hlsRef.current = null;
       }
 
-      let src = finalUrl;
-      // Ensure FLV/Proxy params are injected if needed
-      if (/^https?:\/\//i.test(finalUrl)) {
-        const enc = encodeURIComponent(finalUrl);
-        const srcParam = encodeURIComponent(seriesId || 'global');
-        // Only modify if not already proxied
-        if (!finalUrl.includes('/api/proxy/')) {
-          if (isFlv) {
-            src = `/api/proxy/flv?url=${enc}&moontv-source=${srcParam}`;
-          } else if (isHls) {
-            // Determine if we need to force proxy usage or if URL is direct
-            // For consistnecy with LivePageClient, we often use the passed proxied URL directly.
-            // But if raw URL passed, proxy it:
-            src = `/api/proxy/m3u8?url=${enc}&moontv-source=${srcParam}`;
+      // FLV: Use flv.js directly (bypass videojs-flvjs)
+      // This enables reconnection when the CDN closes the connection after
+      // short-lived signed tokens expire.
+      if (isFlv) {
+        let src = finalUrl;
+        if (
+          /^https?:\/\//i.test(finalUrl) &&
+          !finalUrl.includes('/api/proxy/')
+        ) {
+          const enc = encodeURIComponent(finalUrl);
+          const srcParam = encodeURIComponent(seriesId || 'global');
+          src = `/api/proxy/flv?url=${enc}&moontv-source=${srcParam}`;
+        }
+
+        // Clear previous error overlay
+        (playerRef.current as any).error(null);
+
+        // Attach flv.js directly to the underlying <video> element
+        (async () => {
+          let v = getTechVideoEl();
+          for (let i = 0; i < 10 && !v; i++) {
+            await new Promise((r) => setTimeout(r, 50));
+            v = getTechVideoEl();
+          }
+          if (!v || !mountedRef.current) return;
+
+          // Destroy any previous flv player
+          if ((window as any).__flvPlayer) {
+            try {
+              (window as any).__flvPlayer.pause();
+              (window as any).__flvPlayer.unload();
+              (window as any).__flvPlayer.detachMediaElement();
+              (window as any).__flvPlayer.destroy();
+            } catch {
+              /* ignore */
+            }
+            (window as any).__flvPlayer = null;
+          }
+
+          const flvjs = window.flvjs;
+          if (!flvjs || !flvjs.isSupported()) {
+            console.error('[FLV] flv.js not available or not supported');
+            return;
+          }
+
+          let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+          let reconnectCount = 0;
+          const MAX_RECONNECTS = 50;
+
+          const createPlayer = () => {
+            if (!mountedRef.current) return;
+
+            const fp = flvjs.createPlayer(
+              {
+                type: 'flv',
+                url: src,
+                isLive: true,
+                hasAudio: true,
+                hasVideo: true,
+                cors: true,
+                withCredentials: false,
+              },
+              {
+                enableWorker: false,
+                enableStashBuffer: true,
+                stashInitialSize: 128 * 1024, // 128KB initial buffer
+                lazyLoad: false,
+                autoCleanupSourceBuffer: true,
+                autoCleanupMaxBackwardDuration: 30,
+                autoCleanupMinBackwardDuration: 15,
+              },
+            );
+
+            fp.attachMediaElement(v!);
+            fp.load();
+            fp.play();
+            (window as any).__flvPlayer = fp;
+
+            // On stream end (CDN closes connection), reconnect
+            fp.on(flvjs.Events.LOADING_COMPLETE, () => {
+              console.warn('[FLV] Loading complete, reconnecting...');
+              if (!mountedRef.current) return;
+              reconnectCount++;
+              if (reconnectCount > MAX_RECONNECTS) {
+                console.error('[FLV] Max reconnects reached');
+                return;
+              }
+              // Destroy and recreate after a short delay
+              try {
+                fp.pause();
+                fp.unload();
+                fp.detachMediaElement();
+                fp.destroy();
+              } catch {
+                /* ignore */
+              }
+              (window as any).__flvPlayer = null;
+              reconnectTimer = setTimeout(() => {
+                if (mountedRef.current) createPlayer();
+              }, 1000);
+            });
+
+            fp.on(flvjs.Events.ERROR, (errType: string, errDetail: string) => {
+              console.error('[FLV] Error:', errType, errDetail);
+              if (!mountedRef.current) return;
+              // On network errors, try reconnecting
+              if (errType === flvjs.ErrorTypes.NETWORK_ERROR) {
+                reconnectCount++;
+                if (reconnectCount > MAX_RECONNECTS) return;
+                try {
+                  fp.pause();
+                  fp.unload();
+                  fp.detachMediaElement();
+                  fp.destroy();
+                } catch {
+                  /* ignore */
+                }
+                (window as any).__flvPlayer = null;
+                reconnectTimer = setTimeout(() => {
+                  if (mountedRef.current) createPlayer();
+                }, 2000);
+              }
+            });
+          };
+
+          createPlayer();
+
+          // Store cleanup for this effect
+          const origCleanup = () => {
+            if (reconnectTimer) clearTimeout(reconnectTimer);
+            if ((window as any).__flvPlayer) {
+              try {
+                (window as any).__flvPlayer.pause();
+                (window as any).__flvPlayer.unload();
+                (window as any).__flvPlayer.detachMediaElement();
+                (window as any).__flvPlayer.destroy();
+              } catch {
+                /* ignore */
+              }
+              (window as any).__flvPlayer = null;
+            }
+          };
+          // Save a reference for cleanup when url/type changes
+          (playerRef.current as any).__flvCleanup = origCleanup;
+        })();
+
+        // Arm autoplay
+        armAutoplay();
+      } else {
+        let src = finalUrl;
+        // Ensure FLV/Proxy params are injected if needed
+        if (/^https?:\/\//i.test(finalUrl)) {
+          const enc = encodeURIComponent(finalUrl);
+          const srcParam = encodeURIComponent(seriesId || 'global');
+          // Only modify if not already proxied
+          if (!finalUrl.includes('/api/proxy/')) {
+            if (isHls) {
+              // Determine if we need to force proxy usage or if URL is direct
+              // For consistnecy with LivePageClient, we often use the passed proxied URL directly.
+              // But if raw URL passed, proxy it:
+              src = `/api/proxy/m3u8?url=${enc}&moontv-source=${srcParam}`;
+            }
           }
         }
-      }
 
-      const determinedType = isFlv
-        ? 'video/x-flv'
-        : isHls
+        const determinedType = isHls
           ? 'application/x-mpegURL'
           : type || 'video/mp4';
 
-      // FIX: Clear any previous error overlay before setting new source
-      (playerRef.current as any).error(null);
+        // FIX: Clear any previous error overlay before setting new source
+        (playerRef.current as any).error(null);
 
-      playerRef.current.src({
-        src,
-        type: determinedType,
-      });
+        playerRef.current.src({
+          src,
+          type: determinedType,
+        });
 
-      // Arm autoplay for standard handling
-      armAutoplay();
+        // Arm autoplay for standard handling
+        armAutoplay();
+      }
     }
   }, [
     finalUrl,
