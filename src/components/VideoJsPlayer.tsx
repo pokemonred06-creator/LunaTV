@@ -1251,6 +1251,9 @@ export default function VideoJsPlayer({
           ? 'application/x-mpegURL'
           : type || 'video/mp4';
 
+      // FIX: Clear any previous error overlay before setting new source
+      (playerRef.current as any).error(null);
+
       playerRef.current.src({
         src,
         type: determinedType,
@@ -1319,6 +1322,13 @@ export default function VideoJsPlayer({
         html5: {
           vhs: { overrideNative: true, xhr: { withCredentials: false } },
           hls: { overrideNative: true },
+        },
+        flvjs: {
+          mediaDataSource: {
+            isLive: isLive !== false,
+            cors: true,
+            withCredentials: false,
+          },
         },
         ...videoJsOptions,
       }) as unknown as VideoJsPlayerInstance;
