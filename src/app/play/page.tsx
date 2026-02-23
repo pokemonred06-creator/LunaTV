@@ -5,7 +5,7 @@
 import { Heart } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Suspense, useEffect, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import Player from 'video.js/dist/types/player';
 import 'videojs-mobile-ui';
 
@@ -281,6 +281,11 @@ function PlayPageClient() {
   useEffect(() => {
     debugEnabledRef.current = debugEnabled;
   }, [debugEnabled]);
+
+  const lastProgressTimeRef = useRef<number>(Date.now());
+  const handleVideoProgress = useCallback(() => {
+    lastProgressTimeRef.current = Date.now();
+  }, []);
   useEffect(() => {
     searchTitleRef.current = searchTitle;
   }, [searchTitle]);
@@ -304,108 +309,120 @@ function PlayPageClient() {
   useEffect(() => {
     if (!isVideoLoading || !videoUrl) return;
 
-    const timeoutId = window.setTimeout(() => {
-      console.warn('Video loading timeout - clearing loading state');
-      setIsVideoLoading(false);
+    lastProgressTimeRef.current = Date.now();
+    const CHECK_INTERVAL = 3000;
+    const TIMEOUT_DURATION = 15000;
 
-      const episodeIdx = currentEpisodeIndexRef.current;
-      if (sourceFailoverLockRef.current) return;
+    const intervalId = window.setInterval(() => {
+      if (!isVideoLoading) return;
 
-      sourceFailoverLockRef.current = true;
-      void (async () => {
-        const pickCandidates = (sources: SearchResult[]) =>
-          sources.filter((s) => {
-            if (
-              s.source === currentSourceRef.current &&
-              s.id === currentIdRef.current
-            )
-              return false;
-            if (!s.episodes || episodeIdx >= s.episodes.length) return false;
-            const candidateKey = `${s.source}|${s.id}|${episodeIdx}`;
-            return (sourceFailCountRef.current[candidateKey] || 0) < 2;
-          });
+      const now = Date.now();
+      if (now - lastProgressTimeRef.current > TIMEOUT_DURATION) {
+        window.clearInterval(intervalId);
+        console.warn('Video loading timeout - clearing loading state');
+        setIsVideoLoading(false);
 
-        let candidates = pickCandidates(availableSources);
-        if (candidates.length === 0) {
-          const query = (
-            searchTitleRef.current ||
-            videoTitleRef.current ||
-            ''
-          ).trim();
-          if (query) {
-            try {
-              const res = await fetch(
-                `/api/search?q=${encodeURIComponent(query)}`,
-                { cache: 'no-store' },
-              );
-              if (res.ok) {
-                const data = (await res.json()) as { results?: SearchResult[] };
-                const rawResults = Array.isArray(data.results)
-                  ? data.results
-                  : [];
-                const normalizedTitle = videoTitleRef.current
-                  ?.replaceAll(' ', '')
-                  .toLowerCase();
-                const normalizedSearchTitle = searchTitleRef.current
-                  ?.replaceAll(' ', '')
-                  .toLowerCase();
-                const normalizedYear = (videoYearRef.current || '')
-                  .trim()
-                  .toLowerCase();
+        const episodeIdx = currentEpisodeIndexRef.current;
+        if (sourceFailoverLockRef.current) return;
 
-                const refreshedResults = rawResults.filter((result) => {
-                  const normalizedResultTitle = result.title
-                    .replaceAll(' ', '')
+        sourceFailoverLockRef.current = true;
+        void (async () => {
+          const pickCandidates = (sources: SearchResult[]) =>
+            sources.filter((s) => {
+              if (
+                s.source === currentSourceRef.current &&
+                s.id === currentIdRef.current
+              )
+                return false;
+              if (!s.episodes || episodeIdx >= s.episodes.length) return false;
+              const candidateKey = `${s.source}|${s.id}|${episodeIdx}`;
+              return (sourceFailCountRef.current[candidateKey] || 0) < 2;
+            });
+
+          let candidates = pickCandidates(availableSources);
+          if (candidates.length === 0) {
+            const query = (
+              searchTitleRef.current ||
+              videoTitleRef.current ||
+              ''
+            ).trim();
+            if (query) {
+              try {
+                const res = await fetch(
+                  `/api/search?q=${encodeURIComponent(query)}`,
+                  { cache: 'no-store' },
+                );
+                if (res.ok) {
+                  const data = (await res.json()) as {
+                    results?: SearchResult[];
+                  };
+                  const rawResults = Array.isArray(data.results)
+                    ? data.results
+                    : [];
+                  const normalizedTitle = videoTitleRef.current
+                    ?.replaceAll(' ', '')
                     .toLowerCase();
-                  const titleOk =
-                    !normalizedTitle ||
-                    normalizedResultTitle === normalizedTitle ||
-                    (!!normalizedSearchTitle &&
-                      normalizedResultTitle === normalizedSearchTitle);
-                  const yearOk = normalizedYear
-                    ? result.year.toLowerCase() === normalizedYear
-                    : true;
-                  return titleOk && yearOk;
-                });
+                  const normalizedSearchTitle = searchTitleRef.current
+                    ?.replaceAll(' ', '')
+                    .toLowerCase();
+                  const normalizedYear = (videoYearRef.current || '')
+                    .trim()
+                    .toLowerCase();
 
-                if (refreshedResults.length > 0) {
-                  setAvailableSources(refreshedResults);
-                  candidates = pickCandidates(refreshedResults);
+                  const refreshedResults = rawResults.filter((result) => {
+                    const normalizedResultTitle = result.title
+                      .replaceAll(' ', '')
+                      .toLowerCase();
+                    const titleOk =
+                      !normalizedTitle ||
+                      normalizedResultTitle === normalizedTitle ||
+                      (!!normalizedSearchTitle &&
+                        normalizedResultTitle === normalizedSearchTitle);
+                    const yearOk = normalizedYear
+                      ? result.year.toLowerCase() === normalizedYear
+                      : true;
+                    return titleOk && yearOk;
+                  });
+
+                  if (refreshedResults.length > 0) {
+                    setAvailableSources(refreshedResults);
+                    candidates = pickCandidates(refreshedResults);
+                  }
                 }
+              } catch {
+                // Ignore refresh errors
               }
-            } catch {
-              // Ignore refresh errors
             }
           }
-        }
 
-        if (candidates.length === 0) return;
+          if (candidates.length === 0) return;
 
-        const rankedCandidates = sortSourcesByScore(candidates);
-        for (const candidate of rankedCandidates) {
-          const candidateEpisode = candidate.episodes?.[episodeIdx] || '';
-          const ok = await probeEpisodePlayable(
-            candidateEpisode,
-            candidate.source,
-            candidate.id,
-          );
-          if (!ok) continue;
-          await handleSourceChange(
-            candidate.source,
-            candidate.id,
-            candidate.title,
-          );
-          return;
-        }
-      })().finally(() => {
-        setTimeout(() => {
-          sourceFailoverLockRef.current = false;
-        }, 1000);
-      });
-    }, 15000);
+          const rankedCandidates = sortSourcesByScore(candidates);
+          for (const candidate of rankedCandidates) {
+            const candidateEpisode = candidate.episodes?.[episodeIdx] || '';
+            const ok = await probeEpisodePlayable(
+              candidateEpisode,
+              candidate.source,
+              candidate.id,
+            );
+            if (!ok) continue;
+            await handleSourceChange(
+              candidate.source,
+              candidate.id,
+              candidate.title,
+            );
+            return;
+          }
+        })().finally(() => {
+          setTimeout(() => {
+            sourceFailoverLockRef.current = false;
+          }, 1000);
+        });
+      }
+    }, CHECK_INTERVAL);
 
     return () => {
-      if (timeoutId) window.clearTimeout(timeoutId);
+      window.clearInterval(intervalId);
     };
   }, [
     isVideoLoading,
@@ -656,6 +673,8 @@ function PlayPageClient() {
           source: SearchResult;
           testResult: { quality: string; loadSpeed: string; pingTime: number };
         }
+      | { status: 'reachable_untested'; source: SearchResult }
+      | { status: 'unreachable'; source: SearchResult }
       | { status: 'error'; source: SearchResult }
       | { status: 'aborted' };
 
@@ -677,6 +696,7 @@ function PlayPageClient() {
 
         const testResult = await getVideoResolutionFromM3u8(episodeUrl, {
           signal,
+          sourceId: source.source,
         });
 
         if (signal?.aborted) return { status: 'aborted' };
@@ -684,7 +704,12 @@ function PlayPageClient() {
         return { status: 'ok', source, testResult };
       } catch (error: any) {
         if (error?.name === 'AbortError') return { status: 'aborted' };
-        return { status: 'error', source };
+        if (
+          error?.message === 'Stream probe failed - source unreachable or 403'
+        ) {
+          return { status: 'unreachable', source };
+        }
+        return { status: 'reachable_untested', source };
       }
     };
 
@@ -728,7 +753,10 @@ function PlayPageClient() {
         if (result.status === 'ok') {
           const sourceKey = `${result.source.source}-${result.source.id}`;
           newVideoInfoMap.set(sourceKey, result.testResult);
-        } else if (result.status === 'error') {
+        } else if (
+          result.status === 'error' ||
+          result.status === 'unreachable'
+        ) {
           const sourceKey = `${result.source.source}-${result.source.id}`;
           newVideoInfoMap.set(sourceKey, {
             quality: 'Error',
@@ -750,7 +778,24 @@ function PlayPageClient() {
       .map((r) => ({ source: r.source, testResult: r.testResult }));
 
     if (successfulResults.length === 0) {
-      console.warn('所有播放源测速都失败，使用第一个播放源');
+      const reachableResults = allResults.filter(
+        (r): r is Extract<TestResult, { status: 'reachable_untested' }> =>
+          r?.status === 'reachable_untested',
+      );
+      if (reachableResults.length > 0) {
+        if (process.env.NODE_ENV !== 'production') {
+          console.warn(
+            '所有源HLS测速均失败或超时，但存在基础连通源，回退到连通源',
+          );
+        }
+        sourceScoreMapRef.current = {};
+        sourceRankOrderRef.current = [];
+        return reachableResults[0].source;
+      }
+
+      console.warn(
+        '所有播放源测速连通均失败，由于无可用判定，退回使用第一个评级源',
+      );
       sourceScoreMapRef.current = {};
       sourceRankOrderRef.current = [];
       return sources[0];
@@ -1391,6 +1436,7 @@ function PlayPageClient() {
   };
 
   const handleTimeUpdate = (currentTime: number, duration: number) => {
+    handleVideoProgress();
     const now = Date.now();
     let interval = 5000;
     if (process.env.NEXT_PUBLIC_STORAGE_TYPE === 'upstash') interval = 20000;

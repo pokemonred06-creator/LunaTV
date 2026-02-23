@@ -329,6 +329,71 @@ async function getVideoResolutionWithHls(m3u8Url: string): Promise<{
   });
 }
 
+const probeCache = new Map<string, { ok: boolean; timestamp: number }>();
+const PROBE_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+
+/**
+ * Stage 1 Hard Filter: Fast lightweight probe to ensure the stream URL is actually reachable and returns valid content.
+ */
+export async function probeStreamStatus(
+  url: string,
+  sourceId: string,
+  options?: { signal?: AbortSignal },
+): Promise<boolean> {
+  if (!url) return false;
+
+  const cacheKey = `${sourceId}|${url}`;
+  const now = Date.now();
+  const cached = probeCache.get(cacheKey);
+  if (cached && now - cached.timestamp < PROBE_CACHE_TTL) {
+    return cached.ok;
+  }
+
+  try {
+    const probeUrl = /^https?:\/\//i.test(url)
+      ? `/api/proxy/m3u8?url=${encodeURIComponent(url)}&moontv-source=${encodeURIComponent(sourceId || 'global')}`
+      : url;
+
+    // We do a GET with a small Range request to avoid downloading the whole manifest if it's huge,
+    // but still get the HTTP status code and headers.
+    const res = await fetch(probeUrl, {
+      method: 'GET',
+      headers: { Range: 'bytes=0-512' },
+      cache: 'no-store',
+      signal: options?.signal,
+    });
+
+    if (!res.ok) {
+      probeCache.set(cacheKey, { ok: false, timestamp: now });
+      return false;
+    }
+
+    const contentType = res.headers.get('content-type') || '';
+    let isOk = true;
+
+    // For M3U8, we can strictly verify the starting #EXTM3U tag
+    if (
+      contentType.includes('mpegurl') ||
+      contentType.includes('apple.mpegurl') ||
+      url.includes('.m3u8')
+    ) {
+      const text = await res.text();
+      // Even with Range request, the first few bytes should contain EXTM3U
+      if (!text.includes('#EXTM3U')) {
+        isOk = false;
+      }
+    }
+
+    probeCache.set(cacheKey, { ok: isOk, timestamp: now });
+    return isOk;
+  } catch (error: any) {
+    if (error.name !== 'AbortError') {
+      probeCache.set(cacheKey, { ok: false, timestamp: now });
+    }
+    return false;
+  }
+}
+
 /**
  * 从m3u8地址获取视频质量等级和网络信息
  * 使用混合策略：先尝试快速M3U8文本解析，如果没有分辨率标签则回退到HLS.js方法
@@ -338,7 +403,7 @@ async function getVideoResolutionWithHls(m3u8Url: string): Promise<{
  */
 export async function getVideoResolutionFromM3u8(
   m3u8Url: string,
-  options?: { signal?: AbortSignal },
+  options?: { signal?: AbortSignal; sourceId?: string },
 ): Promise<{
   quality: string; // 如720p、1080p等
   loadSpeed: string; // 自动转换为KB/s或MB/s
@@ -347,6 +412,12 @@ export async function getVideoResolutionFromM3u8(
   // Check if aborted before starting
   if (options?.signal?.aborted) {
     throw new DOMException('Aborted', 'AbortError');
+  }
+
+  // 先进行轻量级连通性探测 (Stage 1)
+  const isPlayable = await probeStreamStatus(m3u8Url, 'global', options);
+  if (!isPlayable) {
+    throw new Error('Stream probe failed - source unreachable or 403');
   }
 
   // 直接使用 HLS 方法，以确保测速准确（需要下载真实分片）
