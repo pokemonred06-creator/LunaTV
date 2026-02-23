@@ -280,21 +280,36 @@ export async function GET(request: NextRequest, props: ProxyParams) {
   const httpFallbackUrl = toHttpFallbackUrl(urlParam);
   let triedHttpFallback = false;
 
+  const isLiveStream = type === 'flv';
   const timeoutMs = type === 'm3u8' ? 15000 : 20000;
 
   try {
     let upstreamRes: Response;
     try {
-      upstreamRes = await fetchWithRetries(
-        activeUrl.toString(),
-        {
-          headers: upstreamHeaders,
-          cache: 'no-store',
-        },
-        5,
-        2,
-        timeoutMs,
-      );
+      if (isLiveStream) {
+        // FLV live streams: no timeout, no retries.
+        // The connection must stay open until the client disconnects.
+        upstreamRes = await fetchWithValidatedRedirects(
+          activeUrl.toString(),
+          {
+            headers: upstreamHeaders,
+            cache: 'no-store',
+            signal: request.signal, // tied to client connection
+          },
+          5,
+        );
+      } else {
+        upstreamRes = await fetchWithRetries(
+          activeUrl.toString(),
+          {
+            headers: upstreamHeaders,
+            cache: 'no-store',
+          },
+          5,
+          2,
+          timeoutMs,
+        );
+      }
     } catch {
       // Some providers have broken TLS chains from container trust stores,
       // but still serve valid HTTP streams. Retry once over HTTP.
