@@ -10,7 +10,9 @@ export const dynamic = 'force-dynamic';
 // Some IPTV/VOD providers serve HLS on non-standard ports (e.g. :777). We still
 // keep SSRF protections (public IP-only), but allow a small, configurable port
 // set for legitimate streams.
-const DEFAULT_ALLOWED_PORTS = [80, 443, 777, 999, 8000, 8080, 8443, 8888];
+const DEFAULT_ALLOWED_PORTS = [
+  80, 88, 443, 777, 999, 4022, 8000, 8080, 8443, 8880, 8888, 8899, 9000, 35455,
+];
 function buildAllowedPorts(): Set<number> {
   const ports = new Set<number>(DEFAULT_ALLOWED_PORTS);
   const raw = process.env.PROXY_ALLOWED_PORTS;
@@ -113,6 +115,7 @@ async function fetchWithValidatedRedirects(
         const error = e as Error;
         throw new Error(`Invalid redirect: ${error.message}`, { cause: e });
       }
+      continue;
     }
     return res;
   }

@@ -31,7 +31,12 @@ export async function GET(req: NextRequest) {
   const path = u.pathname.toLowerCase();
 
   // Heuristic based on extension/path
-  if (path.includes('.flv') || path.includes('.xs') || path.includes('douyu')) {
+  if (
+    path.includes('.flv') ||
+    path.includes('.xs') ||
+    path.includes('douyu') ||
+    path.includes('huya')
+  ) {
     return ok('flv');
   }
   if (path.includes('.m3u8') || path.includes('playlist.m3u8')) {

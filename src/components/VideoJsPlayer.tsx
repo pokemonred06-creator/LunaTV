@@ -7,15 +7,13 @@ type HlsType = any;
 declare global {
   interface Window {
     Hls: any;
+    flvjs: any;
   }
 }
 import type { MutableRefObject } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import videojs from 'video.js';
 import Player from 'video.js/dist/types/player';
-import 'videojs-flvjs';
-
-import 'video.js/dist/video-js.css';
 
 import { useLanguage } from '@/components/LanguageProvider';
 
@@ -922,7 +920,7 @@ export default function VideoJsPlayer({
     const p = playerRef.current;
 
     // If already playing or switching, don't force it yet
-    if (!p.paused()) {
+    if ((p as any).isDisposed?.() || !p.paused()) {
       setAutoplayBlocked(false);
       return;
     }
@@ -936,7 +934,13 @@ export default function VideoJsPlayer({
 
       // Retry once after a short delay (sometimes helpful for race conditions)
       setTimeout(async () => {
-        if (!mountedRef.current || !p || !p.paused()) return;
+        if (
+          !mountedRef.current ||
+          !p ||
+          (p as any).isDisposed?.() ||
+          !p.paused()
+        )
+          return;
         try {
           await p.play();
           setAutoplayBlocked(false);
@@ -1173,7 +1177,7 @@ export default function VideoJsPlayer({
 
     const isHls =
       type === 'application/x-mpegURL' || finalUrl.includes('.m3u8');
-    const isFlv = finalUrl.includes('.flv');
+    const isFlv = type === 'video/x-flv' || finalUrl.includes('.flv');
 
     // Only use manual HLS if we have a custom loader (e.g. P2P)
     // Otherwise, rely on Video.js (VHS or Native) to handle it via player.src()
@@ -1278,122 +1282,6 @@ export default function VideoJsPlayer({
     });
     videoWrapperRef.current.appendChild(vid);
 
-    const player = videojs(vid, {
-      controls: false,
-      autoplay: autoPlay,
-      preload: 'auto',
-      fluid: false,
-      fill: true,
-      poster,
-      playsinline: true,
-      userActions: { click: false, doubleClick: false },
-      html5: {
-        vhs: { overrideNative: true, xhr: { withCredentials: false } },
-        hls: { overrideNative: true },
-      },
-      ...videoJsOptions,
-    }) as unknown as VideoJsPlayerInstance;
-
-    playerRef.current = player;
-
-    const clearSwitching = () => {
-      isSwitchingRef.current = false;
-      if (switchGuardRef.current) {
-        clearTimeout(switchGuardRef.current);
-        switchGuardRef.current = null;
-      }
-    };
-    player.on('loadedmetadata', clearSwitching);
-    player.on('canplay', clearSwitching);
-    player.on('error', () => {
-      clearSwitching();
-      const err = player.error();
-      reportPlaybackError({
-        code: Number(err?.code || 0) || 0,
-        message: err?.message || 'Player error',
-        raw: err,
-      });
-    });
-
-    player.on('playing', () => {
-      if (mountedRef.current) {
-        setIsPlaying(true);
-        if (pendingAutoplayRef.current) pendingAutoplayRef.current = false;
-        clearSwitching();
-        callbacksRef.current.onPlay?.();
-
-        // FIX: Audio Context Resumption
-        const AudioContext =
-          window.AudioContext || (window as any).webkitAudioContext;
-        if (AudioContext) {
-          const ctx = new AudioContext();
-          if (ctx.state === 'suspended') ctx.resume();
-        }
-      }
-    });
-    player.on('pause', () => {
-      if (mountedRef.current) {
-        setIsPlaying(false);
-        if (!isSwitchingRef.current) pendingAutoplayRef.current = false;
-        callbacksRef.current.onPause?.();
-      }
-    });
-    // FIX: Update duration immediately on loadedmetadata/durationchange
-    player.on('loadedmetadata', () => {
-      if (!mountedRef.current) return;
-      const d = player.duration() || 0;
-      if (Number.isFinite(d) && d > 0) setDuration(d);
-      callbacksRef.current.onLoadedMetadata?.();
-    });
-    player.on('durationchange', () => {
-      if (!mountedRef.current) return;
-      const d = player.duration() || 0;
-      if (Number.isFinite(d) && d > 0) setDuration(d);
-    });
-    player.on('timeupdate', () => {
-      if (!mountedRef.current) return;
-      const t = player.currentTime() || 0;
-      let d = player.duration() || 0;
-      if (!Number.isFinite(d) || d <= 0) {
-        const native = player.tech?.(true)?.el?.();
-        if (native && Number.isFinite(native.duration) && native.duration > 0)
-          d = native.duration;
-      }
-      if (Number.isFinite(d) && d > 0)
-        setDuration((prev) => (prev !== d ? d : prev));
-
-      const isSeeking =
-        isScrubbing || seekingTime !== null || unifiedSeek.isActive();
-      if (!isSeeking) setCurrentTime(t);
-
-      const { enableSkip, skipIntroTime, skipOutroTime } = configRef.current;
-      if (enableSkip && skipIntroTime > 0 && t < skipIntroTime)
-        player.currentTime(skipIntroTime);
-      callbacksRef.current.onTimeUpdate?.(t, d);
-    });
-    player.on('ended', () => {
-      if (mountedRef.current) callbacksRef.current.onEnded?.();
-    });
-    player.on('enterpictureinpicture', () => setIsPiPActive(true));
-    player.on('leavepictureinpicture', () => setIsPiPActive(false));
-    player.ready(() => {
-      if (mountedRef.current) {
-        setPlayerReady(true);
-        callbacksRef.current.onReady?.(player);
-        const v = player.tech?.(true)?.el?.();
-        if (v) {
-          setPipSupported(
-            (document.pictureInPictureEnabled && !!v.requestPictureInPicture) ||
-              !!(v as any).webkitSetPresentationMode,
-          );
-          setHasAirPlay(
-            !!(window as any).WebKitPlaybackTargetAvailabilityEvent,
-          );
-          if (casEnabledRef.current) v.crossOrigin = 'anonymous';
-        }
-      }
-    });
-
     const handleFullscreenChange = () =>
       setIsFullscreen(
         !!document.fullscreenElement ||
@@ -1402,7 +1290,152 @@ export default function VideoJsPlayer({
     document.addEventListener('fullscreenchange', handleFullscreenChange);
     document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
 
+    let player: VideoJsPlayerInstance | null = null;
+    let isCanceled = false;
+
+    (async () => {
+      try {
+        const flvjs = (await import('flv.js')).default;
+        if (typeof window !== 'undefined') {
+          window.flvjs = flvjs;
+        }
+        // @ts-ignore - videojs-flvjs has no types
+        await import('videojs-flvjs');
+      } catch (e) {
+        console.warn('Failed to load flv.js dependencies', e);
+      }
+
+      if (isCanceled) return;
+
+      player = videojs(vid, {
+        controls: false,
+        autoplay: autoPlay,
+        preload: 'auto',
+        fluid: false,
+        fill: true,
+        poster,
+        playsinline: true,
+        userActions: { click: false, doubleClick: false },
+        html5: {
+          vhs: { overrideNative: true, xhr: { withCredentials: false } },
+          hls: { overrideNative: true },
+        },
+        ...videoJsOptions,
+      }) as unknown as VideoJsPlayerInstance;
+
+      if (isCanceled) {
+        player.dispose();
+        return;
+      }
+
+      playerRef.current = player;
+
+      const clearSwitching = () => {
+        isSwitchingRef.current = false;
+        if (switchGuardRef.current) {
+          clearTimeout(switchGuardRef.current);
+          switchGuardRef.current = null;
+        }
+      };
+      player!.on('loadedmetadata', clearSwitching);
+      player!.on('canplay', clearSwitching);
+      player!.on('error', () => {
+        clearSwitching();
+        const err = player!.error();
+        reportPlaybackError({
+          code: Number(err?.code || 0) || 0,
+          message: err?.message || 'Player error',
+          raw: err,
+        });
+      });
+
+      player!.on('playing', () => {
+        if (mountedRef.current) {
+          setIsPlaying(true);
+          if (pendingAutoplayRef.current) pendingAutoplayRef.current = false;
+          clearSwitching();
+          callbacksRef.current.onPlay?.();
+
+          // FIX: Audio Context Resumption
+          const AudioContext =
+            window.AudioContext || (window as any).webkitAudioContext;
+          if (AudioContext) {
+            const ctx = new AudioContext();
+            if (ctx.state === 'suspended') ctx.resume();
+          }
+        }
+      });
+      player!.on('pause', () => {
+        if (mountedRef.current) {
+          setIsPlaying(false);
+          if (!isSwitchingRef.current) pendingAutoplayRef.current = false;
+          callbacksRef.current.onPause?.();
+        }
+      });
+      // FIX: Update duration immediately on loadedmetadata/durationchange
+      player!.on('loadedmetadata', () => {
+        if (!mountedRef.current) return;
+        const d = player!.duration() || 0;
+        if (Number.isFinite(d) && d > 0) setDuration(d);
+        callbacksRef.current.onLoadedMetadata?.();
+      });
+      player!.on('durationchange', () => {
+        if (!mountedRef.current) return;
+        const d = player!.duration() || 0;
+        if (Number.isFinite(d) && d > 0) setDuration(d);
+      });
+      player!.on('timeupdate', () => {
+        if (!mountedRef.current) return;
+        const t = player!.currentTime() || 0;
+        let d = player!.duration() || 0;
+        if (!Number.isFinite(d) || d <= 0) {
+          const native = player!.tech?.(true)?.el?.() as
+            | HTMLVideoElement
+            | undefined;
+          if (native && Number.isFinite(native.duration) && native.duration > 0)
+            d = native.duration;
+        }
+        if (Number.isFinite(d) && d > 0)
+          setDuration((prev) => (prev !== d ? d : prev));
+
+        const isSeeking =
+          isScrubbing || seekingTime !== null || unifiedSeek.isActive();
+        if (!isSeeking) setCurrentTime(t);
+
+        const { enableSkip, skipIntroTime, skipOutroTime } = configRef.current;
+        if (enableSkip && skipIntroTime > 0 && t < skipIntroTime)
+          player!.currentTime(skipIntroTime);
+        callbacksRef.current.onTimeUpdate?.(t, d);
+      });
+      player!.on('ended', () => {
+        if (mountedRef.current) callbacksRef.current.onEnded?.();
+      });
+      player!.on('enterpictureinpicture', () => setIsPiPActive(true));
+      player!.on('leavepictureinpicture', () => setIsPiPActive(false));
+      player!.ready(() => {
+        if (mountedRef.current) {
+          setPlayerReady(true);
+          callbacksRef.current.onReady?.(player!);
+          const v = player!.tech?.(true)?.el?.() as
+            | HTMLVideoElement
+            | undefined;
+          if (v) {
+            setPipSupported(
+              (document.pictureInPictureEnabled &&
+                !!(v as any).requestPictureInPicture) ||
+                !!(v as any).webkitSetPresentationMode,
+            );
+            setHasAirPlay(
+              !!(window as any).WebKitPlaybackTargetAvailabilityEvent,
+            );
+            if (casEnabledRef.current) v.crossOrigin = 'anonymous';
+          }
+        }
+      });
+    })();
+
     return () => {
+      isCanceled = true;
       clearNativeAutoplayListeners();
       if (player) {
         try {
@@ -1440,7 +1473,7 @@ export default function VideoJsPlayer({
       const p = playerRef.current;
 
       // Only check if supposed to be playing
-      if (p.paused() || p.scrubbing()) {
+      if ((p as any).isDisposed?.() || p.paused() || p.scrubbing()) {
         stallCount = 0;
         return;
       }

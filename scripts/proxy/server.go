@@ -329,6 +329,17 @@ func buildTLSConfig(base *tls.Config, serverName string) *tls.Config {
 	return cfg
 }
 
+// Allowed ports for upstream IPTV/VOD targets
+var allowedPorts = map[string]bool{
+	"80": true, "88": true, "443": true, "777": true, "999": true,
+	"4022": true, "8000": true, "8080": true, "8443": true, "8880": true,
+	"8888": true, "8899": true, "9000": true, "35455": true,
+}
+
+func isAllowedPort(port string) bool {
+	return allowedPorts[port]
+}
+
 func validateTargetURL(rawURL string) error {
 	u, err := url.Parse(rawURL)
 	if err != nil {
@@ -344,7 +355,7 @@ func validateTargetURL(rawURL string) error {
 		return errors.New("user info not allowed")
 	}
 	port := u.Port()
-	if port != "" && port != "80" && port != "443" && port != "8080" {
+	if port != "" && !isAllowedPort(port) {
 		return errors.New("non-standard port")
 	}
 	return nil
@@ -1204,6 +1215,7 @@ func main() {
 	mux.HandleFunc("/api/proxy/ts", func(w http.ResponseWriter, r *http.Request) { commonHandler(w, r, "segment") })
 	mux.HandleFunc("/api/proxy/key", func(w http.ResponseWriter, r *http.Request) { commonHandler(w, r, "key") })
 	mux.HandleFunc("/api/proxy/flv", func(w http.ResponseWriter, r *http.Request) { commonHandler(w, r, "flv") })
+	mux.HandleFunc("/api/proxy/logo", handleImageProxy)
 	mux.HandleFunc("/api/image-proxy", handleImageProxy)
 	mux.HandleFunc("/api/detail-proxy", handleDetailProxy)
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("OK")) })

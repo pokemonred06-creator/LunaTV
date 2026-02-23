@@ -608,8 +608,10 @@ function LivePageClient() {
   }, []);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (!playerRef.current) return;
     const p = playerRef.current;
+
+    if (!p || (p as unknown as { isDisposed?: () => boolean }).isDisposed?.())
+      return;
     switch (e.key) {
       case 'ArrowUp':
         e.preventDefault();
@@ -856,7 +858,12 @@ function LivePageClient() {
           {activeTab === 'channels' ? (
             <>
               {/* Groups Sticky Header */}
-              <div className='overflow-x-auto p-2 border-b border-gray-100 dark:border-gray-800 scrollbar-hide shrink-0 bg-white dark:bg-gray-900'>
+              <div
+                className='overflow-x-auto p-2 border-b border-gray-100 dark:border-gray-800 scrollbar-hide shrink-0 bg-white dark:bg-gray-900'
+                onWheel={(e) => {
+                  e.currentTarget.scrollLeft += e.deltaY;
+                }}
+              >
                 <div className='flex gap-2'>
                   {groupKeys.map((g) => (
                     <button

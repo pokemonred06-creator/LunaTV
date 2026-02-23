@@ -1,5 +1,5 @@
 # 使用官方 Node.js 镜像作为基础镜像
-FROM node:22-alpine AS base
+FROM node:alpine AS base
 
 # ===== Go Proxy Build Stage =====
 FROM golang:alpine AS go-builder
@@ -23,7 +23,8 @@ COPY patches ./patches
 RUN rm -rf node_modules .next
 
 # Install dependencies using pnpm
-RUN pnpm install --no-frozen-lockfile
+RUN pnpm config set registry https://registry.npmmirror.com && \
+  pnpm install --no-frozen-lockfile
 
 # ===== Next.js Build Stage =====
 FROM base AS builder

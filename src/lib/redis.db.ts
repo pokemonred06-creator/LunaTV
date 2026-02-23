@@ -12,14 +12,47 @@ import {
   SkipConfig,
 } from './types';
 
+declare global {
+  var __redisClient: RedisClientType | undefined;
+}
+
 export class RedisStorage
   implements IStorage, IAdminStorage<AdminConfig>, ISkipStorage, ICacheStorage
 {
   private client: RedisClientType;
 
   constructor() {
-    this.client = createClient({ url: process.env.REDIS_URL });
-    this.client.connect().catch(console.error);
+    if (!globalThis.__redisClient) {
+      globalThis.__redisClient = createClient({ url: process.env.REDIS_URL });
+
+      const connectWithRetry = async () => {
+        try {
+          await globalThis.__redisClient!.connect();
+          console.log('[RedisStorage] Connected successfully');
+        } catch (err) {
+          console.error(
+            '[RedisStorage] Connection failed, retrying in 2s...',
+            err,
+          );
+          setTimeout(connectWithRetry, 2000);
+        }
+      };
+
+      globalThis.__redisClient.on('error', (err) =>
+        console.error('[RedisStorage] Error:', err),
+      );
+      connectWithRetry();
+    }
+    this.client = globalThis.__redisClient;
+  }
+
+  private async ensureConnected() {
+    if (this.client.isReady) return;
+    let retries = 0;
+    while (!this.client.isReady && retries < 20) {
+      await new Promise((r) => setTimeout(r, 500));
+      retries++;
+    }
   }
 
   // --- Core (IStorage) ---
@@ -28,6 +61,7 @@ export class RedisStorage
     userName: string,
     key: string,
   ): Promise<PlayRecord | null> {
+    await this.ensureConnected();
     const data = await this.client.get(`record:${userName}:${key}`);
     return data ? JSON.parse(data) : null;
   }
@@ -37,31 +71,35 @@ export class RedisStorage
     key: string,
     record: PlayRecord,
   ): Promise<void> {
+    await this.ensureConnected();
     await this.client.set(`record:${userName}:${key}`, JSON.stringify(record));
   }
 
   async getAllPlayRecords(
     userName: string,
   ): Promise<Record<string, PlayRecord>> {
-    // Basic implementation using keys scan - simplified for now
-    // In production, might want a set of keys per user to avoid scan
+    await this.ensureConnected();
     const keys = await this.client.keys(`record:${userName}:*`);
     const result: Record<string, PlayRecord> = {};
-    for (const k of keys) {
-      const val = await this.client.get(k);
+    if (keys.length === 0) return result;
+    const values = await this.client.mGet(keys);
+    keys.forEach((k: string, idx: number) => {
+      const val = values[idx];
       if (val) {
         const shortKey = k.replace(`record:${userName}:`, '');
         result[shortKey] = JSON.parse(val);
       }
-    }
+    });
     return result;
   }
 
   async deletePlayRecord(userName: string, key: string): Promise<void> {
+    await this.ensureConnected();
     await this.client.del(`record:${userName}:${key}`);
   }
 
   async getFavorite(userName: string, key: string): Promise<Favorite | null> {
+    await this.ensureConnected();
     const data = await this.client.get(`fav:${userName}:${key}`);
     return data ? JSON.parse(data) : null;
   }
@@ -71,45 +109,55 @@ export class RedisStorage
     key: string,
     favorite: Favorite,
   ): Promise<void> {
+    await this.ensureConnected();
     await this.client.set(`fav:${userName}:${key}`, JSON.stringify(favorite));
   }
 
   async getAllFavorites(userName: string): Promise<Record<string, Favorite>> {
+    await this.ensureConnected();
     const keys = await this.client.keys(`fav:${userName}:*`);
     const result: Record<string, Favorite> = {};
-    for (const k of keys) {
-      const val = await this.client.get(k);
+    if (keys.length === 0) return result;
+    const values = await this.client.mGet(keys);
+    keys.forEach((k: string, idx: number) => {
+      const val = values[idx];
       if (val) {
         const shortKey = k.replace(`fav:${userName}:`, '');
         result[shortKey] = JSON.parse(val);
       }
-    }
+    });
     return result;
   }
 
   async deleteFavorite(userName: string, key: string): Promise<void> {
+    await this.ensureConnected();
     await this.client.del(`fav:${userName}:${key}`);
   }
 
   async registerUser(userName: string, pass: string): Promise<void> {
+    await this.ensureConnected();
     await this.client.set(`u:${userName}:pwd`, pass);
   }
 
   async verifyUser(userName: string, pass: string): Promise<boolean> {
+    await this.ensureConnected();
     const stored = await this.client.get(`u:${userName}:pwd`);
     return stored === pass;
   }
 
   async checkUserExist(userName: string): Promise<boolean> {
+    await this.ensureConnected();
     const exists = await this.client.exists(`u:${userName}:pwd`);
     return exists > 0;
   }
 
   async changePassword(userName: string, newPass: string): Promise<void> {
+    await this.ensureConnected();
     await this.client.set(`u:${userName}:pwd`, newPass);
   }
 
   async deleteUser(userName: string): Promise<void> {
+    await this.ensureConnected();
     const keys = await this.client.keys(`u:${userName}:*`);
     // Also delete records/favs
     const recKeys = await this.client.keys(`record:${userName}:*`);
@@ -148,11 +196,13 @@ export class RedisStorage
   // --- Admin (IAdminStorage) ---
 
   async getAdminConfig(): Promise<AdminConfig | null> {
+    await this.ensureConnected();
     const data = await this.client.get('admin:config');
     return data ? JSON.parse(data) : null;
   }
 
   async setAdminConfig(config: AdminConfig): Promise<void> {
+    await this.ensureConnected();
     await this.client.set('admin:config', JSON.stringify(config));
   }
 
