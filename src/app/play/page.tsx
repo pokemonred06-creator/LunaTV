@@ -940,22 +940,32 @@ function PlayPageClient() {
           setLoadingStage('fetching');
           setLoadingMessage('🎬 正在获取视频详情...');
 
-          sourcesInfo = await fetchSourceDetail(targetSource, targetId);
-          if (sourcesInfo.length > 0) {
-            detailData = sourcesInfo[0];
+          try {
+            sourcesInfo = await fetchSourceDetail(targetSource, targetId);
+            if (sourcesInfo.length > 0) {
+              detailData = sourcesInfo[0];
 
-            // Spin off the heavy global search into the background silently
-            // to populate the right-side panel without blocking video playback.
-            if (snap.searchTitle || snap.videoTitle) {
-              backgroundSearchPromise = fetchSourcesData(
-                snap.searchTitle || snap.videoTitle,
-              ).catch(() => []);
+              // Spin off the heavy global search into the background silently
+              // to populate the right-side panel without blocking video playback.
+              if (snap.searchTitle || snap.videoTitle) {
+                backgroundSearchPromise = fetchSourcesData(
+                  snap.searchTitle || snap.videoTitle,
+                ).catch(() => []);
+              }
             }
+          } catch (err) {
+            console.warn(
+              '[Fast-Path] Direct source is dead, falling back to aggregate search...',
+              err,
+            );
+            // Drop out of Fast Path, sourcesInfo remains empty, triggers fallback below.
           }
-        } else {
-          // 2. SLOW PATH: We need to search all 12+ sites and auto-pick the best one.
+        }
+
+        if (sourcesInfo.length === 0) {
+          // 2. SLOW PATH / FALLBACK: Search all 12+ sites and auto-pick the best one.
           setLoadingStage('searching');
-          setLoadingMessage('🔍 正在搜索播放源...');
+          setLoadingMessage('🔍 正在搜索可用播放源...');
 
           sourcesInfo = await fetchSourcesData(
             snap.searchTitle || snap.videoTitle,
@@ -963,6 +973,9 @@ function PlayPageClient() {
 
           if (sourcesInfo.length > 0) {
             detailData = sourcesInfo[0];
+            // Force the Prefer mechanism to run so we don't just pick the first unverified source
+            setNeedPrefer(true);
+            needPreferRef.current = true;
           }
         }
 
