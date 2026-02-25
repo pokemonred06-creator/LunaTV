@@ -5,6 +5,20 @@ import { getCachedLiveChannels } from '@/lib/live';
 
 export const runtime = 'nodejs';
 
+function parseForwardedFirst(value: string | null): string {
+  if (!value) return '';
+  return value.split(',')[0].trim();
+}
+
+function resolvePublicOrigin(request: NextRequest): string {
+  const direct = new URL(request.url);
+  const xfProto = parseForwardedFirst(request.headers.get('x-forwarded-proto'));
+  const xfHost = parseForwardedFirst(request.headers.get('x-forwarded-host'));
+  const host = xfHost || request.headers.get('host') || direct.host;
+  const proto = xfProto || direct.protocol.replace(':', '');
+  return `${proto}://${host}`;
+}
+
 function escapeM3uAttr(value: string) {
   return (value || '').replace(/\r?\n/g, ' ').replace(/"/g, "'").trim();
 }
@@ -95,7 +109,7 @@ export async function GET(request: NextRequest) {
     return new NextResponse('Live source not found', { status: 404 });
   }
 
-  const origin = new URL(request.url).origin;
+  const origin = resolvePublicOrigin(request);
   const lines: string[] = [];
 
   // Aggregate EPG urls if available.

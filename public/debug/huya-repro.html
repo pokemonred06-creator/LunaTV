@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Huya FLV Repro</title>
+    <link href="https://vjs.zencdn.net/8.23.4/video-js.css" rel="stylesheet" />
+    <style>
+      body { font-family: Arial, sans-serif; padding: 16px; }
+      #log { white-space: pre-wrap; background: #111; color: #ddd; padding: 8px; height: 220px; overflow: auto; }
+    </style>
+  </head>
+  <body>
+    <h1>Repro: FLV first-frame freeze style behavior</h1>
+    <video id="v" class="video-js vjs-default-skin" controls autoplay muted playsinline width="960" height="540"></video>
+    <p>URL: <code id="url"></code></p>
+    <div id="log"></div>
+
+    <script src="https://vjs.zencdn.net/8.23.4/video.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/flv.js@1.6.2/dist/flv.min.js"></script>
+    <script>
+      const STREAM_URL = 'http://cdn.jdshipin.com:8880/huya.php?id=11342412';
+      document.getElementById('url').textContent = STREAM_URL;
+      const logEl = document.getElementById('log');
+      const log = (...args) => {
+        const line = `[${new Date().toISOString()}] ${args.join(' ')}`;
+        logEl.textContent += line + '\n';
+        logEl.scrollTop = logEl.scrollHeight;
+        console.log(...args);
+      };
+
+      const p = videojs('v', {
+        liveui: true,
+        autoplay: true,
+        muted: true,
+        controls: true,
+      });
+
+      let fp;
+      const createPlayer = () => {
+        if (fp) {
+          try { fp.pause(); fp.unload(); fp.detachMediaElement(); fp.destroy(); } catch (_) {}
+        }
+        log('createPlayer()');
+        fp = flvjs.createPlayer(
+          {
+            type: 'flv',
+            url: STREAM_URL,
+            isLive: true,
+            cors: true,
+          },
+          {
+            seekType: 'range',
+            lazyLoad: false,
+            enableStashBuffer: true,
+          }
+        );
+
+        fp.attachMediaElement(p.tech().el());
+        fp.load();
+        fp.play().catch((e) => log('play error', e?.name || e));
+
+        fp.on(flvjs.Events.LOADING_COMPLETE, () => {
+          log('LOADING_COMPLETE => aggressive recreate (repro)');
+          setTimeout(createPlayer, 300);
+        });
+        fp.on(flvjs.Events.ERROR, (t, d, i) => {
+          log('ERROR', t, d, JSON.stringify(i || {}));
+        });
+      };
+
+      createPlayer();
+    </script>
+  </body>
+</html>

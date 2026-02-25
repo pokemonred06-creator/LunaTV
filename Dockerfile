@@ -1,8 +1,8 @@
 # 使用官方 Node.js 镜像作为基础镜像
-FROM node:alpine AS base
+FROM node:25-alpine AS base
 
 # ===== Go Proxy Build Stage =====
-FROM golang:alpine AS go-builder
+FROM golang:1.26-alpine AS go-builder
 WORKDIR /go-app
 COPY scripts/proxy/go.mod .
 COPY scripts/proxy/server.go .

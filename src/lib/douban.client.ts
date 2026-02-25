@@ -54,6 +54,19 @@ interface DoubanRecommendApiResponse {
   }>;
 }
 
+function isAbortLikeError(error: unknown): boolean {
+  if (!error) return false;
+  if (error instanceof DOMException && error.name === 'AbortError') return true;
+  if (error instanceof Error) {
+    if (error.name === 'AbortError') return true;
+    const cause = (error as Error & { cause?: unknown }).cause;
+    if (cause instanceof Error && cause.name === 'AbortError') return true;
+    if (typeof cause === 'string' && /abort/i.test(cause)) return true;
+    return /abort/i.test(error.message);
+  }
+  return false;
+}
+
 /**
  * 带超时的 fetch 请求
  */
@@ -178,7 +191,7 @@ export async function fetchDoubanCategories(
     };
   } catch (error) {
     // 触发全局错误提示
-    if (typeof window !== 'undefined') {
+    if (typeof window !== 'undefined' && !isAbortLikeError(error)) {
       window.dispatchEvent(
         new CustomEvent('globalError', {
           detail: { message: '获取豆瓣分类数据失败' },
@@ -312,7 +325,7 @@ export async function fetchDoubanList(
     };
   } catch (error) {
     // 触发全局错误提示
-    if (typeof window !== 'undefined') {
+    if (typeof window !== 'undefined' && !isAbortLikeError(error)) {
       window.dispatchEvent(
         new CustomEvent('globalError', {
           detail: { message: '获取豆瓣列表数据失败' },

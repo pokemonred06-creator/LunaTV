@@ -607,18 +607,94 @@ func fetchWithRetry(ctx context.Context, method, targetURL, userAgent string, he
 	if method == "" {
 		method = "GET"
 	}
-	for i := 0; i < MaxRetries; i++ {
-		req, e := http.NewRequestWithContext(ctx, method, targetURL, nil)
+
+	isTransient403Target := func(raw string) bool {
+		l := strings.ToLower(raw)
+		return strings.Contains(l, "cdn.jdshipin.com") ||
+			strings.Contains(l, "douzhicloud.site") ||
+			strings.Contains(l, "huya.php") ||
+			strings.Contains(l, "/huya/")
+	}
+
+	withTransientCacheBuster := func(raw string, attempt int) string {
+		if !isTransient403Target(raw) {
+			return raw
+		}
+		u, parseErr := url.Parse(raw)
+		if parseErr != nil {
+			return raw
+		}
+		q := u.Query()
+		q.Set("_mt", strconv.FormatInt(time.Now().UnixMilli(), 10))
+		q.Set("_mr", strconv.Itoa(rand.Intn(900000)+100000))
+		if attempt > 0 {
+			q.Set("_ra", strconv.Itoa(attempt))
+		}
+		u.RawQuery = q.Encode()
+		return u.String()
+	}
+
+	isRetryable403Host := func(host string) bool {
+		h := strings.ToLower(host)
+		return strings.Contains(h, "huya.com") ||
+			strings.Contains(h, "jdshipin.com") ||
+			strings.Contains(h, "douzhicloud.site") ||
+			strings.Contains(h, "zxyxndc.top")
+	}
+
+	maxAttempts := MaxRetries
+	isTransientTarget := isTransient403Target(targetURL)
+	if isTransientTarget {
+		// Huya gateway chains are frequently 403/200-flappy for the same URL.
+		// Use more short retries and vary request fingerprint to improve success.
+		maxAttempts = 14
+	}
+
+	for i := 0; i < maxAttempts; i++ {
+		requestURL := withTransientCacheBuster(targetURL, i)
+		requestUA := userAgent
+		requestHeaders := headers
+		if isTransientTarget {
+			requestHeaders = cloneHeadersMap(headers)
+			switch i % 3 {
+			case 1:
+				requestUA = "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+				delete(requestHeaders, "Referer")
+				delete(requestHeaders, "Origin")
+			case 2:
+				requestUA = "VLC/3.0.20 LibVLC/3.0.20"
+				requestHeaders["Referer"] = "https://www.huya.com/"
+				requestHeaders["Origin"] = "https://www.huya.com"
+			}
+		}
+
+		req, e := http.NewRequestWithContext(ctx, method, requestURL, nil)
 		if e != nil {
 			return nil, e
 		}
-		req.Header.Set("User-Agent", userAgent)
-		for k, v := range headers {
+		req.Header.Set("User-Agent", requestUA)
+		for k, v := range requestHeaders {
 			req.Header.Set(k, v)
 		}
 
 		resp, err = client.Do(req)
 		if err == nil {
+			if resp.StatusCode == 403 {
+				finalHost := ""
+				if resp.Request != nil && resp.Request.URL != nil {
+					finalHost = resp.Request.URL.Hostname()
+				}
+				if i < maxAttempts-1 && isRetryable403Host(finalHost) {
+					resp.Body.Close()
+					select {
+					case <-ctx.Done():
+						return nil, ctx.Err()
+					case <-time.After(time.Duration(220+rand.Intn(220)) * time.Millisecond):
+					}
+					continue
+				}
+				return resp, nil
+			}
 			if resp.StatusCode < 500 && resp.StatusCode != 429 {
 				return resp, nil
 			}
@@ -630,10 +706,17 @@ func fetchWithRetry(ctx context.Context, method, targetURL, userAgent string, he
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-time.After(time.Duration(200*(1<<i)+rand.Intn(100)) * time.Millisecond):
+		case <-time.After(time.Duration(200*(1<<min(i, 5))+rand.Intn(100)) * time.Millisecond):
 		}
 	}
 	return resp, err
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func handleHeadProxy(w http.ResponseWriter, r *http.Request, targetURL, ua string, reqHeaders map[string]string) bool {
@@ -972,7 +1055,23 @@ func commonHandler(w http.ResponseWriter, r *http.Request, handlerType string) {
 	ua := getUserAgent(sourceKey)
 	reqHeaders := forwardableHeaders(r)
 
-	if strings.Contains(targetURL, "huya") {
+	targetLower := strings.ToLower(targetURL)
+	if strings.Contains(targetLower, "huya") ||
+		strings.Contains(targetLower, "jdshipin.com") ||
+		strings.Contains(targetLower, "douzhicloud.site") ||
+		strings.Contains(targetLower, "zxyxndc.top") {
+		// Strip browser-only cross-site headers that frequently trigger upstream
+		// anti-hotlink filters on Huya gateway chains.
+		delete(reqHeaders, "Origin")
+		delete(reqHeaders, "Sec-Fetch-Site")
+		delete(reqHeaders, "Sec-Fetch-Mode")
+		delete(reqHeaders, "Sec-Fetch-Dest")
+		delete(reqHeaders, "Sec-Fetch-User")
+		delete(reqHeaders, "Dnt")
+		reqHeaders["Accept"] = "*/*"
+		if _, ok := reqHeaders["Accept-Language"]; !ok {
+			reqHeaders["Accept-Language"] = "zh-CN,zh;q=0.9,en;q=0.8"
+		}
 		reqHeaders["Referer"] = "https://www.huya.com/"
 	}
 

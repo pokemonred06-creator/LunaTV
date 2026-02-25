@@ -280,10 +280,68 @@ function useLiveCore() {
   };
 }
 
-const guessType = (url: string) => {
-  if (/\.(flv|xs)(\?|$)/i.test(url) || /huya|douyu/i.test(url)) return 'flv';
-  return 'm3u8';
-};
+type LiveStreamType = 'm3u8' | 'flv' | 'mp4' | 'audio' | 'ts' | 'unknown';
+
+function guessType(url: string): {
+  type: LiveStreamType;
+  unsupportedReason?: string;
+} {
+  const raw = (url || '').trim();
+  if (!raw) return { type: 'unknown' };
+
+  try {
+    const u = new URL(raw);
+    const scheme = u.protocol.replace(':', '').toLowerCase();
+    if (['rtmp', 'rtsp', 'udp', 'rtp'].includes(scheme)) {
+      return {
+        type: 'unknown',
+        unsupportedReason: `Unsupported protocol: ${scheme}`,
+      };
+    }
+  } catch {
+    return { type: 'unknown' };
+  }
+
+  const lower = raw.toLowerCase();
+  if (/\.(flv|xs)(\?|$)/i.test(lower) || /huya|douyu/.test(lower)) {
+    return { type: 'flv' };
+  }
+  if (
+    lower.includes('.m3u8') ||
+    lower.includes('/m3u8') ||
+    lower.includes('playlist.m3u') ||
+    lower.includes('index.m3u')
+  ) {
+    return { type: 'm3u8' };
+  }
+  if (/\.(mp4|m4v|mov|webm|ogv)(\?|$)/i.test(lower)) {
+    return { type: 'mp4' };
+  }
+  if (/\.(mp3|aac|m4a|ogg|wav|flac)(\?|$)/i.test(lower)) {
+    return { type: 'audio' };
+  }
+  if (/\/(rtp|udp)\//i.test(lower)) {
+    return { type: 'ts' };
+  }
+  return { type: 'ts' };
+}
+
+function streamMimeType(type: LiveStreamType): string {
+  switch (type) {
+    case 'flv':
+      return 'video/x-flv';
+    case 'm3u8':
+      return 'application/x-mpegURL';
+    case 'mp4':
+      return 'video/mp4';
+    case 'audio':
+      return 'audio/mpeg';
+    case 'ts':
+      return 'video/mp2t';
+    default:
+      return 'application/octet-stream';
+  }
+}
 
 function usePlayerState(videoUrl: string, sourceKey?: string) {
   const debouncedUrl = useDebounce(videoUrl, 500);
@@ -292,9 +350,7 @@ function usePlayerState(videoUrl: string, sourceKey?: string) {
   const [proxiedUrl, setProxiedUrl] = useState('');
   const [isStreamLoading, setIsStreamLoading] = useState(false);
   const [unsupportedType, setUnsupportedType] = useState<string | null>(null);
-  const [streamType, setStreamType] = useState<
-    'm3u8' | 'flv' | 'unknown' | null
-  >(null);
+  const [streamType, setStreamType] = useState<LiveStreamType | null>(null);
 
   useEffect(() => {
     if (videoUrl !== debouncedUrl) {
@@ -320,30 +376,56 @@ function usePlayerState(videoUrl: string, sourceKey?: string) {
         const data = await res.json();
 
         if (controller.signal.aborted) return;
-        let detected = data.type;
-        if (!detected || detected === 'unknown')
-          detected = guessType(debouncedUrl);
+        let detected = (data.type || 'unknown') as LiveStreamType;
+        let unsupportedReason: string | undefined;
+        if (detected === 'unknown') {
+          const guessed = guessType(debouncedUrl);
+          detected = guessed.type;
+          unsupportedReason = guessed.unsupportedReason;
+        }
 
-        if (
-          detected !== 'm3u8' &&
-          detected !== 'flv' &&
-          detected !== 'unknown'
-        ) {
-          setUnsupportedType(detected);
+        if (detected === 'unknown') {
+          setUnsupportedType(
+            unsupportedReason || data.error || 'Unsupported stream type',
+          );
+          setProxiedUrl('');
+          setStreamType('unknown');
         } else {
-          setStreamType(detected as 'm3u8' | 'flv');
-          const typeParam = detected === 'flv' ? 'flv' : 'm3u8';
+          const selectedType: 'm3u8' | 'flv' | 'ts' =
+            detected === 'flv' ? 'flv' : detected === 'm3u8' ? 'm3u8' : 'ts';
+
+          setStreamType(
+            selectedType === 'm3u8'
+              ? 'm3u8'
+              : selectedType === 'flv'
+                ? 'flv'
+                : 'ts',
+          );
           setProxiedUrl(
-            `/api/proxy/${typeParam}?url=${encodeURIComponent(debouncedUrl)}&moontv-source=${debouncedKey}`,
+            `/api/proxy/${selectedType}?url=${encodeURIComponent(debouncedUrl)}&moontv-source=${debouncedKey}`,
           );
         }
       } catch (e) {
         if ((e as Error).name !== 'AbortError') {
           const fallback = guessType(debouncedUrl);
-          setStreamType(fallback as 'm3u8' | 'flv');
-          setProxiedUrl(
-            `/api/proxy/${fallback === 'flv' ? 'flv' : 'm3u8'}?url=${encodeURIComponent(debouncedUrl)}&moontv-source=${debouncedKey}`,
-          );
+          if (fallback.type === 'unknown') {
+            setUnsupportedType(
+              fallback.unsupportedReason || 'Unsupported stream type',
+            );
+            setProxiedUrl('');
+            setStreamType('unknown');
+          } else {
+            const typeParam =
+              fallback.type === 'flv'
+                ? 'flv'
+                : fallback.type === 'm3u8'
+                  ? 'm3u8'
+                  : 'ts';
+            setStreamType(fallback.type);
+            setProxiedUrl(
+              `/api/proxy/${typeParam}?url=${encodeURIComponent(debouncedUrl)}&moontv-source=${debouncedKey}`,
+            );
+          }
         }
       } finally {
         if (!controller.signal.aborted) setIsStreamLoading(false);
@@ -724,9 +806,7 @@ function LivePageClient() {
                   currentChannel?.logo || '',
                   currentSource?.key,
                 )}
-                type={
-                  streamType === 'flv' ? 'video/x-flv' : 'application/x-mpegURL'
-                }
+                type={streamMimeType(streamType || 'm3u8')}
                 autoPlay={true}
                 onReady={handlePlayerReady}
                 className='w-full h-full'

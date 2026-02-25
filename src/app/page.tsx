@@ -128,6 +128,19 @@ function HomeClient() {
   // 3. Consolidated Data Fetching (With Unmount Guard)
   useEffect(() => {
     let isMounted = true;
+    const isAbortLikeError = (error: unknown) => {
+      if (!error) return false;
+      if (error instanceof DOMException && error.name === 'AbortError')
+        return true;
+      if (error instanceof Error) {
+        if (error.name === 'AbortError') return true;
+        const cause = (error as Error & { cause?: unknown }).cause;
+        if (cause instanceof Error && cause.name === 'AbortError') return true;
+        if (typeof cause === 'string' && /abort/i.test(cause)) return true;
+        return /abort/i.test(error.message);
+      }
+      return false;
+    };
 
     const fetchData = async <T,>(
       key: keyof typeof loadingStates,
@@ -142,6 +155,7 @@ function HomeClient() {
         if (!isMounted) return;
         onSuccess(result);
       } catch (error) {
+        if (isAbortLikeError(error)) return;
         console.error(`Fetch failed for ${key}:`, error);
       } finally {
         if (isMounted) {

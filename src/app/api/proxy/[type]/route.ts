@@ -13,6 +13,11 @@ export const dynamic = 'force-dynamic';
 const DEFAULT_ALLOWED_PORTS = [
   80, 88, 443, 777, 999, 4022, 8000, 8080, 8443, 8880, 8888, 8899, 9000, 35455,
 ];
+
+const TRANSPARENT_GIF_1X1 = Uint8Array.from([
+  71, 73, 70, 56, 57, 97, 1, 0, 1, 0, 128, 0, 0, 0, 0, 0, 255, 255, 255, 33,
+  249, 4, 1, 0, 0, 1, 0, 44, 0, 0, 0, 0, 1, 0, 1, 0, 0, 2, 2, 68, 1, 0, 59,
+]);
 function buildAllowedPorts(): Set<number> {
   const ports = new Set<number>(DEFAULT_ALLOWED_PORTS);
   const raw = process.env.PROXY_ALLOWED_PORTS;
@@ -75,22 +80,47 @@ async function validateSafeUrl(urlStr: string) {
     if (u.username || u.password) return false;
 
     const port = u.port ? Number(u.port) : u.protocol === 'https:' ? 443 : 80;
-    if (!ALLOWED_PORTS.has(port)) return false;
+    if (!ALLOWED_PORTS.has(port)) {
+      console.warn('[Proxy SSRF] Blocked Port:', port, urlStr);
+      return false;
+    }
 
     const ipType = net.isIP(u.hostname);
-    // Server is IPv4-only: reject literal IPv6 targets.
     if (ipType === 6) return false;
-    if (ipType === 4) return !isBlockedIp(u.hostname);
-    const addrs = await dns.lookup(u.hostname, { all: true, verbatim: true });
-    if (!addrs.length) return false;
+    if (ipType === 4) {
+      const blocked = isBlockedIp(u.hostname);
+      if (blocked) console.warn('[Proxy SSRF] Blocked IP:', u.hostname, urlStr);
+      return !blocked;
+    }
+    const addrs = await dns
+      .lookup(u.hostname, { all: true, verbatim: true })
+      .catch(() => []);
+    if (!addrs.length) {
+      console.warn(
+        '[Proxy SSRF] DNS ENOTFOUND, allowing attempt as fallback:',
+        u.hostname,
+      );
+      return true; // Allow it to fall through to fetch() if DNS lookup fails here
+    }
 
-    // IPv4-only policy:
-    // TOCTOU Fix: allow ONLY if ALL IPv4 answers are public.
     const ipv4Addrs = addrs.filter((a) => a.family === 4);
-    if (!ipv4Addrs.length) return false;
-    return ipv4Addrs.every((a) => !isBlockedIp(a.address));
-  } catch {
-    return false;
+    if (!ipv4Addrs.length) return true; // IPv6? Allow fetch() to handle
+    const allPublic = ipv4Addrs.every((a) => !isBlockedIp(a.address));
+    if (!allPublic) {
+      console.warn(
+        '[Proxy SSRF] Blocked resolved IP:',
+        ipv4Addrs.map((a) => a.address),
+        urlStr,
+      );
+    }
+    return allPublic;
+  } catch (err) {
+    console.warn(
+      '[Proxy SSRF] Validation Error, allowing attempt as fallback:',
+      err,
+      urlStr,
+    );
+    return true; // Fallback to raw fetch()
   }
 }
 
@@ -101,10 +131,16 @@ async function fetchWithValidatedRedirects(
 ) {
   let current = initialUrl;
   for (let hop = 0; hop <= maxHops; hop++) {
-    if (!(await validateSafeUrl(current)))
+    const safe = await validateSafeUrl(current);
+    if (!safe) {
+      console.warn(`[Proxy] SSRF block at hop ${hop}: ${current}`);
       throw new Error(`SSRF Blocked: ${current}`);
+    }
 
+    console.log(`[Proxy] Hop ${hop}: Fetching ${current}`);
     const res = await fetch(current, { ...init, redirect: 'manual' });
+    console.log(`[Proxy] Hop ${hop} Status: ${res.status}`);
+
     if (res.status >= 300 && res.status < 400) {
       const loc = res.headers.get('location');
       if (!loc) return res;
@@ -181,6 +217,35 @@ function toHttpFallbackUrl(urlStr: string): string | null {
     return u.toString();
   } catch {
     return null;
+  }
+}
+
+function isHuyaLikeUrl(urlStr: string): boolean {
+  const lower = urlStr.toLowerCase();
+  return (
+    lower.includes('huya') ||
+    lower.includes('jdshipin.com') ||
+    lower.includes('douzhicloud.site') ||
+    lower.includes('zxyxndc.top')
+  );
+}
+
+function withLiveCacheBuster(urlStr: string): string {
+  try {
+    const u = new URL(urlStr);
+    const lower = u.toString().toLowerCase();
+    if (
+      lower.includes('jdshipin.com') ||
+      lower.includes('zxyxndc.top') ||
+      lower.includes('/huya/')
+    ) {
+      u.searchParams.set('_mt', String(Date.now()));
+      u.searchParams.set('_mr', String(Math.floor(Math.random() * 1_000_000)));
+      return u.toString();
+    }
+    return urlStr;
+  } catch {
+    return urlStr;
   }
 }
 
@@ -265,12 +330,18 @@ export async function GET(request: NextRequest, props: ProxyParams) {
     if (request.headers.get('range'))
       headers['Range'] = request.headers.get('range')!;
 
-    const raw = target.toString();
-    if (raw.includes('huya') || raw.includes('douzhicloud'))
+    const raw = target.toString().toLowerCase();
+    if (raw.includes('huya') || raw.includes('douzhicloud')) {
       headers['Referer'] = 'https://www.huya.com/';
-    else if (raw.includes('douyin'))
+      // Some FLV gateways reject cross-site Origin; omit for live FLV.
+      if (type !== 'flv') headers['Origin'] = 'https://www.huya.com';
+    } else if (raw.includes('douyin')) {
       headers['Referer'] = 'https://live.douyin.com/';
-    else headers['Referer'] = target.origin + '/';
+      if (type !== 'flv') headers['Origin'] = 'https://live.douyin.com';
+    } else {
+      headers['Referer'] = target.origin + '/';
+      if (type !== 'flv') headers['Origin'] = target.origin;
+    }
 
     return headers;
   };
@@ -282,75 +353,114 @@ export async function GET(request: NextRequest, props: ProxyParams) {
 
   const isLiveStream = type === 'flv';
   const timeoutMs = type === 'm3u8' ? 15000 : 20000;
+  const liveConnectTimeoutMs = 12000;
+  const liveConnectRetries = 2;
+
+  const fetchUpstream = (
+    targetUrl: string,
+    headers: Record<string, string>,
+    retries: number = isLiveStream ? liveConnectRetries : 2,
+  ) => {
+    const finalTarget =
+      isLiveStream && isHuyaLikeUrl(targetUrl)
+        ? withLiveCacheBuster(targetUrl)
+        : targetUrl;
+    return fetchWithRetries(
+      finalTarget,
+      {
+        headers,
+        cache: 'no-store',
+        ...(isLiveStream ? { signal: request.signal } : {}),
+      },
+      5,
+      retries,
+      isLiveStream ? liveConnectTimeoutMs : timeoutMs,
+    );
+  };
+
+  const retryTransient403 = async (
+    current: Response,
+    headers: Record<string, string>,
+    label: string,
+  ): Promise<Response> => {
+    if (
+      !isLiveStream ||
+      current.status !== 403 ||
+      !isHuyaLikeUrl(current.url || activeUrl.toString())
+    ) {
+      return current;
+    }
+
+    let latest = current;
+    for (let i = 1; i <= 6; i++) {
+      const wait = 180 + Math.floor(Math.random() * 260);
+      await new Promise((resolve) => setTimeout(resolve, wait));
+      try {
+        await latest.body?.cancel();
+      } catch {
+        // ignore
+      }
+      latest = await fetchUpstream(activeUrl.toString(), headers, 0);
+      console.log(
+        `[Proxy] ${label} transient-403 retry ${i}/6 status=${latest.status}`,
+      );
+      if (latest.ok || latest.status !== 403) {
+        return latest;
+      }
+    }
+    return latest;
+  };
 
   try {
     let upstreamRes: Response;
     try {
-      if (isLiveStream) {
-        // FLV live streams: no timeout, no retries.
-        // The connection must stay open until the client disconnects.
-        upstreamRes = await fetchWithValidatedRedirects(
-          activeUrl.toString(),
-          {
-            headers: upstreamHeaders,
-            cache: 'no-store',
-            signal: request.signal, // tied to client connection
-          },
-          5,
-        );
-      } else {
-        upstreamRes = await fetchWithRetries(
-          activeUrl.toString(),
-          {
-            headers: upstreamHeaders,
-            cache: 'no-store',
-          },
-          5,
-          2,
-          timeoutMs,
-        );
-      }
-    } catch {
+      console.log(
+        `[Proxy] Fetching ${type}: ${activeUrl.toString().substring(0, 150)}`,
+      );
+      upstreamRes = await fetchUpstream(activeUrl.toString(), upstreamHeaders);
+      console.log(
+        `[Proxy] Upstream Status: ${upstreamRes.status} for ${activeUrl.hostname}`,
+      );
+      upstreamRes = await retryTransient403(
+        upstreamRes,
+        upstreamHeaders,
+        'Base',
+      );
+    } catch (err: unknown) {
+      const error = err as Error;
+      console.error(
+        `[Proxy] Fetch Error: ${error.message} for ${activeUrl.hostname}`,
+      );
       // Some providers have broken TLS chains from container trust stores,
       // but still serve valid HTTP streams. Retry once over HTTP.
-      if (!httpFallbackUrl) throw new Error('Initial upstream fetch failed');
+      if (!httpFallbackUrl) throw err;
       triedHttpFallback = true;
       activeUrl = new URL(httpFallbackUrl);
       upstreamHeaders = buildHeaders(activeUrl);
-      if (!isLiveStream) {
-        upstreamRes = await fetchWithRetries(
-          activeUrl.toString(),
-          {
-            headers: upstreamHeaders,
-            cache: 'no-store',
-          },
-          5,
-          2,
-          timeoutMs,
-        );
-      } else {
-        upstreamRes = await fetchWithValidatedRedirects(
-          activeUrl.toString(),
-          {
-            headers: upstreamHeaders,
-            cache: 'no-store',
-            signal: request.signal,
-          },
-          5,
-        );
-      }
+      console.log(`[Proxy] Trying HTTP fallback: ${activeUrl.toString()}`);
+      upstreamRes = await fetchUpstream(activeUrl.toString(), upstreamHeaders);
+      console.log(`[Proxy] Upstream (Fallback) Status: ${upstreamRes.status}`);
+      upstreamRes = await retryTransient403(
+        upstreamRes,
+        upstreamHeaders,
+        'HTTP fallback',
+      );
     }
 
     // Multi-stage retry for 403 rejections (often due to anti-hotlinking)
     if (upstreamRes.status === 403) {
+      console.log(
+        `[Proxy] Upstream 403, starting retry strategies for ${activeUrl.hostname}...`,
+      );
       const retryStrategies: Record<string, string | undefined>[] = [
-        // 1. Try without Referer
-        { Referer: undefined },
+        // 1. Try without Referer/Origin
+        { Referer: undefined, Origin: undefined },
         // 2. Try with Mobile UA (often has different/looser blocklists) + No Referer
         {
           'User-Agent':
             'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
           Referer: undefined,
+          Origin: undefined,
         },
         // 3. Try spoofing Origin to match upstream origin
         {
@@ -359,7 +469,8 @@ export async function GET(request: NextRequest, props: ProxyParams) {
         },
       ];
 
-      for (const strategy of retryStrategies) {
+      for (let i = 0; i < retryStrategies.length; i++) {
+        const strategy = retryStrategies[i];
         const nextHeaders: Record<string, string> = { ...upstreamHeaders };
         for (const [k, v] of Object.entries(strategy)) {
           if (v === undefined) {
@@ -369,28 +480,16 @@ export async function GET(request: NextRequest, props: ProxyParams) {
           }
         }
 
-        if (!isLiveStream) {
-          upstreamRes = await fetchWithRetries(
-            activeUrl.toString(),
-            {
-              headers: nextHeaders,
-              cache: 'no-store',
-            },
-            5,
-            1,
-            timeoutMs,
-          );
-        } else {
-          upstreamRes = await fetchWithValidatedRedirects(
-            activeUrl.toString(),
-            {
-              headers: nextHeaders,
-              cache: 'no-store',
-              signal: request.signal,
-            },
-            5,
-          );
-        }
+        console.log(
+          `[Proxy] Retry Strategy ${i + 1}/${retryStrategies.length} for ${activeUrl.hostname}...`,
+        );
+        upstreamRes = await fetchUpstream(activeUrl.toString(), nextHeaders, 1);
+        upstreamRes = await retryTransient403(
+          upstreamRes,
+          nextHeaders,
+          `Strategy ${i + 1}`,
+        );
+        console.log(`[Proxy] Strategy ${i + 1} Status: ${upstreamRes.status}`);
         if (upstreamRes.ok) break;
       }
     }
@@ -405,28 +504,7 @@ export async function GET(request: NextRequest, props: ProxyParams) {
       triedHttpFallback = true;
       activeUrl = new URL(httpFallbackUrl);
       upstreamHeaders = buildHeaders(activeUrl);
-      if (!isLiveStream) {
-        upstreamRes = await fetchWithRetries(
-          activeUrl.toString(),
-          {
-            headers: upstreamHeaders,
-            cache: 'no-store',
-          },
-          5,
-          2,
-          timeoutMs,
-        );
-      } else {
-        upstreamRes = await fetchWithValidatedRedirects(
-          activeUrl.toString(),
-          {
-            headers: upstreamHeaders,
-            cache: 'no-store',
-            signal: request.signal,
-          },
-          5,
-        );
-      }
+      upstreamRes = await fetchUpstream(activeUrl.toString(), upstreamHeaders);
     }
 
     // If HTTPS responds with 403, try HTTP once before giving up.
@@ -439,33 +517,27 @@ export async function GET(request: NextRequest, props: ProxyParams) {
       triedHttpFallback = true;
       activeUrl = new URL(httpFallbackUrl);
       upstreamHeaders = buildHeaders(activeUrl);
-      if (!isLiveStream) {
-        upstreamRes = await fetchWithRetries(
-          activeUrl.toString(),
-          {
-            headers: upstreamHeaders,
-            cache: 'no-store',
-          },
-          5,
-          2,
-          timeoutMs,
-        );
-      } else {
-        // Live streams use client signal, no timeout
-        upstreamRes = await fetchWithValidatedRedirects(
-          activeUrl.toString(),
-          {
-            headers: upstreamHeaders,
-            cache: 'no-store',
-            signal: request.signal,
-          },
-          5,
-        );
-      }
+      upstreamRes = await fetchUpstream(activeUrl.toString(), upstreamHeaders);
     }
 
     if (!upstreamRes.ok) {
-      return new NextResponse(`Upstream HTTP ${upstreamRes.status}`, {
+      if (type === 'logo') {
+        return new NextResponse(TRANSPARENT_GIF_1X1, {
+          status: 200,
+          headers: {
+            'content-type': 'image/gif',
+            'cache-control': 'public, max-age=300',
+            'Access-Control-Allow-Origin': '*',
+          },
+        });
+      }
+
+      const upstreamHost = activeUrl.hostname || 'unknown-host';
+      const body =
+        upstreamRes.status === 404
+          ? `Upstream HTTP 404: source not found (${upstreamHost})`
+          : `Upstream HTTP ${upstreamRes.status} (${upstreamHost})`;
+      return new NextResponse(body, {
         status: upstreamRes.status,
       });
     }
@@ -483,23 +555,124 @@ export async function GET(request: NextRequest, props: ProxyParams) {
       });
     }
 
+    const upstreamContentType = (
+      upstreamRes.headers.get('content-type') || ''
+    ).toLowerCase();
+    const isM3u8ContentType =
+      upstreamContentType.includes('mpegurl') ||
+      upstreamContentType.includes('x-mpegurl') ||
+      upstreamContentType.includes('vnd.apple.mpegurl');
+    const isFlvContentType =
+      upstreamContentType.includes('video/x-flv') ||
+      upstreamContentType.includes('/flv');
+    const isTsContentType =
+      upstreamContentType.includes('video/mp2t') ||
+      upstreamContentType.includes('mpegts') ||
+      upstreamContentType.includes('/mp2t') ||
+      upstreamContentType.includes('/ts');
+
+    if (type === 'flv' && isM3u8ContentType) {
+      return new NextResponse('Type mismatch: upstream is m3u8, not flv', {
+        status: 415,
+        headers: {
+          'x-moontv-actual-type': 'm3u8',
+          'Access-Control-Allow-Origin': '*',
+        },
+      });
+    }
+
+    if (type === 'ts' && isFlvContentType) {
+      return new NextResponse('Type mismatch: upstream is flv, not ts', {
+        status: 415,
+        headers: {
+          'x-moontv-actual-type': 'flv',
+          'Access-Control-Allow-Origin': '*',
+        },
+      });
+    }
+
+    // TS fallback: some IPTV sources are exposed via .php/ts routes but actually
+    // return HLS playlists. Detect and rewrite to keep client playback stable.
+    if (type === 'ts') {
+      let upstreamPath = '';
+      try {
+        upstreamPath = new URL(upstreamRes.url).pathname.toLowerCase();
+      } catch {
+        upstreamPath = '';
+      }
+      const looksLikeManifestPath =
+        upstreamPath.includes('.m3u8') ||
+        upstreamPath.includes('/m3u8') ||
+        upstreamPath.includes('playlist.m3u') ||
+        upstreamPath.includes('index.m3u');
+      if (isM3u8ContentType || looksLikeManifestPath) {
+        const playlistProbe = upstreamRes.clone();
+        const text = await playlistProbe.text();
+        if (text.includes('#EXTM3U')) {
+          const proxiedUrl = new URL(request.url);
+          const rewritten = rewriteM3U8(
+            text,
+            new URL(upstreamRes.url),
+            proxiedUrl.origin,
+            sourceKey,
+          );
+          return new NextResponse(rewritten, {
+            status: 200,
+            headers: {
+              'content-type': 'application/vnd.apple.mpegurl',
+              'cache-control': 'no-store',
+              'Access-Control-Allow-Origin': '*',
+            },
+          });
+        }
+      }
+    }
+
     // M3U8: rewrite segments
     if (type === 'm3u8') {
+      if (isFlvContentType || isTsContentType) {
+        return new NextResponse(
+          `Type mismatch: upstream is ${isFlvContentType ? 'flv' : 'ts'}, not m3u8`,
+          {
+            status: 415,
+            headers: {
+              'x-moontv-actual-type': isFlvContentType ? 'flv' : 'ts',
+              'Access-Control-Allow-Origin': '*',
+            },
+          },
+        );
+      }
+
+      let upstreamPath = '';
+      try {
+        upstreamPath = new URL(upstreamRes.url).pathname.toLowerCase();
+      } catch {
+        upstreamPath = '';
+      }
+      const looksLikeManifestPath =
+        upstreamPath.includes('.m3u8') ||
+        upstreamPath.includes('/m3u8') ||
+        upstreamPath.includes('playlist.m3u') ||
+        upstreamPath.includes('index.m3u');
+      if (!isM3u8ContentType && !looksLikeManifestPath) {
+        return new NextResponse('Type mismatch: upstream is not m3u8', {
+          status: 415,
+          headers: {
+            'x-moontv-actual-type': 'unknown',
+            'Access-Control-Allow-Origin': '*',
+          },
+        });
+      }
+
       const playlistProbe = upstreamRes.clone();
       const text = await playlistProbe.text();
       if (!text.includes('#EXTM3U')) {
-        // Fallback to raw passthrough for non-standard sources
-        // (some providers return unconventional manifests/content-types).
-        const fallbackHeaders = new Headers();
-        fallbackHeaders.set('Access-Control-Allow-Origin', '*');
-        const ct =
-          upstreamRes.headers.get('content-type') || 'application/octet-stream';
-        fallbackHeaders.set('content-type', ct);
-        const cl = upstreamRes.headers.get('content-length');
-        if (cl) fallbackHeaders.set('content-length', cl);
-        return new NextResponse(upstreamRes.body, {
-          status: upstreamRes.status,
-          headers: fallbackHeaders,
+        return new NextResponse('Type mismatch: invalid m3u8 payload', {
+          status: 415,
+          headers: {
+            'x-moontv-actual-type': 'unknown',
+            'Access-Control-Allow-Origin': '*',
+          },
         });
       }
 
@@ -523,11 +696,16 @@ export async function GET(request: NextRequest, props: ProxyParams) {
     // Default: stream body (flv, ts, etc.)
     const responseHeaders = new Headers();
     responseHeaders.set('Access-Control-Allow-Origin', '*');
-    responseHeaders.set('Accept-Ranges', 'bytes');
+    responseHeaders.set('Access-Control-Allow-Headers', 'Range, Content-Type');
+    responseHeaders.set(
+      'Access-Control-Expose-Headers',
+      'Content-Type, Content-Length, Content-Range, Accept-Ranges, Cache-Control, ETag',
+    );
     [
       'content-type',
       'content-length',
       'content-range',
+      'accept-ranges',
       'cache-control',
       'expires',
       'etag',

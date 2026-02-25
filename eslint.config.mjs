@@ -149,7 +149,7 @@ export default tseslint.config(
       'start.js',
       'tailwind.config.ts',
       '.prettierrc.js',
-      'scripts/**/*.{js,ts}',
+      'scripts/**/*.{js,ts,mjs}',
     ],
     languageOptions: {
       globals: {
@@ -163,4 +163,5 @@ export default tseslint.config(
       'no-undef': 'off',
     },
   },
+
 );

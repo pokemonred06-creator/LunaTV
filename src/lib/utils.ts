@@ -415,7 +415,11 @@ export async function getVideoResolutionFromM3u8(
   }
 
   // 先进行轻量级连通性探测 (Stage 1)
-  const isPlayable = await probeStreamStatus(m3u8Url, 'global', options);
+  const isPlayable = await probeStreamStatus(
+    m3u8Url,
+    options?.sourceId || 'global',
+    options,
+  );
   if (!isPlayable) {
     throw new Error('Stream probe failed - source unreachable or 403');
   }

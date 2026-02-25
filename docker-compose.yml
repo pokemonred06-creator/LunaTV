@@ -10,6 +10,7 @@ services:
     environment:
       - NODE_ENV=production
       - GO_PROXY_URL=http://127.0.0.1:8080
+      - PROXY_DEV=true
       - DISABLE_SECURE_COOKIES=true
       # Cache Configuration
       - DOUBAN_DATA_CACHE_TTL_MINUTES=1440

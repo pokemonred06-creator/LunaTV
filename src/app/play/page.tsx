@@ -238,6 +238,11 @@ function PlayPageClient() {
   const playerRef = useRef<Player | null>(null);
 
   const resumeTimeRef = useRef<number | null>(null);
+  const pendingResumeTargetRef = useRef<{
+    source: string;
+    id: string;
+    episodeIndex: number;
+  } | null>(null);
   const lastSaveTimeRef = useRef<number>(0);
   const saveErrorCountRef = useRef<number>(0);
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
@@ -305,6 +310,76 @@ function PlayPageClient() {
     videoYear,
   ]);
 
+  const stableSourceCompare = (a: SearchResult, b: SearchResult): number => {
+    const sourceNameCmp = (a.source_name || a.source || '').localeCompare(
+      b.source_name || b.source || '',
+    );
+    if (sourceNameCmp !== 0) return sourceNameCmp;
+
+    const idCmp = String(a.id || '').localeCompare(String(b.id || ''));
+    if (idCmp !== 0) return idCmp;
+
+    return (a.title || '').localeCompare(b.title || '');
+  };
+
+  const pickDeterministicSource = (sources: SearchResult[]): SearchResult => {
+    if (sources.length <= 1) return sources[0];
+    const ordered = [...sources].sort(stableSourceCompare);
+    const seed = [
+      searchTitleRef.current || '',
+      videoTitleRef.current || '',
+      videoYearRef.current || '',
+      String(currentEpisodeIndexRef.current || 0),
+    ].join('|');
+
+    let hash = 0;
+    for (let i = 0; i < seed.length; i++) {
+      hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+    }
+    return ordered[hash % ordered.length];
+  };
+
+  const normalizeLooseTitle = (value: string | undefined | null): string =>
+    (value || '').replaceAll(' ', '').toLowerCase();
+
+  const filterSourcesForCurrentVideo = (
+    sources: SearchResult[],
+  ): SearchResult[] => {
+    const normalizedTitle = normalizeLooseTitle(videoTitleRef.current);
+    const normalizedSearchTitle = normalizeLooseTitle(searchTitleRef.current);
+    const normalizedYear = (videoYearRef.current || '').trim().toLowerCase();
+
+    if (!normalizedTitle && !normalizedSearchTitle && !normalizedYear) {
+      return sources;
+    }
+
+    return sources.filter((result) => {
+      const normalizedResultTitle = normalizeLooseTitle(result.title);
+      const titleOk =
+        (!normalizedTitle && !normalizedSearchTitle) ||
+        (!!normalizedTitle && normalizedResultTitle === normalizedTitle) ||
+        (!!normalizedSearchTitle &&
+          normalizedResultTitle === normalizedSearchTitle);
+      const yearOk = normalizedYear
+        ? String(result.year || '').toLowerCase() === normalizedYear
+        : true;
+      return titleOk && yearOk;
+    });
+  };
+
+  const pickFailoverCandidates = (
+    sources: SearchResult[],
+    episodeIdx: number,
+    activeSource: string,
+    activeId: string,
+  ) =>
+    filterSourcesForCurrentVideo(sources).filter((s) => {
+      if (s.source === activeSource && s.id === activeId) return false;
+      if (!s.episodes || episodeIdx >= s.episodes.length) return false;
+      const candidateKey = `${s.source}|${s.id}|${episodeIdx}`;
+      return (sourceFailCountRef.current[candidateKey] || 0) < 2;
+    });
+
   // --- Effect: Loading Timeout (Event Driven) ---
   useEffect(() => {
     if (!isVideoLoading || !videoUrl) return;
@@ -327,19 +402,14 @@ function PlayPageClient() {
 
         sourceFailoverLockRef.current = true;
         void (async () => {
-          const pickCandidates = (sources: SearchResult[]) =>
-            sources.filter((s) => {
-              if (
-                s.source === currentSourceRef.current &&
-                s.id === currentIdRef.current
-              )
-                return false;
-              if (!s.episodes || episodeIdx >= s.episodes.length) return false;
-              const candidateKey = `${s.source}|${s.id}|${episodeIdx}`;
-              return (sourceFailCountRef.current[candidateKey] || 0) < 2;
-            });
-
-          let candidates = pickCandidates(availableSources);
+          const activeSource = currentSourceRef.current;
+          const activeId = currentIdRef.current;
+          let candidates = pickFailoverCandidates(
+            availableSources,
+            episodeIdx,
+            activeSource,
+            activeId,
+          );
           if (candidates.length === 0) {
             const query = (
               searchTitleRef.current ||
@@ -359,34 +429,17 @@ function PlayPageClient() {
                   const rawResults = Array.isArray(data.results)
                     ? data.results
                     : [];
-                  const normalizedTitle = videoTitleRef.current
-                    ?.replaceAll(' ', '')
-                    .toLowerCase();
-                  const normalizedSearchTitle = searchTitleRef.current
-                    ?.replaceAll(' ', '')
-                    .toLowerCase();
-                  const normalizedYear = (videoYearRef.current || '')
-                    .trim()
-                    .toLowerCase();
-
-                  const refreshedResults = rawResults.filter((result) => {
-                    const normalizedResultTitle = result.title
-                      .replaceAll(' ', '')
-                      .toLowerCase();
-                    const titleOk =
-                      !normalizedTitle ||
-                      normalizedResultTitle === normalizedTitle ||
-                      (!!normalizedSearchTitle &&
-                        normalizedResultTitle === normalizedSearchTitle);
-                    const yearOk = normalizedYear
-                      ? result.year.toLowerCase() === normalizedYear
-                      : true;
-                    return titleOk && yearOk;
-                  });
+                  const refreshedResults =
+                    filterSourcesForCurrentVideo(rawResults);
 
                   if (refreshedResults.length > 0) {
                     setAvailableSources(refreshedResults);
-                    candidates = pickCandidates(refreshedResults);
+                    candidates = pickFailoverCandidates(
+                      refreshedResults,
+                      episodeIdx,
+                      activeSource,
+                      activeId,
+                    );
                   }
                 }
               } catch {
@@ -652,7 +705,16 @@ function PlayPageClient() {
       if (aHasRank && bHasRank && aRank !== bRank) return aRank - bRank;
       if (aHasRank !== bHasRank) return aHasRank ? -1 : 1;
 
-      return 0;
+      // Deterministic client-side tie-break to avoid depending on server return order.
+      const sourceNameCmp = (a.source_name || a.source || '').localeCompare(
+        b.source_name || b.source || '',
+      );
+      if (sourceNameCmp !== 0) return sourceNameCmp;
+
+      const idCmp = String(a.id || '').localeCompare(String(b.id || ''));
+      if (idCmp !== 0) return idCmp;
+
+      return (a.title || '').localeCompare(b.title || '');
     });
   };
 
@@ -661,11 +723,48 @@ function PlayPageClient() {
     signal?: AbortSignal,
   ): Promise<SearchResult> => {
     if (sources.length === 1) return sources[0];
-    if (signal?.aborted) return sources[0];
+    if (signal?.aborted) return pickDeterministicSource(sources);
 
     const MAX_CONCURRENT = 3;
     const MAX_TEST_SOURCES = 6;
-    const candidates = sources.slice(0, MAX_TEST_SOURCES);
+    const pickBalancedCandidates = (
+      inputSources: SearchResult[],
+      maxCount: number,
+    ): SearchResult[] => {
+      if (inputSources.length <= maxCount) return inputSources;
+
+      const sourceBuckets = new Map<string, SearchResult[]>();
+      inputSources.forEach((item) => {
+        const bucketKey = item.source || 'unknown-source';
+        const bucket = sourceBuckets.get(bucketKey);
+        if (bucket) {
+          bucket.push(item);
+        } else {
+          sourceBuckets.set(bucketKey, [item]);
+        }
+      });
+
+      const queues = Array.from(sourceBuckets.values()).map((bucket) =>
+        bucket.slice(),
+      );
+      const picked: SearchResult[] = [];
+      let cursor = 0;
+
+      while (picked.length < maxCount && queues.length > 0) {
+        if (cursor >= queues.length) cursor = 0;
+        const queue = queues[cursor];
+        const next = queue.shift();
+        if (next) picked.push(next);
+        if (queue.length === 0) {
+          queues.splice(cursor, 1);
+        } else {
+          cursor += 1;
+        }
+      }
+
+      return picked;
+    };
+    const candidates = pickBalancedCandidates(sources, MAX_TEST_SOURCES);
 
     type TestResult =
       | {
@@ -769,7 +868,7 @@ function PlayPageClient() {
       setPrecomputedVideoInfo(newVideoInfoMap);
     }
 
-    if (signal?.aborted) return sources[0];
+    if (signal?.aborted) return pickDeterministicSource(sources);
 
     const successfulResults = allResults
       .filter(
@@ -790,7 +889,7 @@ function PlayPageClient() {
         }
         sourceScoreMapRef.current = {};
         sourceRankOrderRef.current = [];
-        return reachableResults[0].source;
+        return pickDeterministicSource(reachableResults.map((r) => r.source));
       }
 
       console.warn(
@@ -798,7 +897,7 @@ function PlayPageClient() {
       );
       sourceScoreMapRef.current = {};
       sourceRankOrderRef.current = [];
-      return sources[0];
+      return pickDeterministicSource(sources);
     }
 
     const resultsWithScore = rankSourceResults(successfulResults);
@@ -821,7 +920,10 @@ function PlayPageClient() {
       });
     }
 
-    return resultsWithScore[0]?.source || candidates[0] || sources[0];
+    return (
+      resultsWithScore[0]?.source ||
+      pickDeterministicSource(candidates.length > 0 ? candidates : sources)
+    );
   };
 
   useEffect(() => {
@@ -1326,12 +1428,18 @@ function PlayPageClient() {
       if (!newDetail.episodes || targetIndex >= newDetail.episodes.length)
         targetIndex = 0;
 
-      if (targetIndex !== currentEpisodeIndex) resumeTimeRef.current = 0;
-      else if (
-        (!resumeTimeRef.current || resumeTimeRef.current === 0) &&
-        currentPlayTime > 1
-      )
+      if (targetIndex !== currentEpisodeIndex) {
+        resumeTimeRef.current = 0;
+        pendingResumeTargetRef.current = null;
+      } else if (currentPlayTime > 1) {
+        // Keep movie/same-episode progress across source switches.
         resumeTimeRef.current = currentPlayTime;
+        pendingResumeTargetRef.current = {
+          source: newSource,
+          id: newId,
+          episodeIndex: targetIndex,
+        };
+      }
 
       const newUrl = new URL(window.location.href);
       newUrl.searchParams.set('source', newSource);
@@ -1430,6 +1538,7 @@ function PlayPageClient() {
       const playPromise = player.play();
       if (playPromise !== undefined) playPromise.catch(() => {});
       resumeTimeRef.current = null;
+      pendingResumeTargetRef.current = null;
     }
 
     if ((player as any).mobileUi) {
@@ -1445,6 +1554,43 @@ function PlayPageClient() {
           lockOnRotate: true,
         },
       });
+    }
+  };
+
+  const handleLoadedMetadata = () => {
+    setIsVideoLoading(false);
+
+    const player = playerRef.current;
+    if (!player || player.isDisposed()) return;
+
+    const pendingResume = resumeTimeRef.current;
+    if (!pendingResume || pendingResume <= 0) return;
+
+    const pendingTarget = pendingResumeTargetRef.current;
+    if (
+      pendingTarget &&
+      (pendingTarget.source !== currentSource ||
+        pendingTarget.id !== currentId ||
+        pendingTarget.episodeIndex !== currentEpisodeIndex)
+    ) {
+      // Metadata from old/intermediate source; keep pending resume for target source.
+      return;
+    }
+
+    const duration = player.duration();
+    const targetTime =
+      typeof duration === 'number' && Number.isFinite(duration) && duration > 0
+        ? Math.min(pendingResume, Math.max(duration - 1, 0))
+        : pendingResume;
+
+    try {
+      player.currentTime(targetTime);
+      const playPromise = player.play();
+      if (playPromise !== undefined) playPromise.catch(() => {});
+      resumeTimeRef.current = null;
+      pendingResumeTargetRef.current = null;
+    } catch {
+      // Keep pending resume for next metadata/canplay cycle.
     }
   };
 
@@ -1725,7 +1871,7 @@ function PlayPageClient() {
                     onReady={handlePlayerReady}
                     onTimeUpdate={handleTimeUpdate}
                     onEnded={handleEnded}
-                    onLoadedMetadata={() => setIsVideoLoading(false)}
+                    onLoadedMetadata={handleLoadedMetadata}
                     onPlay={() => setIsVideoLoading(false)}
                     onError={(err: any) => {
                       if (process.env.NODE_ENV !== 'production') {
@@ -1759,7 +1905,9 @@ function PlayPageClient() {
                       if (!retryableByCode && !retryableByMessage) return;
 
                       const episodeIdx = currentEpisodeIndex;
-                      const failKey = `${currentSource}|${currentId}|${episodeIdx}`;
+                      const activeSource = currentSourceRef.current;
+                      const activeId = currentIdRef.current;
+                      const failKey = `${activeSource}|${activeId}|${episodeIdx}`;
                       const nextCount =
                         (sourceFailCountRef.current[failKey] || 0) + 1;
                       sourceFailCountRef.current[failKey] = nextCount;
@@ -1769,23 +1917,12 @@ function PlayPageClient() {
                       if (sourceFailoverLockRef.current) return;
                       sourceFailoverLockRef.current = true;
                       void (async () => {
-                        const pickCandidates = (sources: SearchResult[]) =>
-                          sources.filter((s) => {
-                            if (
-                              s.source === currentSource &&
-                              s.id === currentId
-                            )
-                              return false;
-                            if (!s.episodes || episodeIdx >= s.episodes.length)
-                              return false;
-                            const candidateKey = `${s.source}|${s.id}|${episodeIdx}`;
-                            return (
-                              (sourceFailCountRef.current[candidateKey] || 0) <
-                              2
-                            );
-                          });
-
-                        let candidates = pickCandidates(availableSources);
+                        let candidates = pickFailoverCandidates(
+                          availableSources,
+                          episodeIdx,
+                          activeSource,
+                          activeId,
+                        );
                         if (candidates.length === 0) {
                           const query = (
                             searchTitleRef.current ||
@@ -1807,9 +1944,18 @@ function PlayPageClient() {
                                 )
                                   ? data.results
                                   : [];
-                                if (refreshedResults.length > 0) {
-                                  setAvailableSources(refreshedResults);
-                                  candidates = pickCandidates(refreshedResults);
+                                const refreshedFiltered =
+                                  filterSourcesForCurrentVideo(
+                                    refreshedResults,
+                                  );
+                                if (refreshedFiltered.length > 0) {
+                                  setAvailableSources(refreshedFiltered);
+                                  candidates = pickFailoverCandidates(
+                                    refreshedFiltered,
+                                    episodeIdx,
+                                    activeSource,
+                                    activeId,
+                                  );
                                 }
                               }
                             } catch {

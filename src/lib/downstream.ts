@@ -19,7 +19,16 @@ interface ApiSearchItem {
 }
 
 function isPlayableM3u8(url: string): boolean {
-  return /\.m3u8(?:$|[?#])/i.test(url.trim());
+  const u = url.trim().toLowerCase();
+  if (!u) return false;
+  return (
+    /\.m3u8(?:$|[?#])/i.test(u) ||
+    /\.mpd(?:$|[?#])/i.test(u) ||
+    /\.flv(?:$|[?#])/i.test(u) ||
+    /\.mp4(?:$|[?#])/i.test(u) ||
+    /\.ts(?:$|[?#])/i.test(u) ||
+    /\/(m3u8|flv|vod|live)\//i.test(u)
+  );
 }
 
 /**
@@ -246,6 +255,22 @@ export async function getDetailFromApi(
   apiSite: ApiSite,
   id: string,
 ): Promise<SearchResult> {
+  const buildDetailCandidateUrls = (
+    apiBase: string,
+    vodId: string,
+  ): string[] => {
+    const trimmed = apiBase.replace(/[?&]+$/, '');
+    if (trimmed.includes('?')) {
+      return [`${trimmed}&ac=videolist&ids=${encodeURIComponent(vodId)}`];
+    }
+    const encoded = encodeURIComponent(vodId);
+    return [
+      `${trimmed}?ac=videolist&ids=${encoded}`,
+      `${trimmed}?ac=detail&ids=${encoded}`,
+      `${trimmed}?ac=detail&vod_id=${encoded}`,
+    ];
+  };
+
   const fetchWithTimeout = async (url: string) => {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 15000);
@@ -273,98 +298,113 @@ export async function getDetailFromApi(
     return res;
   }
 
-  const detailUrl = `${apiSite.api}${API_CONFIG.detail.path}${id}`;
+  const detailCandidates = buildDetailCandidateUrls(apiSite.api, id);
+  const detailUrl = detailCandidates[0];
 
   // Route through Go proxy when available; fall back to direct fetch
   const goProxyUrl = process.env.GO_PROXY_URL;
-  const proxyUrl =
-    goProxyUrl &&
-    `${goProxyUrl}/api/detail-proxy?upstream=${encodeURIComponent(detailUrl)}`;
+  const proxyUrlFor = (upstream: string) =>
+    goProxyUrl
+      ? `${goProxyUrl}/api/detail-proxy?upstream=${encodeURIComponent(upstream)}`
+      : '';
 
   let response: Response | null = null;
 
-  if (proxyUrl) {
-    try {
-      response = await fetchWithTimeout(proxyUrl);
-    } catch (err) {
-      console.warn(
-        '[Detail] Proxy fetch failed, falling back to direct:',
-        (err as Error)?.message,
-      );
-      response = null;
+  for (const candidate of detailCandidates) {
+    const proxyUrl = proxyUrlFor(candidate);
+    response = null;
+
+    if (proxyUrl) {
+      try {
+        response = await fetchWithTimeout(proxyUrl);
+      } catch (err) {
+        console.warn(
+          '[Detail] Proxy fetch failed, falling back to direct:',
+          (err as Error)?.message,
+        );
+        response = null;
+      }
     }
-  }
 
-  if (!response || !response.ok) {
-    response = await fetchWithTimeout(detailUrl);
-  }
+    if (!response || !response.ok) {
+      try {
+        response = await fetchWithTimeout(candidate);
+      } catch {
+        response = null;
+      }
+    }
 
-  if (!response.ok) {
-    throw new Error(`详情请求失败: ${response.status}`);
-  }
+    if (!response || !response.ok) {
+      continue;
+    }
 
-  const data = await response.json();
+    const data = await response.json();
+    if (
+      !data ||
+      !data.list ||
+      !Array.isArray(data.list) ||
+      data.list.length === 0
+    ) {
+      continue;
+    }
 
-  if (
-    !data ||
-    !data.list ||
-    !Array.isArray(data.list) ||
-    data.list.length === 0
-  ) {
-    throw new Error('获取到的详情内容无效');
-  }
+    const videoDetail = data.list[0];
+    let episodes: string[] = [];
+    let titles: string[] = [];
 
-  const videoDetail = data.list[0];
-  let episodes: string[] = [];
-  let titles: string[] = [];
-
-  if (videoDetail.vod_play_url) {
-    const vod_play_url_array = videoDetail.vod_play_url.split('$$$');
-    vod_play_url_array.forEach((url: string) => {
-      const matchEpisodes: string[] = [];
-      const matchTitles: string[] = [];
-      const title_url_array = url.split('#');
-      title_url_array.forEach((title_url: string) => {
-        const episode_title_url = title_url.split('$');
-        if (
-          episode_title_url.length === 2 &&
-          isPlayableM3u8(episode_title_url[1])
-        ) {
-          matchTitles.push(episode_title_url[0]);
-          matchEpisodes.push(episode_title_url[1]);
+    if (videoDetail.vod_play_url) {
+      const vod_play_url_array = videoDetail.vod_play_url.split('$$$');
+      vod_play_url_array.forEach((url: string) => {
+        const matchEpisodes: string[] = [];
+        const matchTitles: string[] = [];
+        const title_url_array = url.split('#');
+        title_url_array.forEach((title_url: string) => {
+          const episode_title_url = title_url.split('$');
+          if (
+            episode_title_url.length === 2 &&
+            isPlayableM3u8(episode_title_url[1])
+          ) {
+            matchTitles.push(episode_title_url[0]);
+            matchEpisodes.push(episode_title_url[1]);
+          }
+        });
+        if (matchEpisodes.length > episodes.length) {
+          episodes = matchEpisodes;
+          titles = matchTitles;
         }
       });
-      if (matchEpisodes.length > episodes.length) {
-        episodes = matchEpisodes;
-        titles = matchTitles;
-      }
-    });
+    }
+
+    if (episodes.length === 0 && videoDetail.vod_content) {
+      const matches = videoDetail.vod_content.match(M3U8_PATTERN) || [];
+      episodes = matches.map((link: string) => link.replace(/^\$/, ''));
+    }
+
+    const result = {
+      id: id.toString(),
+      title: videoDetail.vod_name,
+      poster: videoDetail.vod_pic,
+      episodes,
+      episodes_titles: titles,
+      source: apiSite.key,
+      source_name: apiSite.name,
+      class: videoDetail.vod_class,
+      year: videoDetail.vod_year
+        ? videoDetail.vod_year.match(/\d{4}/)?.[0] || ''
+        : 'unknown',
+      desc: cleanHtmlTags(videoDetail.vod_content),
+      type_name: videoDetail.type_name,
+      douban_id: videoDetail.vod_douban_id,
+    };
+
+    await setCachedDetail(apiSite.key, id, 'ok', [result]);
+    return result;
   }
 
-  if (episodes.length === 0 && videoDetail.vod_content) {
-    const matches = videoDetail.vod_content.match(M3U8_PATTERN) || [];
-    episodes = matches.map((link: string) => link.replace(/^\$/, ''));
+  if (response && !response.ok) {
+    throw new Error(`详情请求失败: ${response.status}`);
   }
-
-  const result = {
-    id: id.toString(),
-    title: videoDetail.vod_name,
-    poster: videoDetail.vod_pic,
-    episodes,
-    episodes_titles: titles,
-    source: apiSite.key,
-    source_name: apiSite.name,
-    class: videoDetail.vod_class,
-    year: videoDetail.vod_year
-      ? videoDetail.vod_year.match(/\d{4}/)?.[0] || ''
-      : 'unknown',
-    desc: cleanHtmlTags(videoDetail.vod_content),
-    type_name: videoDetail.type_name,
-    douban_id: videoDetail.vod_douban_id,
-  };
-
-  await setCachedDetail(apiSite.key, id, 'ok', [result]);
-  return result;
+  throw new Error('获取到的详情内容无效');
 }
 
 async function handleSpecialSourceDetail(

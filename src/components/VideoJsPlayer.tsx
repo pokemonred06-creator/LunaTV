@@ -8,9 +8,10 @@ declare global {
   interface Window {
     Hls: any;
     flvjs: any;
+    mpegts: any;
   }
 }
-import type { MutableRefObject } from 'react';
+import type { CSSProperties, MutableRefObject } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import videojs from 'video.js';
 import Player from 'video.js/dist/types/player';
@@ -256,13 +257,35 @@ const useUnifiedSeek = (
 
 const useStats = (
   playerRef: MutableRefObject<VideoJsPlayerInstance | null>,
+  isLiveMode: boolean,
 ) => {
+  const normalizeStreamUrl = useCallback((rawUrl: string) => {
+    const value = (rawUrl || '').trim();
+    if (!value) return '';
+    try {
+      const u = new URL(
+        value,
+        typeof window !== 'undefined' ? window.location.origin : undefined,
+      );
+      if (u.pathname.startsWith('/api/proxy/')) {
+        const nested = u.searchParams.get('url');
+        if (!nested) return value;
+        return decodeURIComponent(nested);
+      }
+      return u.toString();
+    } catch {
+      return value;
+    }
+  }, []);
+
   const [stats, setStats] = useState({
     resolution: '0x0',
     connSpeed: '0 Mbps',
     currentBitrate: '0 Mbps',
     bufferHealth: '0s',
     droppedFrames: 0,
+    currentUrl: '',
+    streamMode: 'VOD',
   });
 
   useEffect(() => {
@@ -295,6 +318,13 @@ const useStats = (
         : '0';
       const dropped =
         (v as any).getVideoPlaybackQuality?.()?.droppedVideoFrames ?? 0;
+      const currentUrl =
+        p.currentSrc?.() ||
+        v.currentSrc ||
+        v.src ||
+        (p as any).cache_?.src ||
+        '';
+      const streamUrl = normalizeStreamUrl(currentUrl);
 
       setStats({
         resolution: res,
@@ -302,10 +332,12 @@ const useStats = (
         currentBitrate: bitrate,
         bufferHealth: buf + 's',
         droppedFrames: dropped,
+        currentUrl: streamUrl,
+        streamMode: isLiveMode ? 'LIVE' : 'VOD',
       });
     }, 1000);
     return () => clearInterval(interval);
-  }, [playerRef]);
+  }, [playerRef, normalizeStreamUrl, isLiveMode]);
   return stats;
 };
 
@@ -747,6 +779,18 @@ export default function VideoJsPlayer({
   reloadTrigger = 0,
 }: VideoJsPlayerProps) {
   const { convert } = useLanguage();
+  const inferLiveFromSource = useCallback(() => {
+    if (isLive) return true;
+    const u = (url || '').toLowerCase();
+    const t = (type || '').toLowerCase();
+    if (u.includes('/api/proxy/flv') || u.includes('/api/proxy/ts'))
+      return true;
+    if (u.includes('huya') || u.includes('douyu') || u.includes('douzhicloud'))
+      return true;
+    if (t === 'video/x-flv' || t === 'video/mp2t') return true;
+    return false;
+  }, [isLive, type, url]);
+
   // --- Refs & State ---
   const containerRef = useRef<HTMLDivElement>(null);
   const videoWrapperRef = useRef<HTMLDivElement>(null);
@@ -774,6 +818,7 @@ export default function VideoJsPlayer({
   const [hasAirPlay, setHasAirPlay] = useState(false);
   const [isPiPActive, setIsPiPActive] = useState(false);
   const [playerReady, setPlayerReady] = useState(false);
+  const [playbackIsLive, setPlaybackIsLive] = useState(inferLiveFromSource());
   const [techEpoch, setTechEpoch] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [autoplayBlocked, setAutoplayBlocked] = useState(false);
@@ -849,7 +894,52 @@ export default function VideoJsPlayer({
 
   // Stats
   const [showStats, setShowStats] = useState(false);
-  const stats = useStats(playerRef);
+  const stats = useStats(playerRef, playbackIsLive);
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const mediaQuery = window.matchMedia('(max-width: 768px)');
+    const updateViewport = () => {
+      setIsMobileViewport(mediaQuery.matches);
+    };
+
+    updateViewport();
+    if (typeof mediaQuery.addEventListener === 'function') {
+      mediaQuery.addEventListener('change', updateViewport);
+      return () => mediaQuery.removeEventListener('change', updateViewport);
+    }
+
+    mediaQuery.addListener(updateViewport);
+    return () => mediaQuery.removeListener(updateViewport);
+  }, []);
+
+  const statsOverlayStyle = useMemo<CSSProperties>(
+    () => ({
+      position: 'absolute',
+      top: isMobileViewport ? 'auto' : 64,
+      bottom: isMobileViewport ? 92 : 'auto',
+      left: isMobileViewport ? 12 : 16,
+      right: isMobileViewport ? 12 : 'auto',
+      maxWidth: isMobileViewport ? 'calc(100% - 24px)' : 520,
+      maxHeight: isMobileViewport ? '40vh' : undefined,
+      overflowY: isMobileViewport ? 'auto' : 'visible',
+      background: 'rgba(0,0,0,0.8)',
+      padding: 8,
+      fontSize: 12,
+      color: '#d1d5db',
+      fontFamily: 'monospace',
+      pointerEvents: 'auto',
+      borderRadius: 4,
+      backdropFilter: 'blur(4px)',
+      border: '1px solid rgba(255,255,255,0.1)',
+      zIndex: 50,
+      userSelect: 'text',
+      WebkitUserSelect: 'text',
+    }),
+    [isMobileViewport],
+  );
 
   // --- Helpers ---
   const getTechVideoEl = useCallback((): HTMLVideoElement | null => {
@@ -863,6 +953,40 @@ export default function VideoJsPlayer({
   const reportPlaybackError = useCallback((error: unknown) => {
     callbacksRef.current.onError?.(error);
   }, []);
+
+  const detectLiveRuntime = useCallback(
+    (
+      p: VideoJsPlayerInstance | null,
+      v?: HTMLVideoElement | null,
+      currentDuration?: number,
+    ) => {
+      if (inferLiveFromSource()) return true;
+      const player = p || playerRef.current;
+      const video = v || (player?.tech?.(true)?.el?.() as HTMLVideoElement);
+      if (!player || !video) return false;
+
+      const liveTracker = (player as any).liveTracker;
+      if (liveTracker?.isLive?.()) return true;
+
+      const d = Number.isFinite(currentDuration || NaN)
+        ? (currentDuration as number)
+        : player.duration?.() || video.duration;
+      if (!Number.isFinite(d) || d === Infinity || d <= 0) return true;
+
+      if (video.seekable && video.seekable.length > 0) {
+        const start = video.seekable.start(0);
+        const end = video.seekable.end(video.seekable.length - 1);
+        if (
+          Number.isFinite(start) &&
+          Number.isFinite(end) &&
+          end - start <= 180
+        )
+          return true;
+      }
+      return false;
+    },
+    [inferLiveFromSource, playerRef],
+  );
 
   const formatTime = (s: number) => {
     if (!Number.isFinite(s)) return '0:00';
@@ -951,6 +1075,10 @@ export default function VideoJsPlayer({
       }, 1000);
     }
   }, [debug]);
+
+  useEffect(() => {
+    setPlaybackIsLive(inferLiveFromSource());
+  }, [inferLiveFromSource, url, type]);
 
   const armAutoplay = useCallback(
     (videoEl?: HTMLVideoElement | null) => {
@@ -1080,7 +1208,7 @@ export default function VideoJsPlayer({
         const HlsClass = Hls as any;
         const hls = new HlsClass({
           enableWorker: true,
-          lowLatencyMode: isLive,
+          lowLatencyMode: playbackIsLive,
           loader: customHlsLoaderFactory
             ? customHlsLoaderFactory(HlsClass)
             : HlsClass.DefaultConfig?.loader,
@@ -1147,7 +1275,7 @@ export default function VideoJsPlayer({
     [
       seriesId,
       customHlsLoaderFactory,
-      isLive,
+      playbackIsLive,
       armAutoplay,
       getTechVideoEl,
       tryPlayNow,
@@ -1175,22 +1303,49 @@ export default function VideoJsPlayer({
 
     clearNativeAutoplayListeners();
 
-    // Clean up any previous direct flv.js player
-    if (playerRef.current && (playerRef.current as any).__flvCleanup) {
-      (playerRef.current as any).__flvCleanup();
-      (playerRef.current as any).__flvCleanup = null;
+    // Clean up any previous direct MSE player
+    if (playerRef.current && (playerRef.current as any).__mseCleanup) {
+      (playerRef.current as any).__mseCleanup();
+      (playerRef.current as any).__mseCleanup = null;
     }
 
+    let proxiedUpstream: string;
+    try {
+      const parsed = new URL(finalUrl, window.location.origin);
+      proxiedUpstream = (parsed.searchParams.get('url') || '').toLowerCase();
+    } catch {
+      proxiedUpstream = '';
+    }
+
+    const forcedFlvFromProxy =
+      finalUrl.includes('/api/proxy/m3u8') &&
+      (proxiedUpstream.includes('huya') ||
+        proxiedUpstream.includes('douyu') ||
+        proxiedUpstream.includes('jdshipin.com') ||
+        proxiedUpstream.includes('douzhicloud.site') ||
+        proxiedUpstream.includes('zxyxndc.top') ||
+        /\.flv(\?|$)/i.test(proxiedUpstream) ||
+        /\.php(\?|$)/i.test(proxiedUpstream));
+
     const isHls =
-      type === 'application/x-mpegURL' || finalUrl.includes('.m3u8');
+      !forcedFlvFromProxy &&
+      (type === 'application/x-mpegURL' || finalUrl.includes('.m3u8'));
+    const isTs =
+      type === 'video/mp2t' ||
+      type === 'ts' ||
+      finalUrl.includes('/api/proxy/ts') ||
+      /\.ts(\?|$)/i.test(finalUrl);
     const isFlv =
+      forcedFlvFromProxy ||
       type === 'video/x-flv' ||
       type === 'flv' ||
       finalUrl.includes('.flv') ||
       finalUrl.includes('/api/proxy/flv');
     console.log('[VideoJsPlayer] Detect:', {
       isHls,
+      isTs,
       isFlv,
+      forcedFlvFromProxy,
       type,
       finalUrl: finalUrl.substring(0, 100),
     });
@@ -1239,10 +1394,11 @@ export default function VideoJsPlayer({
         hlsRef.current = null;
       }
 
-      // FLV: Use flv.js directly (bypass videojs-flvjs)
+      // FLV/TS: Use MSE libraries directly (bypass Video.js native src handling)
       // This enables reconnection when the CDN closes the connection after
       // short-lived signed tokens expire.
-      if (isFlv) {
+      if (isFlv || isTs) {
+        const streamLabel = isTs ? 'TS' : 'FLV';
         let src = finalUrl;
         if (
           /^https?:\/\//i.test(finalUrl) &&
@@ -1250,13 +1406,15 @@ export default function VideoJsPlayer({
         ) {
           const enc = encodeURIComponent(finalUrl);
           const srcParam = encodeURIComponent(seriesId || 'global');
-          src = `/api/proxy/flv?url=${enc}&moontv-source=${srcParam}`;
+          src = isTs
+            ? `/api/proxy/ts?url=${enc}&moontv-source=${srcParam}`
+            : `/api/proxy/flv?url=${enc}&moontv-source=${srcParam}`;
         }
 
         // Clear previous error overlay
         (playerRef.current as any).error(null);
 
-        // Attach flv.js directly to the underlying <video> element
+        // Attach MSE library directly to the underlying <video> element
         (async () => {
           let v = getTechVideoEl();
           for (let i = 0; i < 10 && !v; i++) {
@@ -1265,125 +1423,418 @@ export default function VideoJsPlayer({
           }
           if (!v || !mountedRef.current) return;
 
-          // Destroy any previous flv player
-          if ((window as any).__flvPlayer) {
+          // Destroy any previous direct MSE player
+          if ((window as any).__msePlayer) {
             try {
-              (window as any).__flvPlayer.pause();
-              (window as any).__flvPlayer.unload();
-              (window as any).__flvPlayer.detachMediaElement();
-              (window as any).__flvPlayer.destroy();
+              (window as any).__msePlayer.pause();
+              (window as any).__msePlayer.unload();
+              (window as any).__msePlayer.detachMediaElement();
+              (window as any).__msePlayer.destroy();
             } catch {
               /* ignore */
             }
-            (window as any).__flvPlayer = null;
+            (window as any).__msePlayer = null;
           }
 
-          const flvjs = window.flvjs;
-          if (!flvjs || !flvjs.isSupported()) {
-            console.error('[FLV] flv.js not available or not supported');
+          const mseLib = isTs ? window.mpegts : window.flvjs;
+          if (!mseLib || !mseLib.isSupported?.()) {
+            console.error(
+              `[${streamLabel}] MSE library not available or not supported`,
+            );
             return;
           }
 
+          // Tell Video.js to clear previous error state; we attach media via MSE directly.
+          if (playerRef.current) {
+            try {
+              (playerRef.current as any).error(null);
+            } catch {
+              /* ignore */
+            }
+          }
+
           let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+          let playRetryTimer: ReturnType<typeof setTimeout> | null = null;
+          let stallWatchTimer: ReturnType<typeof setInterval> | null = null;
+          let continuityProbeTimer: ReturnType<typeof setTimeout> | null = null;
+          let endedHandler: (() => void) | null = null;
           let reconnectCount = 0;
           const MAX_RECONNECTS = 50;
+          const RECONNECT_MIN_INTERVAL_MS = 8000;
+          const TARGET_LIVE_BUFFER_SECONDS = 20;
+          const MIN_CONTINUITY_RELOAD_MS = 2000;
+          let lastReconnectAt = 0;
+          let lastContinuityReloadAt = 0;
+          let stopReconnect = false;
+          let creatingPlayer = false;
+          let loadingCompleted = false;
+          let consecutiveRetryable403 = 0;
 
-          const createPlayer = () => {
-            if (!mountedRef.current) return;
+          const clearTimers = () => {
+            if (reconnectTimer) {
+              clearTimeout(reconnectTimer);
+              reconnectTimer = null;
+            }
+            if (playRetryTimer) {
+              clearTimeout(playRetryTimer);
+              playRetryTimer = null;
+            }
+            if (stallWatchTimer) {
+              clearInterval(stallWatchTimer);
+              stallWatchTimer = null;
+            }
+            if (continuityProbeTimer) {
+              clearTimeout(continuityProbeTimer);
+              continuityProbeTimer = null;
+            }
+          };
 
-            const fp = flvjs.createPlayer(
-              {
-                type: 'flv',
-                url: src,
-                isLive: true,
-                hasAudio: true,
-                hasVideo: true,
-                cors: true,
-                withCredentials: false,
-              },
-              {
-                enableWorker: true,
-                enableStashBuffer: true,
-                stashInitialSize: 64 * 1024, // 64KB for slightly more stability
-                lazyLoad: false,
-                autoCleanupSourceBuffer: true,
-                autoCleanupMaxBackwardDuration: 30,
-                autoCleanupMinBackwardDuration: 15,
-              },
-            );
-
-            fp.attachMediaElement(v!);
-            fp.load();
-            fp.play();
-            (window as any).__flvPlayer = fp;
-
-            // On stream end (CDN closes connection), reconnect
-            fp.on(flvjs.Events.LOADING_COMPLETE, () => {
-              console.warn('[FLV] Loading complete, reconnecting...');
-              if (!mountedRef.current) return;
-              reconnectCount++;
-              if (reconnectCount > MAX_RECONNECTS) {
-                console.error('[FLV] Max reconnects reached');
-                return;
-              }
-              // Destroy and recreate after a short delay
+          const destroyPlayer = (fp: any) => {
+            clearTimers();
+            try {
+              fp.pause();
+              fp.unload();
+              fp.detachMediaElement();
+              fp.destroy();
+            } catch {
+              /* ignore */
+            }
+            if ((window as any).__msePlayer === fp) {
+              (window as any).__msePlayer = null;
+            }
+            if (endedHandler && v) {
               try {
-                fp.pause();
-                fp.unload();
-                fp.detachMediaElement();
-                fp.destroy();
+                v.removeEventListener('ended', endedHandler);
               } catch {
                 /* ignore */
               }
-              (window as any).__flvPlayer = null;
-              // 800ms delay to balance recovery and stability
-              reconnectTimer = setTimeout(() => {
-                if (mountedRef.current) createPlayer();
-              }, 800);
-            });
+              endedHandler = null;
+            }
+          };
 
-            fp.on(flvjs.Events.ERROR, (errType: string, errDetail: string) => {
-              console.error('[FLV] Error:', errType, errDetail);
-              if (!mountedRef.current) return;
-              // On network errors, try reconnecting
-              if (errType === flvjs.ErrorTypes.NETWORK_ERROR) {
-                reconnectCount++;
-                if (reconnectCount > MAX_RECONNECTS) return;
-                try {
-                  fp.pause();
-                  fp.unload();
-                  fp.detachMediaElement();
-                  fp.destroy();
-                } catch {
-                  /* ignore */
-                }
-                (window as any).__flvPlayer = null;
-                reconnectTimer = setTimeout(() => {
-                  if (mountedRef.current) createPlayer();
-                }, 500);
+          const scheduleReconnect = (delayMs: number, force = false) => {
+            if (!mountedRef.current || stopReconnect) return;
+            if (reconnectCount > MAX_RECONNECTS) {
+              console.error(`[${streamLabel}] Max reconnects reached`);
+              stopReconnect = true;
+              return;
+            }
+            if (
+              !force &&
+              Date.now() - lastReconnectAt < RECONNECT_MIN_INTERVAL_MS
+            ) {
+              return;
+            }
+            if (reconnectTimer) return;
+            reconnectTimer = setTimeout(() => {
+              reconnectTimer = null;
+              if (mountedRef.current && !stopReconnect) {
+                lastReconnectAt = Date.now();
+                createPlayer();
               }
-            });
+            }, delayMs);
+          };
+
+          const getBufferAhead = (videoEl: HTMLVideoElement | null) => {
+            if (!videoEl || videoEl.buffered.length === 0) return 0;
+            const end = videoEl.buffered.end(videoEl.buffered.length - 1);
+            return Math.max(0, end - videoEl.currentTime);
+          };
+
+          const createPlayer = () => {
+            if (!mountedRef.current || stopReconnect || creatingPlayer) return;
+            creatingPlayer = true;
+            try {
+              console.log(`[${streamLabel}] Creating player for:`, src);
+              const fp = mseLib.createPlayer(
+                {
+                  type: isTs ? 'mpegts' : 'flv',
+                  url: src,
+                  isLive: true,
+                  hasAudio: true,
+                  hasVideo: true,
+                  cors: true,
+                  withCredentials: false,
+                },
+                {
+                  // Some environments/chunking setups break flv.js worker bundle
+                  // resolution and throw "Class extends value undefined".
+                  // Keep transmuxing on main thread for reliability.
+                  enableWorker: false,
+                  enableStashBuffer: true,
+                  // Larger stash helps absorb jitter and build a deeper live buffer.
+                  stashInitialSize: 1024 * 1024,
+                  lazyLoad: false,
+                  // Keep more buffered media in MSE; avoid aggressively trimming to tiny windows.
+                  autoCleanupSourceBuffer: false,
+                  autoCleanupMaxBackwardDuration: 90,
+                  autoCleanupMinBackwardDuration: 45,
+                  liveBufferLatencyChasing: false,
+                  // Upstream live FLV commonly ignores HTTP Range and always returns 200 stream.
+                  // 'param' avoids range-based reconnect/seek behavior that can stall on some CDNs.
+                  seekType: 'param',
+                },
+              );
+
+              fp.attachMediaElement(v!);
+              fp.load();
+              loadingCompleted = false;
+              consecutiveRetryable403 = 0;
+
+              endedHandler = () => {
+                if (
+                  stopReconnect ||
+                  !mountedRef.current ||
+                  (window as any).__msePlayer !== fp
+                ) {
+                  return;
+                }
+                // Live FLV gateways often close each pull after a few seconds.
+                // If media reaches ended, immediately reopen to continue.
+                reconnectCount++;
+                console.warn(
+                  `[${streamLabel}] Media ended, reopening live stream`,
+                );
+                destroyPlayer(fp);
+                scheduleReconnect(200, true);
+              };
+              v?.addEventListener('ended', endedHandler);
+
+              // FIX: Aggressive auto-play bypass: mute before play
+              v.muted = true;
+
+              // Ensure play is called after load
+              setTimeout(() => {
+                if (mountedRef.current && (window as any).__msePlayer === fp) {
+                  console.log(`[${streamLabel}] Attempting play()...`);
+                  fp.play().catch((e: any) => {
+                    if (
+                      stopReconnect ||
+                      !mountedRef.current ||
+                      (window as any).__msePlayer !== fp
+                    ) {
+                      return;
+                    }
+                    if (e?.name === 'AbortError') {
+                      console.debug(
+                        `[${streamLabel}] play() interrupted during transition`,
+                      );
+                    } else {
+                      console.warn(
+                        `[${streamLabel}] Play failed, retrying in 500ms:`,
+                        e,
+                      );
+                    }
+                    // Second attempt if first one was caught in a race
+                    playRetryTimer = setTimeout(() => {
+                      playRetryTimer = null;
+                      if (
+                        !stopReconnect &&
+                        mountedRef.current &&
+                        (window as any).__msePlayer === fp
+                      ) {
+                        fp.play().catch((e2: any) =>
+                          e2?.name === 'AbortError'
+                            ? console.debug(
+                                `[${streamLabel}] Final play interrupted during transition`,
+                              )
+                            : console.error(
+                                `[${streamLabel}] Final play failure:`,
+                                e2,
+                              ),
+                        );
+                      }
+                    }, 500);
+                  });
+                }
+              }, 100);
+              (window as any).__msePlayer = fp;
+              let lastVideoTime = v?.currentTime ?? 0;
+              let stagnantTicks = 0;
+              let starvationTicks = 0;
+              // Some upstreams (notably unstable FLV gateways) can stop sending
+              // frames without triggering an explicit flv.js error event.
+              // Detect stalled playback and force a reconnect.
+              stallWatchTimer = setInterval(() => {
+                if (
+                  stopReconnect ||
+                  !mountedRef.current ||
+                  (window as any).__msePlayer !== fp
+                ) {
+                  return;
+                }
+                const current = v?.currentTime ?? 0;
+                const isPaused = v?.paused ?? true;
+                const hasFutureData = (v?.readyState ?? 0) >= 2;
+                const bufferAhead = getBufferAhead(v ?? null);
+                if (!isPaused) {
+                  // FLV live streams may carry non-zero PTS. If currentTime sits
+                  // at 0 while data starts later, jump to buffered start.
+                  if ((v?.buffered.length ?? 0) > 0) {
+                    const start = v!.buffered.start(0);
+                    if (current + 0.05 < start) {
+                      try {
+                        v!.currentTime = start + 0.1;
+                      } catch {
+                        /* ignore */
+                      }
+                    }
+                  }
+
+                  if (hasFutureData) {
+                    starvationTicks = 0;
+                    if (Math.abs(current - lastVideoTime) < 0.01) {
+                      stagnantTicks++;
+                    } else {
+                      stagnantTicks = 0;
+                      lastVideoTime = current;
+                    }
+                    if (
+                      (loadingCompleted && stagnantTicks >= 6) ||
+                      stagnantTicks >= 20
+                    ) {
+                      console.warn(
+                        `[${streamLabel}] Playback stalled, forcing reconnect`,
+                      );
+                      reconnectCount++;
+                      destroyPlayer(fp);
+                      scheduleReconnect(300);
+                    }
+                  } else {
+                    stagnantTicks = 0;
+                    starvationTicks++;
+                    if (
+                      (loadingCompleted && starvationTicks >= 6) ||
+                      starvationTicks >= 20
+                    ) {
+                      console.warn(
+                        `[${streamLabel}] Buffer starvation detected, reconnecting`,
+                      );
+                      reconnectCount++;
+                      destroyPlayer(fp);
+                      scheduleReconnect(300);
+                    }
+                  }
+                }
+              }, 500);
+
+              // Some gateways close and reopen frequently; only reconnect when
+              // playback time actually stops after LOADING_COMPLETE.
+              fp.on(mseLib.Events.LOADING_COMPLETE, () => {
+                console.warn(
+                  `[${streamLabel}] Loading complete, probing continuity...`,
+                );
+                if (!mountedRef.current || stopReconnect) return;
+                loadingCompleted = true;
+                if (continuityProbeTimer) {
+                  clearTimeout(continuityProbeTimer);
+                }
+                continuityProbeTimer = setTimeout(() => {
+                  continuityProbeTimer = null;
+                  if (
+                    stopReconnect ||
+                    !mountedRef.current ||
+                    (window as any).__msePlayer !== fp
+                  ) {
+                    return;
+                  }
+                  const bufferAhead = getBufferAhead(v ?? null);
+                  const shouldExtend =
+                    bufferAhead < TARGET_LIVE_BUFFER_SECONDS &&
+                    Date.now() - lastContinuityReloadAt >
+                      MIN_CONTINUITY_RELOAD_MS;
+                  if (shouldExtend) {
+                    lastContinuityReloadAt = Date.now();
+                    reconnectCount++;
+                    console.warn(
+                      `[${streamLabel}] Soft reload to extend live buffer`,
+                    );
+                    destroyPlayer(fp);
+                    scheduleReconnect(250, true);
+                  }
+                }, 1200);
+              });
+
+              fp.on(
+                mseLib.Events.ERROR,
+                (errType: string, errDetail: string, errInfo?: any) => {
+                  console.error(
+                    `[${streamLabel}] Error:`,
+                    errType,
+                    errDetail,
+                    errInfo,
+                  );
+                  const statusCode =
+                    typeof errInfo?.code === 'number' ? errInfo.code : null;
+                  const retryable403 =
+                    statusCode === 403 &&
+                    /cdn\.jdshipin\.com|douzhicloud\.site|\/api\/proxy\/flv/i.test(
+                      src,
+                    );
+                  if (retryable403) {
+                    consecutiveRetryable403 += 1;
+                  } else if (statusCode !== 403) {
+                    consecutiveRetryable403 = 0;
+                  }
+                  if (consecutiveRetryable403 >= 8) {
+                    stopReconnect = true;
+                    console.warn(
+                      `[${streamLabel}] Repeated upstream 403, stop reconnecting`,
+                    );
+                    destroyPlayer(fp);
+                    return;
+                  }
+                  const terminalHttpError =
+                    errDetail === 'HttpStatusCodeInvalid' &&
+                    (statusCode === 401 ||
+                      (statusCode === 403 && !retryable403) ||
+                      statusCode === 404);
+                  if (terminalHttpError) {
+                    stopReconnect = true;
+                    console.warn(
+                      `[${streamLabel}] Terminal upstream status ${statusCode}, stop reconnecting`,
+                    );
+                    destroyPlayer(fp);
+                    return;
+                  }
+
+                  if (!mountedRef.current || stopReconnect) return;
+                  // On network errors, try reconnecting.
+                  if (
+                    errType === mseLib.ErrorTypes.NETWORK_ERROR ||
+                    (errDetail === 'HttpStatusCodeInvalid' && retryable403)
+                  ) {
+                    reconnectCount++;
+                    destroyPlayer(fp);
+                    scheduleReconnect(retryable403 ? 6000 : 500);
+                  }
+                },
+              );
+            } finally {
+              creatingPlayer = false;
+            }
           };
 
           createPlayer();
 
           // Store cleanup for this effect
           const origCleanup = () => {
-            if (reconnectTimer) clearTimeout(reconnectTimer);
-            if ((window as any).__flvPlayer) {
+            stopReconnect = true;
+            clearTimers();
+            if ((window as any).__msePlayer) {
               try {
-                (window as any).__flvPlayer.pause();
-                (window as any).__flvPlayer.unload();
-                (window as any).__flvPlayer.detachMediaElement();
-                (window as any).__flvPlayer.destroy();
+                (window as any).__msePlayer.pause();
+                (window as any).__msePlayer.unload();
+                (window as any).__msePlayer.detachMediaElement();
+                (window as any).__msePlayer.destroy();
               } catch {
                 /* ignore */
               }
-              (window as any).__flvPlayer = null;
+              (window as any).__msePlayer = null;
             }
           };
           // Save a reference for cleanup when url/type changes
-          (playerRef.current as any).__flvCleanup = origCleanup;
+          (playerRef.current as any).__mseCleanup = origCleanup;
         })();
 
         // Arm autoplay
@@ -1458,13 +1909,15 @@ export default function VideoJsPlayer({
     (async () => {
       try {
         const flvjs = (await import('flv.js')).default;
+        const mpegts = (await import('mpegts.js')).default;
         if (typeof window !== 'undefined') {
           window.flvjs = flvjs;
+          window.mpegts = mpegts;
         }
-        // @ts-ignore - videojs-flvjs has no types
+        // @ts-expect-error - videojs-flvjs has no types
         await import('videojs-flvjs');
       } catch (e) {
-        console.warn('Failed to load flv.js dependencies', e);
+        console.warn('Failed to load MSE dependencies', e);
       }
 
       if (isCanceled) return;
@@ -1484,7 +1937,7 @@ export default function VideoJsPlayer({
         },
         flvjs: {
           mediaDataSource: {
-            isLive: isLive !== false,
+            isLive: playbackIsLive,
             cors: true,
             withCredentials: false,
           },
@@ -1511,6 +1964,15 @@ export default function VideoJsPlayer({
       player!.on('error', () => {
         clearSwitching();
         const err = player!.error();
+        const hasDirectMsePlayer = !!(window as any).__msePlayer;
+        if (hasDirectMsePlayer && Number(err?.code || 0) === 4) {
+          try {
+            (player as any).error(null);
+          } catch {
+            /* ignore */
+          }
+          return;
+        }
         reportPlaybackError({
           code: Number(err?.code || 0) || 0,
           message: err?.message || 'Player error',
@@ -1546,26 +2008,41 @@ export default function VideoJsPlayer({
         if (!mountedRef.current) return;
         const d = player!.duration() || 0;
         if (Number.isFinite(d) && d > 0) setDuration(d);
+        setPlaybackIsLive(
+          detectLiveRuntime(
+            player!,
+            player!.tech?.(true)?.el?.() as HTMLVideoElement,
+            d,
+          ),
+        );
         callbacksRef.current.onLoadedMetadata?.();
       });
       player!.on('durationchange', () => {
         if (!mountedRef.current) return;
         const d = player!.duration() || 0;
         if (Number.isFinite(d) && d > 0) setDuration(d);
+        setPlaybackIsLive(
+          detectLiveRuntime(
+            player!,
+            player!.tech?.(true)?.el?.() as HTMLVideoElement,
+            d,
+          ),
+        );
       });
       player!.on('timeupdate', () => {
         if (!mountedRef.current) return;
         const t = player!.currentTime() || 0;
         let d = player!.duration() || 0;
+        const native = player!.tech?.(true)?.el?.() as
+          | HTMLVideoElement
+          | undefined;
         if (!Number.isFinite(d) || d <= 0) {
-          const native = player!.tech?.(true)?.el?.() as
-            | HTMLVideoElement
-            | undefined;
           if (native && Number.isFinite(native.duration) && native.duration > 0)
             d = native.duration;
         }
         if (Number.isFinite(d) && d > 0)
           setDuration((prev) => (prev !== d ? d : prev));
+        setPlaybackIsLive(detectLiveRuntime(player!, native, d));
 
         const isSeeking =
           isScrubbing || seekingTime !== null || unifiedSeek.isActive();
@@ -1739,7 +2216,11 @@ export default function VideoJsPlayer({
   const uiInteractTimeoutRef = useRef<any>(null);
 
   const displayTime = seekingTime ?? currentTime;
-  const progressPercent = duration > 0 ? (displayTime / duration) * 100 : 0;
+  const progressPercent = playbackIsLive
+    ? 100
+    : duration > 0
+      ? (displayTime / duration) * 100
+      : 0;
 
   useEffect(() => {
     const id = 'lunatv-player-css-v6';
@@ -1883,7 +2364,7 @@ export default function VideoJsPlayer({
           <div className='seek-info-pill'>
             <span className='seek-time-large'>{formatTime(seekingTime)}</span>
             <span className='text-white/60 text-sm font-medium'>
-              / {formatTime(duration)}
+              / {playbackIsLive ? 'LIVE' : formatTime(duration)}
             </span>
           </div>
         </div>
@@ -1891,28 +2372,16 @@ export default function VideoJsPlayer({
 
       <div className={`player-controls ${controlsVisible ? 'visible' : ''}`}>
         {showStats && (
-          <div
-            style={{
-              position: 'absolute',
-              top: 64,
-              left: 16,
-              background: 'rgba(0,0,0,0.8)',
-              padding: 8,
-              fontSize: 12,
-              color: '#d1d5db',
-              fontFamily: 'monospace',
-              pointerEvents: 'none',
-              borderRadius: 4,
-              backdropFilter: 'blur(4px)',
-              border: '1px solid rgba(255,255,255,0.1)',
-              zIndex: 50,
-            }}
-          >
+          <div style={statsOverlayStyle}>
             <div>RES: {stats.resolution}</div>
             <div>NET: {stats.connSpeed}</div>
             <div>BIT: {stats.currentBitrate}</div>
             <div>BUF: {stats.bufferHealth}</div>
             <div>DROP: {stats.droppedFrames}</div>
+            <div>MODE: {stats.streamMode}</div>
+            <div style={{ whiteSpace: 'normal', wordBreak: 'break-all' }}>
+              URL: {stats.currentUrl || 'N/A'}
+            </div>
           </div>
         )}
 
@@ -1962,6 +2431,7 @@ export default function VideoJsPlayer({
           <div
             className='progress-bar'
             onPointerDown={(e) => {
+              if (playbackIsLive) return;
               const rect = e.currentTarget.getBoundingClientRect();
 
               // When rotated 90deg CW: UI Left (progress 0) is Screen Bottom, UI Right (progress 1) is Screen Top
@@ -2026,8 +2496,9 @@ export default function VideoJsPlayer({
                 </button>
               )}
               <div className='time-text'>
-                {formatTime(seekingTime ?? currentTime)} /{' '}
-                {formatTime(duration)}
+                {playbackIsLive
+                  ? `LIVE ${formatTime(seekingTime ?? currentTime)}`
+                  : `${formatTime(seekingTime ?? currentTime)} / ${formatTime(duration)}`}
               </div>
             </div>
 
