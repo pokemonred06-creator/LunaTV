@@ -785,9 +785,9 @@ export default function VideoJsPlayer({
     const t = (type || '').toLowerCase();
     if (u.includes('/api/proxy/flv') || u.includes('/api/proxy/ts'))
       return true;
-    if (u.includes('huya') || u.includes('douyu') || u.includes('douzhicloud'))
+    if (/\.flv(\?|$)/.test(u)) return true;
+    if (t === 'video/x-flv' || t === 'video/mp2t' || t === 'flv' || t === 'ts')
       return true;
-    if (t === 'video/x-flv' || t === 'video/mp2t') return true;
     return false;
   }, [isLive, type, url]);
 
@@ -842,6 +842,8 @@ export default function VideoJsPlayer({
     video: HTMLVideoElement | null;
     handler: (() => void) | null;
   }>({ video: null, handler: null });
+  const sourceSwitchEpochRef = useRef(0);
+  const playbackIsLiveRef = useRef(playbackIsLive);
 
   const configRef = useRef({
     enableSkip,
@@ -966,20 +968,37 @@ export default function VideoJsPlayer({
       if (!player || !video) return false;
 
       const liveTracker = (player as any).liveTracker;
-      if (liveTracker?.isLive?.()) return true;
-
       const d = Number.isFinite(currentDuration || NaN)
         ? (currentDuration as number)
         : player.duration?.() || video.duration;
-      if (!Number.isFinite(d) || d === Infinity || d <= 0) return true;
 
-      if (video.seekable && video.seekable.length > 0) {
-        const start = video.seekable.start(0);
-        const end = video.seekable.end(video.seekable.length - 1);
+      const hasSeekableWindow = video.seekable && video.seekable.length > 0;
+      const seekableStart = hasSeekableWindow ? video.seekable.start(0) : NaN;
+      const seekableEnd = hasSeekableWindow
+        ? video.seekable.end(video.seekable.length - 1)
+        : NaN;
+      const seekableWindow = seekableEnd - seekableStart;
+
+      if (liveTracker?.isLive?.()) {
+        const looksLikeVodWindow =
+          Number.isFinite(d) &&
+          d > 0 &&
+          Number.isFinite(seekableWindow) &&
+          seekableWindow > 0 &&
+          d - seekableWindow <= 30;
+        if (!looksLikeVodWindow) return true;
+      }
+
+      if (!Number.isFinite(d) || d === Infinity) return true;
+      if (d <= 0) return false;
+
+      if (hasSeekableWindow) {
         if (
-          Number.isFinite(start) &&
-          Number.isFinite(end) &&
-          end - start <= 180
+          Number.isFinite(seekableStart) &&
+          Number.isFinite(seekableEnd) &&
+          seekableWindow > 0 &&
+          seekableWindow <= 180 &&
+          d - seekableWindow > 30
         )
           return true;
       }
@@ -1123,6 +1142,10 @@ export default function VideoJsPlayer({
     unifiedSeekRef.current = unifiedSeek;
   }, [unifiedSeek]);
   useEffect(() => {
+    playbackIsLiveRef.current = playbackIsLive;
+  }, [playbackIsLive]);
+
+  useEffect(() => {
     controlsVisibleRef.current = controlsVisible;
   }, [controlsVisible]);
   useEffect(() => {
@@ -1208,7 +1231,7 @@ export default function VideoJsPlayer({
         const HlsClass = Hls as any;
         const hls = new HlsClass({
           enableWorker: true,
-          lowLatencyMode: playbackIsLive,
+          lowLatencyMode: playbackIsLiveRef.current,
           loader: customHlsLoaderFactory
             ? customHlsLoaderFactory(HlsClass)
             : HlsClass.DefaultConfig?.loader,
@@ -1275,7 +1298,6 @@ export default function VideoJsPlayer({
     [
       seriesId,
       customHlsLoaderFactory,
-      playbackIsLive,
       armAutoplay,
       getTechVideoEl,
       tryPlayNow,
@@ -1285,6 +1307,12 @@ export default function VideoJsPlayer({
 
   useEffect(() => {
     if (!playerReady || !playerRef.current) return;
+    const switchEpoch = ++sourceSwitchEpochRef.current;
+    let switchCancelled = false;
+    const isStaleSwitch = () =>
+      switchCancelled ||
+      sourceSwitchEpochRef.current !== switchEpoch ||
+      !mountedRef.current;
 
     // FIX: Reset state for new source (since we reuse component)
     if (mountedRef.current) {
@@ -1293,6 +1321,10 @@ export default function VideoJsPlayer({
       setSeekingTime(null);
       setIsPlaying(false);
     }
+
+    // Force CAS lifecycle to restart on every source switch. This prevents
+    // stale shader overlays from masking a newly attached video track.
+    setTechEpoch((prev) => prev + 1);
 
     isSwitchingRef.current = true;
     autoplayEpochRef.current += 1;
@@ -1371,8 +1403,10 @@ export default function VideoJsPlayer({
         let v = getTechVideoEl();
         for (let i = 0; i < 10 && !v; i++) {
           await new Promise((r) => setTimeout(r, 50));
+          if (isStaleSwitch()) return;
           v = getTechVideoEl();
         }
+        if (isStaleSwitch()) return;
         if (v) initHls(v, finalUrl);
       })();
     } else {
@@ -1419,9 +1453,10 @@ export default function VideoJsPlayer({
           let v = getTechVideoEl();
           for (let i = 0; i < 10 && !v; i++) {
             await new Promise((r) => setTimeout(r, 50));
+            if (isStaleSwitch()) return;
             v = getTechVideoEl();
           }
-          if (!v || !mountedRef.current) return;
+          if (!v || isStaleSwitch()) return;
 
           // Destroy any previous direct MSE player
           if ((window as any).__msePlayer) {
@@ -1607,45 +1642,53 @@ export default function VideoJsPlayer({
               setTimeout(() => {
                 if (mountedRef.current && (window as any).__msePlayer === fp) {
                   console.log(`[${streamLabel}] Attempting play()...`);
-                  fp.play().catch((e: any) => {
-                    if (
-                      stopReconnect ||
-                      !mountedRef.current ||
-                      (window as any).__msePlayer !== fp
-                    ) {
-                      return;
-                    }
-                    if (e?.name === 'AbortError') {
-                      console.debug(
-                        `[${streamLabel}] play() interrupted during transition`,
-                      );
-                    } else {
-                      console.warn(
-                        `[${streamLabel}] Play failed, retrying in 500ms:`,
-                        e,
-                      );
-                    }
-                    // Second attempt if first one was caught in a race
-                    playRetryTimer = setTimeout(() => {
-                      playRetryTimer = null;
+                  fp.play()
+                    .then(() => {
+                      if (v) v.muted = false;
+                    })
+                    .catch((e: any) => {
                       if (
-                        !stopReconnect &&
-                        mountedRef.current &&
-                        (window as any).__msePlayer === fp
+                        stopReconnect ||
+                        !mountedRef.current ||
+                        (window as any).__msePlayer !== fp
                       ) {
-                        fp.play().catch((e2: any) =>
-                          e2?.name === 'AbortError'
-                            ? console.debug(
-                                `[${streamLabel}] Final play interrupted during transition`,
-                              )
-                            : console.error(
-                                `[${streamLabel}] Final play failure:`,
-                                e2,
-                              ),
+                        return;
+                      }
+                      if (e?.name === 'AbortError') {
+                        console.debug(
+                          `[${streamLabel}] play() interrupted during transition`,
+                        );
+                      } else {
+                        console.warn(
+                          `[${streamLabel}] Play failed, retrying in 500ms:`,
+                          e,
                         );
                       }
-                    }, 500);
-                  });
+                      // Second attempt if first one was caught in a race
+                      playRetryTimer = setTimeout(() => {
+                        playRetryTimer = null;
+                        if (
+                          !stopReconnect &&
+                          mountedRef.current &&
+                          (window as any).__msePlayer === fp
+                        ) {
+                          fp.play()
+                            .then(() => {
+                              if (v) v.muted = false;
+                            })
+                            .catch((e2: any) =>
+                              e2?.name === 'AbortError'
+                                ? console.debug(
+                                    `[${streamLabel}] Final play interrupted during transition`,
+                                  )
+                                : console.error(
+                                    `[${streamLabel}] Final play failure:`,
+                                    e2,
+                                  ),
+                            );
+                        }
+                      }, 500);
+                    });
                 }
               }, 100);
               (window as any).__msePlayer = fp;
@@ -1832,6 +1875,16 @@ export default function VideoJsPlayer({
               }
               (window as any).__msePlayer = null;
             }
+            try {
+              if (v) {
+                v.pause();
+                v.removeAttribute('src');
+                v.src = '';
+                v.load();
+              }
+            } catch {
+              /* ignore */
+            }
           };
           // Save a reference for cleanup when url/type changes
           (playerRef.current as any).__mseCleanup = origCleanup;
@@ -1872,6 +1925,10 @@ export default function VideoJsPlayer({
         armAutoplay();
       }
     }
+
+    return () => {
+      switchCancelled = true;
+    };
   }, [
     finalUrl,
     type,
@@ -1966,12 +2023,15 @@ export default function VideoJsPlayer({
         const err = player!.error();
         const hasDirectMsePlayer = !!(window as any).__msePlayer;
         if (hasDirectMsePlayer && Number(err?.code || 0) === 4) {
+          const v = getTechVideoEl();
+          const hasRenderableVideo =
+            !!v && v.readyState >= 2 && v.videoWidth > 0 && v.videoHeight > 0;
           try {
             (player as any).error(null);
           } catch {
             /* ignore */
           }
-          return;
+          if (hasRenderableVideo) return;
         }
         reportPlaybackError({
           code: Number(err?.code || 0) || 0,

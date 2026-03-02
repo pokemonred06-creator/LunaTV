@@ -368,44 +368,49 @@ function DoubanPageClient() {
     };
   }, [handleLoadMore, hasMore, loading, loadingMore]);
 
-  // --- Handlers ---
-  const handlePrimaryChange = (value: string) => {
-    if (value === filters.primary) return;
+  const handlePrimaryChange = useCallback(
+    (value: string) => {
+      if (value === filters.primary) return;
 
-    let newSecondary = filters.secondary;
-    if (type === 'custom' && customCategories.length > 0) {
-      const firstCat = customCategories.find((cat) => cat.type === value);
-      if (firstCat) newSecondary = firstCat.query;
-    } else if ((type === 'tv' || type === 'show') && value === '最近热门') {
-      newSecondary = type === 'tv' ? 'tv' : 'show';
-    }
+      let newSecondary = filters.secondary;
+      if (type === 'custom' && customCategories.length > 0) {
+        const firstCat = customCategories.find((cat) => cat.type === value);
+        if (firstCat) newSecondary = firstCat.query;
+      } else if ((type === 'tv' || type === 'show') && value === '最近热门') {
+        newSecondary = type === 'tv' ? 'tv' : 'show';
+      }
 
-    setFilters((prev) => ({
-      ...prev,
-      primary: value,
-      secondary: newSecondary,
-      multiLevel: {
-        type: 'all',
-        region: 'all',
-        year: 'all',
-        platform: 'all',
-        label: 'all',
-        sort: 'T',
-      },
-    }));
-  };
+      setFilters((prev) => ({
+        ...prev,
+        primary: value,
+        secondary: newSecondary,
+        multiLevel: {
+          type: 'all',
+          region: 'all',
+          year: 'all',
+          platform: 'all',
+          label: 'all',
+          sort: 'T',
+        },
+      }));
+    },
+    [filters.primary, filters.secondary, type, customCategories],
+  );
 
-  const handleSecondaryChange = (value: string) => {
+  const handleSecondaryChange = useCallback((value: string) => {
     setFilters((prev) => ({ ...prev, secondary: value }));
-  };
+  }, []);
 
-  const handleMultiLevelChange = (values: Record<string, string>) => {
-    setFilters((prev) => ({ ...prev, multiLevel: values }));
-  };
+  const handleMultiLevelChange = useCallback(
+    (values: Record<string, string>) => {
+      setFilters((prev) => ({ ...prev, multiLevel: values }));
+    },
+    [],
+  );
 
-  const handleWeekdayChange = (value: string) => {
+  const handleWeekdayChange = useCallback((value: string) => {
     setFilters((prev) => ({ ...prev, weekday: value }));
-  };
+  }, []);
 
   // --- UI Helpers ---
   const getPageTitle = () => {

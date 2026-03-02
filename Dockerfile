@@ -1,8 +1,8 @@
 # 使用官方 Node.js 镜像作为基础镜像
-FROM node:25-alpine AS base
+FROM node:22-alpine AS base
 
 # ===== Go Proxy Build Stage =====
-FROM golang:1.26-alpine AS go-builder
+FROM golang:alpine AS go-builder
 WORKDIR /go-app
 COPY scripts/proxy/go.mod .
 COPY scripts/proxy/server.go .
@@ -10,6 +10,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /goproxy ./server.go
 
 # ===== Node.js Dependencies Stage =====
 FROM base AS deps
+RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
 # 复制 package.json 和 lock 文件

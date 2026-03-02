@@ -39,7 +39,7 @@ function VersionDisplay() {
   return (
     <button
       onClick={() =>
-        window.open('https://github.com/MoonTechLab/LunaTV', '_blank')
+        window.open('https://github.com/pokemonred06-creator/LunaTV', '_blank')
       }
       className='absolute bottom-6 left-1/2 transform -translate-x-1/2 flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 transition-colors cursor-pointer'
       aria-label='Check for updates on GitHub'

@@ -23,11 +23,11 @@ export interface BangumiCalendarData {
 }
 
 export async function GetBangumiCalendarData(): Promise<BangumiCalendarData[]> {
-  const response = await fetch('https://api.bgm.tv/calendar');
+  const response = await fetch('/api/bangumi/calendar');
   const data = await response.json();
   const filteredData = data.map((item: BangumiCalendarData) => ({
     ...item,
-    items: item.items.filter(bangumiItem => bangumiItem.images)
+    items: item.items.filter((bangumiItem) => bangumiItem.images),
   }));
 
   return filteredData;

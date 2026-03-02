@@ -92,7 +92,7 @@ const MobileBottomNav = ({
         bottom: 0,
         paddingBottom: 'env(safe-area-inset-bottom)',
         minHeight: 'calc(3.5rem + env(safe-area-inset-bottom))',
-        touchAction: 'pan-x', // Only allow horizontal scrolling
+        touchAction: 'manipulation', // Allow all valid panning but optimize tap speed
         userSelect: 'none', // Prevent text selection
         WebkitUserSelect: 'none',
       }}
