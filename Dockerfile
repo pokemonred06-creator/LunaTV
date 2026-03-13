@@ -24,8 +24,7 @@ COPY patches ./patches
 RUN rm -rf node_modules .next
 
 # Install dependencies using pnpm
-RUN pnpm config set registry https://registry.npmmirror.com && \
-  pnpm install --no-frozen-lockfile
+RUN pnpm install --no-frozen-lockfile
 
 # ===== Next.js Build Stage =====
 FROM base AS builder

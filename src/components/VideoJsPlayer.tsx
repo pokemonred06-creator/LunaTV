@@ -255,52 +255,311 @@ const useUnifiedSeek = (
   return { begin, preview, end, cancel, isActive };
 };
 
+interface PlayerStatsSnapshot {
+  resolution: string;
+  viewport: string;
+  connSpeed: string;
+  currentBitrate: string;
+  bufferHealth: string;
+  bufferedRange: string;
+  droppedFrames: string;
+  playbackRate: string;
+  streamMode: string;
+  liveLatency: string;
+  readyState: string;
+  networkState: string;
+  mimeType: string;
+  techName: string;
+  currentUrl: string;
+}
+
+const EMPTY_PLAYER_STATS: PlayerStatsSnapshot = {
+  resolution: 'N/A',
+  viewport: 'N/A',
+  connSpeed: 'N/A',
+  currentBitrate: 'N/A',
+  bufferHealth: 'N/A',
+  bufferedRange: 'N/A',
+  droppedFrames: '0',
+  playbackRate: '1.00x',
+  streamMode: 'VOD',
+  liveLatency: 'N/A',
+  readyState: 'HAVE_NOTHING',
+  networkState: 'IDLE',
+  mimeType: 'N/A',
+  techName: 'N/A',
+  currentUrl: '',
+};
+
+const statsOverlayBaseStyle: CSSProperties = {
+  position: 'absolute',
+  background: 'rgba(0,0,0,0.8)',
+  padding: 12,
+  fontSize: 12,
+  color: '#d1d5db',
+  fontFamily: 'monospace',
+  pointerEvents: 'auto',
+  borderRadius: 8,
+  backdropFilter: 'blur(6px)',
+  border: '1px solid rgba(255,255,255,0.1)',
+  zIndex: 50,
+  userSelect: 'text',
+  WebkitUserSelect: 'text',
+  boxShadow: '0 12px 28px rgba(0,0,0,0.28)',
+};
+
+const statsHeaderStyle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: 12,
+};
+
+const statsTitleStyle: CSSProperties = {
+  fontSize: 11,
+  letterSpacing: '0.12em',
+  textTransform: 'uppercase',
+  color: '#93c5fd',
+};
+
+const statsPanelButtonStyle: CSSProperties = {
+  background: 'rgba(255,255,255,0.08)',
+  color: '#e5e7eb',
+  border: '1px solid rgba(255,255,255,0.12)',
+  borderRadius: 999,
+  padding: '2px 10px',
+  fontSize: 11,
+  cursor: 'pointer',
+};
+
+const statsGridStyle: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'auto minmax(0, 1fr)',
+  gap: '6px 12px',
+  marginTop: 12,
+  alignItems: 'baseline',
+};
+
+const statsLabelStyle: CSSProperties = {
+  color: '#93c5fd',
+  fontSize: 11,
+  letterSpacing: '0.08em',
+  textTransform: 'uppercase',
+};
+
+const statsValueStyle: CSSProperties = {
+  minWidth: 0,
+  color: '#f3f4f6',
+  wordBreak: 'break-word',
+};
+
+const statsUrlStyle: CSSProperties = {
+  marginTop: 12,
+  paddingTop: 10,
+  borderTop: '1px solid rgba(255,255,255,0.08)',
+  whiteSpace: 'normal',
+  wordBreak: 'break-all',
+  lineHeight: 1.45,
+};
+
+const formatDimension = (width: number, height: number) => {
+  if (!Number.isFinite(width) || !Number.isFinite(height)) return 'N/A';
+  if (width <= 0 || height <= 0) return 'N/A';
+  return `${Math.round(width)}x${Math.round(height)}`;
+};
+
+const formatBandwidth = (value: number) => {
+  if (!Number.isFinite(value) || value <= 0) return 'N/A';
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(0)} Kbps`;
+  return `${(value / 1024 / 1024).toFixed(2)} Mbps`;
+};
+
+const formatSeconds = (value: number) => {
+  if (!Number.isFinite(value)) return 'N/A';
+  return `${Math.max(0, value).toFixed(2)}s`;
+};
+
+const formatClock = (value: number) => {
+  if (!Number.isFinite(value)) return 'N/A';
+  const totalSeconds = Math.max(0, Math.floor(value));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, '0')}:${String(
+      seconds,
+    ).padStart(2, '0')}`;
+  }
+
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
+};
+
+const getReadyStateLabel = (value: number) => {
+  switch (value) {
+    case 0:
+      return 'HAVE_NOTHING';
+    case 1:
+      return 'HAVE_METADATA';
+    case 2:
+      return 'HAVE_CURRENT_DATA';
+    case 3:
+      return 'HAVE_FUTURE_DATA';
+    case 4:
+      return 'HAVE_ENOUGH_DATA';
+    default:
+      return 'UNKNOWN';
+  }
+};
+
+const getNetworkStateLabel = (value: number) => {
+  switch (value) {
+    case 0:
+      return 'EMPTY';
+    case 1:
+      return 'IDLE';
+    case 2:
+      return 'LOADING';
+    case 3:
+      return 'NO_SOURCE';
+    default:
+      return 'UNKNOWN';
+  }
+};
+
+const getDroppedFrames = (video: HTMLVideoElement) => {
+  const playbackQuality = video.getVideoPlaybackQuality?.();
+  if (Number.isFinite(playbackQuality?.droppedVideoFrames)) {
+    return playbackQuality.droppedVideoFrames;
+  }
+
+  const webkitDroppedFrames = (video as any).webkitDroppedFrameCount;
+  return Number.isFinite(webkitDroppedFrames) ? webkitDroppedFrames : 0;
+};
+
+const getBufferedMetrics = (video: HTMLVideoElement) => {
+  const ranges = video.buffered;
+  if (!ranges || ranges.length === 0) {
+    return { bufferAhead: '0.00s', bufferedRange: 'N/A' };
+  }
+
+  const current = video.currentTime;
+  let closestFutureRange: { start: number; end: number } | null = null;
+
+  for (let i = 0; i < ranges.length; i += 1) {
+    const start = ranges.start(i);
+    const end = ranges.end(i);
+
+    if (current >= start && current <= end) {
+      return {
+        bufferAhead: formatSeconds(end - current),
+        bufferedRange: `${formatClock(start)}-${formatClock(end)}`,
+      };
+    }
+
+    if (start > current && !closestFutureRange) {
+      closestFutureRange = { start, end };
+    }
+  }
+
+  if (closestFutureRange) {
+    return {
+      bufferAhead: '0.00s',
+      bufferedRange: `${formatClock(closestFutureRange.start)}-${formatClock(
+        closestFutureRange.end,
+      )}`,
+    };
+  }
+
+  const lastIndex = ranges.length - 1;
+  const lastStart = ranges.start(lastIndex);
+  const lastEnd = ranges.end(lastIndex);
+  return {
+    bufferAhead: formatSeconds(lastEnd - current),
+    bufferedRange: `${formatClock(lastStart)}-${formatClock(lastEnd)}`,
+  };
+};
+
+const getMimeType = (
+  player: VideoJsPlayerInstance,
+  tech: any,
+  video: HTMLVideoElement,
+) => {
+  const source = player.currentSource?.() as { type?: string } | undefined;
+  return (
+    source?.type || tech?.currentType_ || video.getAttribute('type') || 'N/A'
+  );
+};
+
+const getTechName = (player: VideoJsPlayerInstance, tech: any) => {
+  const rawName =
+    tech?.name_ ||
+    tech?.constructor?.name ||
+    (player as any).techName_ ||
+    'N/A';
+  return String(rawName).replace(/Tech$/, '');
+};
+
+const arePlayerStatsEqual = (
+  prev: PlayerStatsSnapshot,
+  next: PlayerStatsSnapshot,
+) =>
+  prev.resolution === next.resolution &&
+  prev.viewport === next.viewport &&
+  prev.connSpeed === next.connSpeed &&
+  prev.currentBitrate === next.currentBitrate &&
+  prev.bufferHealth === next.bufferHealth &&
+  prev.bufferedRange === next.bufferedRange &&
+  prev.droppedFrames === next.droppedFrames &&
+  prev.playbackRate === next.playbackRate &&
+  prev.streamMode === next.streamMode &&
+  prev.liveLatency === next.liveLatency &&
+  prev.readyState === next.readyState &&
+  prev.networkState === next.networkState &&
+  prev.mimeType === next.mimeType &&
+  prev.techName === next.techName &&
+  prev.currentUrl === next.currentUrl;
+
 const useStats = (
   playerRef: MutableRefObject<VideoJsPlayerInstance | null>,
   isLiveMode: boolean,
+  enabled: boolean,
 ) => {
   const normalizeStreamUrl = useCallback((rawUrl: string) => {
-    const value = (rawUrl || '').trim();
+    let value = (rawUrl || '').trim();
     if (!value) return '';
-    try {
-      const u = new URL(
-        value,
-        typeof window !== 'undefined' ? window.location.origin : undefined,
-      );
-      if (u.pathname.startsWith('/api/proxy/')) {
+
+    const baseUrl =
+      typeof window !== 'undefined' ? window.location.origin : undefined;
+    for (let depth = 0; depth < 2; depth += 1) {
+      try {
+        const u = new URL(value, baseUrl);
+        if (!u.pathname.startsWith('/api/proxy/')) return u.toString();
         const nested = u.searchParams.get('url');
         if (!nested) return value;
-        return decodeURIComponent(nested);
+        value = nested.trim();
+      } catch {
+        return value;
       }
-      return u.toString();
-    } catch {
-      return value;
     }
+
+    return value;
   }, []);
 
-  const [stats, setStats] = useState({
-    resolution: '0x0',
-    connSpeed: '0 Mbps',
-    currentBitrate: '0 Mbps',
-    bufferHealth: '0s',
-    droppedFrames: 0,
-    currentUrl: '',
-    streamMode: 'VOD',
-  });
+  const [stats, setStats] = useState<PlayerStatsSnapshot>(EMPTY_PLAYER_STATS);
 
   useEffect(() => {
-    const interval = setInterval(() => {
+    if (!enabled) return;
+
+    const sampleStats = () => {
       const p = playerRef.current;
       if (!p) return;
-      const v = p.tech?.(true)?.el?.() as HTMLVideoElement;
+      const tech = p.tech?.(true) as any;
+      const v = tech?.el?.() as HTMLVideoElement | null;
       if (!v) return;
-
-      const res = `${v.videoWidth}x${v.videoHeight}`;
 
       let bw = 0;
       let playingBitrate = 0;
-      // Access Video.js VHS stats if available
-      const tech = p.tech(true) as any;
       if (tech && tech.vhs) {
         if (tech.vhs.bandwidth) bw = tech.vhs.bandwidth;
         const media = tech.vhs.playlists?.media?.();
@@ -311,33 +570,51 @@ const useStats = (
         // HLS.js might have levels
       }
 
-      const speed = (bw / 1024 / 1024).toFixed(2) + ' Mbps';
-      const bitrate = (playingBitrate / 1024 / 1024).toFixed(2) + ' Mbps';
-      const buf = v.buffered.length
-        ? (v.buffered.end(v.buffered.length - 1) - v.currentTime).toFixed(2)
-        : '0';
-      const dropped =
-        (v as any).getVideoPlaybackQuality?.()?.droppedVideoFrames ?? 0;
+      const currentTime = Number.isFinite(v.currentTime) ? v.currentTime : 0;
+      const seekable = v.seekable;
+      const hasSeekableWindow = seekable && seekable.length > 0;
+      const seekableEnd = hasSeekableWindow
+        ? seekable.end(seekable.length - 1)
+        : NaN;
+      const { bufferAhead, bufferedRange } = getBufferedMetrics(v);
       const currentUrl =
         p.currentSrc?.() ||
         v.currentSrc ||
         v.src ||
         (p as any).cache_?.src ||
         '';
-      const streamUrl = normalizeStreamUrl(currentUrl);
-
-      setStats({
-        resolution: res,
-        connSpeed: speed,
-        currentBitrate: bitrate,
-        bufferHealth: buf + 's',
-        droppedFrames: dropped,
-        currentUrl: streamUrl,
+      const nextStats: PlayerStatsSnapshot = {
+        resolution: formatDimension(v.videoWidth, v.videoHeight),
+        viewport: formatDimension(v.clientWidth, v.clientHeight),
+        connSpeed: formatBandwidth(bw),
+        currentBitrate: formatBandwidth(playingBitrate),
+        bufferHealth: bufferAhead,
+        bufferedRange,
+        droppedFrames: String(getDroppedFrames(v)),
+        playbackRate: `${(p.playbackRate?.() ?? v.playbackRate ?? 1).toFixed(2)}x`,
         streamMode: isLiveMode ? 'LIVE' : 'VOD',
+        liveLatency:
+          isLiveMode && Number.isFinite(seekableEnd)
+            ? formatSeconds(seekableEnd - currentTime)
+            : 'N/A',
+        readyState: getReadyStateLabel(v.readyState),
+        networkState: getNetworkStateLabel(v.networkState),
+        mimeType: getMimeType(p, tech, v),
+        techName: getTechName(p, tech),
+        currentUrl: normalizeStreamUrl(currentUrl),
+      };
+
+      setStats((prev) => {
+        if (arePlayerStatsEqual(prev, nextStats)) return prev;
+        return nextStats;
       });
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [playerRef, normalizeStreamUrl, isLiveMode]);
+    };
+
+    sampleStats();
+    const interval = window.setInterval(sampleStats, 1000);
+    return () => window.clearInterval(interval);
+  }, [enabled, isLiveMode, normalizeStreamUrl, playerRef]);
+
   return stats;
 };
 
@@ -896,7 +1173,7 @@ export default function VideoJsPlayer({
 
   // Stats
   const [showStats, setShowStats] = useState(false);
-  const stats = useStats(playerRef, playbackIsLive);
+  const stats = useStats(playerRef, playbackIsLive, showStats);
   const [isMobileViewport, setIsMobileViewport] = useState(false);
 
   useEffect(() => {
@@ -919,28 +1196,38 @@ export default function VideoJsPlayer({
 
   const statsOverlayStyle = useMemo<CSSProperties>(
     () => ({
-      position: 'absolute',
+      ...statsOverlayBaseStyle,
       top: isMobileViewport ? 'auto' : 64,
       bottom: isMobileViewport ? 92 : 'auto',
       left: isMobileViewport ? 12 : 16,
       right: isMobileViewport ? 12 : 'auto',
       maxWidth: isMobileViewport ? 'calc(100% - 24px)' : 520,
+      width: isMobileViewport ? 'auto' : 'min(560px, calc(100% - 32px))',
       maxHeight: isMobileViewport ? '40vh' : undefined,
       overflowY: isMobileViewport ? 'auto' : 'visible',
-      background: 'rgba(0,0,0,0.8)',
-      padding: 8,
-      fontSize: 12,
-      color: '#d1d5db',
-      fontFamily: 'monospace',
-      pointerEvents: 'auto',
-      borderRadius: 4,
-      backdropFilter: 'blur(4px)',
-      border: '1px solid rgba(255,255,255,0.1)',
-      zIndex: 50,
-      userSelect: 'text',
-      WebkitUserSelect: 'text',
     }),
     [isMobileViewport],
+  );
+
+  const statsRows = useMemo(
+    () =>
+      [
+        { label: 'RES', value: stats.resolution },
+        { label: 'VIEW', value: stats.viewport },
+        { label: 'NET', value: stats.connSpeed },
+        { label: 'BIT', value: stats.currentBitrate },
+        { label: 'BUF', value: stats.bufferHealth },
+        { label: 'RANGE', value: stats.bufferedRange },
+        { label: 'DROP', value: stats.droppedFrames },
+        { label: 'RATE', value: stats.playbackRate },
+        { label: 'MODE', value: stats.streamMode },
+        { label: 'LAT', value: stats.liveLatency },
+        { label: 'READY', value: stats.readyState },
+        { label: 'NETST', value: stats.networkState },
+        { label: 'TECH', value: stats.techName },
+        { label: 'TYPE', value: stats.mimeType },
+      ] as const,
+    [stats],
   );
 
   // --- Helpers ---
@@ -2430,21 +2717,39 @@ export default function VideoJsPlayer({
         </div>
       )}
 
-      <div className={`player-controls ${controlsVisible ? 'visible' : ''}`}>
-        {showStats && (
-          <div style={statsOverlayStyle}>
-            <div>RES: {stats.resolution}</div>
-            <div>NET: {stats.connSpeed}</div>
-            <div>BIT: {stats.currentBitrate}</div>
-            <div>BUF: {stats.bufferHealth}</div>
-            <div>DROP: {stats.droppedFrames}</div>
-            <div>MODE: {stats.streamMode}</div>
-            <div style={{ whiteSpace: 'normal', wordBreak: 'break-all' }}>
-              URL: {stats.currentUrl || 'N/A'}
-            </div>
+      {showStats && (
+        <div style={statsOverlayStyle}>
+          <div style={statsHeaderStyle}>
+            <span style={statsTitleStyle}>Stats for Nerds</span>
+            <button
+              type='button'
+              style={statsPanelButtonStyle}
+              onClick={() => setShowStats(false)}
+              aria-label='Hide stats overlay'
+            >
+              Hide
+            </button>
           </div>
-        )}
 
+          <div style={statsGridStyle}>
+            {statsRows.flatMap((row) => [
+              <div key={`${row.label}-label`} style={statsLabelStyle}>
+                {row.label}
+              </div>,
+              <div key={`${row.label}-value`} style={statsValueStyle}>
+                {row.value}
+              </div>,
+            ])}
+          </div>
+
+          <div style={statsUrlStyle}>
+            <span style={statsLabelStyle}>URL </span>
+            <span style={statsValueStyle}>{stats.currentUrl || 'N/A'}</span>
+          </div>
+        </div>
+      )}
+
+      <div className={`player-controls ${controlsVisible ? 'visible' : ''}`}>
         <div className='player-header'>
           <div className='header-left'></div>
           <button

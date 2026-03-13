@@ -40,6 +40,17 @@ function isIpInCidr(ip: string, cidr: string): boolean {
   return false;
 }
 
+function isLocalIPv6(ip: string): boolean {
+  const normalized = ip.toLowerCase();
+  // Loopback
+  if (normalized === '::1' || normalized === '0:0:0:0:0:0:0:1') return true;
+  // Unique Local Addresses (ULA)
+  if (normalized.startsWith('fc') || normalized.startsWith('fd')) return true;
+  // Link-local
+  if (/^fe[89ab]/i.test(normalized)) return true;
+  return false;
+}
+
 async function validateSafeUrl(urlStr: string): Promise<boolean> {
   try {
     const u = new URL(urlStr);
@@ -47,13 +58,17 @@ async function validateSafeUrl(urlStr: string): Promise<boolean> {
     const ipType = net.isIP(u.hostname);
     if (ipType === 4)
       return !BLOCKED_RANGES_IPV4.some((cidr) => isIpInCidr(u.hostname, cidr));
-    if (ipType === 6) return false;
+    if (ipType === 6) {
+      const rawIp = u.hostname.replace(/\[|\]/g, '');
+      return !isLocalIPv6(rawIp);
+    }
     const addrs = await dns.lookup(u.hostname, { all: true, verbatim: true });
-    return !addrs.some(
-      (a) =>
-        a.family === 6 ||
-        BLOCKED_RANGES_IPV4.some((cidr) => isIpInCidr(a.address, cidr)),
-    );
+    return !addrs.some((a) => {
+      if (a.family === 4)
+        return BLOCKED_RANGES_IPV4.some((cidr) => isIpInCidr(a.address, cidr));
+      if (a.family === 6) return isLocalIPv6(a.address);
+      return false;
+    });
   } catch {
     return false;
   }
