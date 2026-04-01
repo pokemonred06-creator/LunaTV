@@ -257,16 +257,23 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
       const maxScrollLeft = el.scrollWidth - el.clientWidth;
       if (maxScrollLeft <= 0) return;
 
+      const horizontalDelta = e.shiftKey
+        ? e.deltaY
+        : Math.abs(e.deltaX) > Math.abs(e.deltaY)
+          ? e.deltaX
+          : 0;
+      if (horizontalDelta === 0) return;
+
       const atLeft = el.scrollLeft <= 0;
       const atRight = el.scrollLeft >= maxScrollLeft - 1;
-      const scrollingUp = e.deltaY < 0;
-      const scrollingDown = e.deltaY > 0;
+      const scrollingLeft = horizontalDelta < 0;
+      const scrollingRight = horizontalDelta > 0;
 
-      if ((atLeft && scrollingUp) || (atRight && scrollingDown)) return;
+      if ((atLeft && scrollingLeft) || (atRight && scrollingRight)) return;
 
       e.preventDefault();
       e.stopPropagation();
-      el.scrollBy({ left: e.deltaY, behavior: 'auto' });
+      el.scrollBy({ left: horizontalDelta, behavior: 'auto' });
     };
 
     el.addEventListener('wheel', onWheel, { passive: false });

@@ -23,7 +23,8 @@ html.dark {
 
 html,
 body {
-  height: 100%;
+  min-height: 100vh;
+  /* Prevent horizontal scroll if content overflows, but don't restrict vertical */
   overflow-x: hidden;
   /* 阻止 iOS Safari 拉动回弹 */
   overscroll-behavior: none;

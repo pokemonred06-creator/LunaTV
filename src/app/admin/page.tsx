@@ -7,6 +7,7 @@ import {
   Home,
   Loader2,
   LogOut,
+  Pencil,
   Plus,
   RefreshCw,
   Rss,
@@ -913,20 +914,34 @@ function UserManagement({
 
 // --- Sub-component: Source Add Form ---
 const SourceAddForm = memo(function SourceAddForm({
-  onAdd,
+  onSubmit,
+  initialValue,
+  title,
+  submitText,
+  onCancel,
   processing,
   convert,
 }: {
-  onAdd: (s: { key: string; name: string; api: string }) => void;
+  onSubmit: (s: { key: string; name: string; api: string }) => void;
+  initialValue?: { key: string; name: string; api: string };
+  title?: string;
+  submitText?: string;
+  onCancel?: () => void;
   processing: boolean;
   convert: (s: string) => string;
 }) {
-  const [newSource, setNewSource] = useState({ key: '', name: '', api: '' });
+  const [newSource, setNewSource] = useState(
+    initialValue || { key: '', name: '', api: '' },
+  );
+
+  useEffect(() => {
+    setNewSource(initialValue || { key: '', name: '', api: '' });
+  }, [initialValue]);
 
   return (
     <div className='border dark:border-gray-700 p-5 rounded-xl bg-gray-50/50 dark:bg-gray-700/30'>
       <h3 className='font-semibold mb-4 text-gray-800 dark:text-white flex items-center gap-2'>
-        <Plus className='w-4 h-4' /> {convert('添加采集源')}
+        <Plus className='w-4 h-4' /> {title || convert('添加采集源')}
       </h3>
       <div className='grid grid-cols-1 md:grid-cols-4 gap-4'>
         <input
@@ -934,6 +949,7 @@ const SourceAddForm = memo(function SourceAddForm({
           className='border p-2 rounded-lg dark:bg-gray-800 dark:border-gray-600 dark:text-white'
           value={newSource.key}
           onChange={(e) => setNewSource({ ...newSource, key: e.target.value })}
+          disabled={!!initialValue}
         />
         <input
           placeholder={convert('名称')}
@@ -949,18 +965,28 @@ const SourceAddForm = memo(function SourceAddForm({
         />
       </div>
       <div className='mt-4 flex justify-end'>
+        {onCancel && (
+          <button
+            className='mr-3 px-6 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-100 transition-colors dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700'
+            onClick={onCancel}
+          >
+            {convert('取消')}
+          </button>
+        )}
         <button
           className='bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50'
           disabled={!newSource.key || !newSource.name || processing}
           onClick={() => {
-            onAdd(newSource);
-            setNewSource({ key: '', name: '', api: '' });
+            onSubmit(newSource);
+            if (!initialValue) {
+              setNewSource({ key: '', name: '', api: '' });
+            }
           }}
         >
           {processing ? (
             <Loader2 className='w-4 h-4 animate-spin' />
           ) : (
-            convert('添加')
+            submitText || convert('添加')
           )}
         </button>
       </div>
@@ -987,15 +1013,36 @@ function SourceManagement({
   convert,
   processingMap,
 }: SourceManagementProps) {
+  const [editingSource, setEditingSource] = useState<ApiSite | null>(null);
+
   return (
     <div className='space-y-6'>
       <SourceAddForm
         convert={convert}
         processing={!!processingMap['source-add-new']}
-        onAdd={(data) => {
+        onSubmit={(data) => {
           onAction('source', '/api/admin/source', 'add', data, 'new');
         }}
       />
+
+      {editingSource && (
+        <SourceAddForm
+          convert={convert}
+          initialValue={{
+            key: editingSource.key,
+            name: editingSource.name,
+            api: editingSource.api,
+          }}
+          title={convert('修改采集源')}
+          submitText={convert('保存修改')}
+          processing={!!processingMap[`source-edit-${editingSource.key}`]}
+          onCancel={() => setEditingSource(null)}
+          onSubmit={(data) => {
+            onAction('source', '/api/admin/source', 'edit', data, data.key);
+            setEditingSource(null);
+          }}
+        />
+      )}
 
       <div className='overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700'>
         <table className='min-w-full text-left'>
@@ -1029,6 +1076,13 @@ function SourceManagement({
                   )}
                 </td>
                 <td className='p-3 flex justify-end gap-2'>
+                  <ActionButton
+                    icon={Pencil}
+                    color='blue'
+                    loading={!!processingMap[`source-edit-${s.key}`]}
+                    onClick={() => setEditingSource(s)}
+                    title={convert('修改')}
+                  />
                   <ActionButton
                     icon={s.disabled ? CheckCircle : Ban}
                     color={s.disabled ? 'green' : 'orange'}

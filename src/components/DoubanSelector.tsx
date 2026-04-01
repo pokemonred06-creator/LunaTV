@@ -208,6 +208,128 @@ const DoubanSelector: React.FC<DoubanSelectorProps> = ({
     updateIndicatorPosition,
   ]);
 
+  const handlePageScrollKeys = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      const isScrollFnSupported = typeof window !== 'undefined';
+      if (!isScrollFnSupported) return;
+
+      const scrollDistance = window.innerHeight * 0.9;
+
+      const doScroll = (distance: number) => {
+        // Try modern behavior
+        try {
+          const scrollEl = (document.scrollingElement ||
+            document.documentElement ||
+            document.body ||
+            window) as unknown as Element;
+          if (typeof scrollEl.scrollBy === 'function') {
+            scrollEl.scrollBy({ top: distance, behavior: 'smooth' });
+            return;
+          }
+        } catch {
+          // ignore
+        }
+
+        // Fallbacks
+        try {
+          window.scrollBy(0, distance);
+        } catch {
+          /* ignore */
+        }
+        try {
+          document.documentElement.scrollTop += distance;
+        } catch {
+          /* ignore */
+        }
+        try {
+          document.body.scrollTop += distance;
+        } catch {
+          /* ignore */
+        }
+      };
+
+      const doScrollTo = (position: number) => {
+        try {
+          const scrollEl = (document.scrollingElement ||
+            document.documentElement ||
+            document.body ||
+            window) as unknown as Element;
+          if (typeof scrollEl.scrollTo === 'function') {
+            scrollEl.scrollTo({ top: position, behavior: 'smooth' });
+            return;
+          }
+        } catch {
+          // ignore
+        }
+
+        try {
+          window.scrollTo(0, position);
+        } catch {
+          /* ignore */
+        }
+        try {
+          document.documentElement.scrollTop = position;
+        } catch {
+          /* ignore */
+        }
+        try {
+          document.body.scrollTop = position;
+        } catch {
+          /* ignore */
+        }
+      };
+
+      switch (e.key) {
+        case 'PageUp':
+          e.preventDefault();
+          doScroll(-scrollDistance);
+          break;
+        case 'PageDown':
+          e.preventDefault();
+          doScroll(scrollDistance);
+          break;
+        case 'Home':
+          e.preventDefault();
+          doScrollTo(0);
+          break;
+        case 'End': {
+          e.preventDefault();
+          const h =
+            document.body.scrollHeight || document.documentElement.scrollHeight;
+          doScrollTo(h);
+          break;
+        }
+      }
+    },
+    [],
+  );
+
+  const handleVerticalWheelPassThrough = useCallback(
+    (e: React.WheelEvent<HTMLDivElement>) => {
+      // If user is actually scrolling horizontally, let the container handle it natively
+      if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+      if (e.deltaY === 0) return;
+
+      // Vertical scroll over horizontal container:
+      // Prevent the container from eating the event or causing weird behavior on some older browsers
+      e.preventDefault();
+
+      if (
+        typeof window !== 'undefined' &&
+        typeof window.scrollBy === 'function'
+      ) {
+        try {
+          // Attempt modern smooth scroll, or auto
+          window.scrollBy({ top: e.deltaY, behavior: 'auto' });
+        } catch {
+          // Fallback for older browsers (e.g. older Tesla Chromium)
+          window.scrollBy(0, e.deltaY);
+        }
+      }
+    },
+    [],
+  );
+
   // 5. Scroll to Active Item (Secondary Only)
   useLayoutEffect(() => {
     if (!showSecondary || !secondaryContainerRef.current || !secondarySelection)
@@ -245,6 +367,8 @@ const DoubanSelector: React.FC<DoubanSelectorProps> = ({
       <div
         ref={containerRef}
         className='relative flex items-center overflow-x-auto bg-gray-200/60 dark:bg-gray-700/60 rounded-full p-1 backdrop-blur-sm [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]'
+        onKeyDownCapture={handlePageScrollKeys}
+        onWheelCapture={handleVerticalWheelPassThrough}
       >
         <div
           className='absolute top-1 bottom-1 bg-white dark:bg-gray-600 rounded-full shadow-sm transition-all duration-300 ease-out pointer-events-none'

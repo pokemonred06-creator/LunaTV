@@ -60,15 +60,11 @@ const PageLayout = ({ children, activePath = '/' }: PageLayoutProps) => {
       `}
       >
         {/* --- Sidebar (Desktop) --- */}
-        {/* Sticky Sidebar Pattern: 
-            Sidebar stays fixed height, Main content scrolls the body.
-            'self-start' ensures it sticks to top.
-        */}
+        {/* We keep this wrapper purely for grid sizing, the Sidebar itself handles fixed positioning */}
         <div
           className={`
           ${isDesktopMode ? 'hidden md:block' : 'hidden'} 
-          sticky top-0 h-screen overflow-y-auto self-start 
-          border-r border-border bg-card/50 backdrop-blur-sm z-30
+          self-start z-30
         `}
         >
           <Sidebar activePath={activePath} />

@@ -1,5 +1,11 @@
 import { Clock, Target, Tv } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type WheelEvent as ReactWheelEvent,
+} from 'react';
 
 import { formatTimeToHHMM, parseCustomTimeFormat } from '@/lib/time';
 
@@ -21,7 +27,6 @@ export default function EpgScrollableRow({
   isLoading = false,
 }: EpgScrollableRowProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [isHovered, setIsHovered] = useState(false);
   const [currentPlayingIndex, setCurrentPlayingIndex] = useState<number>(-1);
 
   // 判断节目是否正在播放
@@ -38,12 +43,24 @@ export default function EpgScrollableRow({
     [currentTime],
   );
 
+  const findCurrentProgramIndex = useCallback(
+    (referenceTime: Date) =>
+      programs.findIndex((program) => {
+        try {
+          const start = parseCustomTimeFormat(program.start);
+          const end = parseCustomTimeFormat(program.end);
+          return referenceTime >= start && referenceTime < end;
+        } catch {
+          return false;
+        }
+      }),
+    [programs],
+  );
+
   // 自动滚动到正在播放的节目
   const scrollToCurrentProgram = useCallback(() => {
     if (containerRef.current) {
-      const currentProgramIndex = programs.findIndex((program) =>
-        isCurrentlyPlaying(program),
-      );
+      const currentProgramIndex = findCurrentProgramIndex(currentTime);
       if (currentProgramIndex !== -1) {
         const programElement = containerRef.current.children[
           currentProgramIndex
@@ -65,93 +82,85 @@ export default function EpgScrollableRow({
         }
       }
     }
-  }, [isCurrentlyPlaying, programs]);
+  }, [currentTime, findCurrentProgramIndex]);
 
-  // 处理滚轮事件，实现横向滚动
-  const handleWheel = useCallback(
-    (e: WheelEvent) => {
-      if (isHovered && containerRef.current) {
-        e.preventDefault(); // 阻止默认的竖向滚动
+  // 仅在鼠标位于当前组件上时将滚轮映射为横向滚动，避免拦截整个页面的滚动
+  const handleWheel = useCallback((e: ReactWheelEvent<HTMLDivElement>) => {
+    const container = containerRef.current;
+    if (!container) return;
 
-        const container = containerRef.current;
-        const scrollAmount = e.deltaY * 4; // 增加滚动速度
+    const horizontalDelta = e.shiftKey
+      ? e.deltaY
+      : Math.abs(e.deltaX) > Math.abs(e.deltaY)
+        ? e.deltaX
+        : 0;
+    if (horizontalDelta === 0) return;
 
-        // 根据滚轮方向进行横向滚动
-        container.scrollBy({
-          left: scrollAmount,
-          behavior: 'smooth',
-        });
-      }
-    },
-    [isHovered],
-  );
+    const maxScrollLeft = container.scrollWidth - container.clientWidth;
+    if (maxScrollLeft <= 0) return;
 
-  // 阻止页面竖向滚动
-  const preventPageScroll = useCallback(
-    (e: WheelEvent) => {
-      if (isHovered) {
-        e.preventDefault();
-      }
-    },
-    [isHovered],
-  );
+    const atLeft = container.scrollLeft <= 0;
+    const atRight = container.scrollLeft >= maxScrollLeft - 1;
+    const scrollingLeft = horizontalDelta < 0;
+    const scrollingRight = horizontalDelta > 0;
 
-  useEffect(() => {
-    if (isHovered) {
-      // 鼠标悬停时阻止页面滚动
-      document.addEventListener('wheel', preventPageScroll, { passive: false });
-      document.addEventListener('wheel', handleWheel, { passive: false });
-    } else {
-      // 鼠标离开时恢复页面滚动
-      document.removeEventListener('wheel', preventPageScroll);
-      document.removeEventListener('wheel', handleWheel);
+    if ((atLeft && scrollingLeft) || (atRight && scrollingRight)) {
+      return;
     }
 
-    return () => {
-      document.removeEventListener('wheel', preventPageScroll);
-      document.removeEventListener('wheel', handleWheel);
-    };
-  }, [handleWheel, isHovered, preventPageScroll]);
+    e.preventDefault();
+    container.scrollBy({
+      left: horizontalDelta * 4,
+      behavior: 'auto',
+    });
+  }, []);
 
   // 组件加载后自动滚动到正在播放的节目
   useEffect(() => {
     // 延迟执行，确保DOM完全渲染
     const timer = setTimeout(() => {
       // 初始化当前正在播放的节目索引
-      const initialPlayingIndex = programs.findIndex((program) =>
-        isCurrentlyPlaying(program),
-      );
+      const initialPlayingIndex = findCurrentProgramIndex(currentTime);
       setCurrentPlayingIndex(initialPlayingIndex);
       scrollToCurrentProgram();
     }, 100);
 
     return () => clearTimeout(timer);
-  }, [currentTime, isCurrentlyPlaying, programs, scrollToCurrentProgram]);
+  }, [currentTime, findCurrentProgramIndex, scrollToCurrentProgram]);
 
   // 定时刷新正在播放状态
   useEffect(() => {
     // 每分钟刷新一次正在播放状态
     const interval = setInterval(() => {
       // 更新当前正在播放的节目索引
-      const newPlayingIndex = programs.findIndex((program) => {
-        try {
-          const start = parseCustomTimeFormat(program.start);
-          const end = parseCustomTimeFormat(program.end);
-          return currentTime >= start && currentTime < end;
-        } catch {
-          return false;
-        }
-      });
+      const now = new Date();
+      const newPlayingIndex = findCurrentProgramIndex(now);
 
       if (newPlayingIndex !== currentPlayingIndex) {
         setCurrentPlayingIndex(newPlayingIndex);
-        // 如果正在播放的节目发生变化，自动滚动到新位置
-        scrollToCurrentProgram();
+        if (newPlayingIndex !== -1 && containerRef.current) {
+          const programElement = containerRef.current.children[
+            newPlayingIndex
+          ] as HTMLElement | undefined;
+
+          if (programElement) {
+            const container = containerRef.current;
+            const scrollLeft =
+              programElement.offsetLeft -
+              container.clientWidth / 2 +
+              programElement.offsetWidth / 2;
+
+            container.scrollTo({
+              left: Math.max(0, scrollLeft),
+              behavior: 'smooth',
+            });
+          }
+        }
       }
     }, 60000); // 60秒 = 1分钟
 
     return () => clearInterval(interval);
-  }, [currentPlayingIndex, currentTime, programs, scrollToCurrentProgram]);
+  }, [currentPlayingIndex, findCurrentProgramIndex]);
 
   // 格式化时间显示
   const formatTime = (timeString: string) => {
@@ -220,14 +229,11 @@ export default function EpgScrollableRow({
         )}
       </div>
 
-      <div
-        className='relative'
-        onMouseEnter={() => setIsHovered(true)}
-        onMouseLeave={() => setIsHovered(false)}
-      >
+      <div className='relative'>
         <div
           ref={containerRef}
           className='flex overflow-x-auto scrollbar-hide py-2 pb-4 px-2 sm:px-4 min-h-[100px] sm:min-h-[120px]'
+          onWheel={handleWheel}
         >
           {programs.map((program, index) => {
             // 使用 currentPlayingIndex 来判断播放状态，确保样式能正确更新

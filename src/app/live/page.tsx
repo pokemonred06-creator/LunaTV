@@ -695,6 +695,25 @@ function LivePageClient() {
     if (!p || (p as unknown as { isDisposed?: () => boolean }).isDisposed?.())
       return;
     switch (e.key) {
+      case 'PageUp':
+        e.preventDefault();
+        window.scrollBy({ top: -window.innerHeight * 0.9, behavior: 'smooth' });
+        break;
+      case 'PageDown':
+        e.preventDefault();
+        window.scrollBy({ top: window.innerHeight * 0.9, behavior: 'smooth' });
+        break;
+      case 'Home':
+        e.preventDefault();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        break;
+      case 'End':
+        e.preventDefault();
+        window.scrollTo({
+          top: document.body.scrollHeight,
+          behavior: 'smooth',
+        });
+        break;
       case 'ArrowUp':
         e.preventDefault();
         p.volume(Math.min(1, (p.volume() ?? 0.5) + 0.1));
@@ -715,6 +734,20 @@ function LivePageClient() {
         break;
     }
   };
+
+  const handlePlayerWheel = useCallback(
+    (e: React.WheelEvent<HTMLDivElement>) => {
+      if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+      if (e.deltaY === 0) return;
+
+      e.preventDefault();
+      window.scrollBy({
+        top: e.deltaY,
+        behavior: 'auto',
+      });
+    },
+    [],
+  );
 
   // Initial scroll
   useEffect(() => {
@@ -768,14 +801,14 @@ function LivePageClient() {
         Desktop: Flex-Row. Player+Info Left. List Right (Sidebar).
         No 'hidden' classes depending on state to ensure visibility.
       */}
-      {/* OUTER CONTAINER: Enforce full viewport height minus header */}
-      <div className='flex flex-col lg:flex-row h-[calc(100vh-64px)] w-full overflow-hidden'>
+      {/* OUTER CONTAINER: allow the page to grow vertically on desktop */}
+      <div className='flex flex-col lg:flex-row min-h-[calc(100vh-64px)] w-full'>
         {/* === LEFT PANE: PLAYER & INFO === 
             Mobile: flex-none (take only natural height). 
             Desktop: flex-1 (grow to fill width), h-full (fill height).
             removed 'overflow-y-auto' so mobile doesn't scroll this container.
         */}
-        <div className='flex-none lg:flex-1 flex flex-col min-w-0 bg-black relative lg:h-full overflow-hidden'>
+        <div className='flex-none lg:flex-1 flex flex-col min-w-0 bg-black relative lg:min-h-[calc(100vh-64px)]'>
           {/* PLAYER WRAPPER: Removed sticky, just relative now */}
           <div
             ref={playerWrapperRef}
@@ -797,6 +830,7 @@ function LivePageClient() {
               setPlayerFocused(true);
               playerWrapperRef.current?.focus();
             }}
+            onWheelCapture={handlePlayerWheel}
           >
             {proxiedUrl && !unsupportedType ? (
               <VideoJsPlayer
@@ -913,8 +947,9 @@ function LivePageClient() {
             bg-white dark:bg-gray-900 
             border-t lg:border-t-0 lg:border-l border-gray-200 dark:border-gray-800
             w-full lg:w-80 lg:shrink-0
-            h-full lg:h-auto
+            h-full lg:max-h-[calc(100vh-64px)]
             overflow-hidden
+            lg:sticky lg:top-0
             flex-1 lg:flex-none
           '
         >

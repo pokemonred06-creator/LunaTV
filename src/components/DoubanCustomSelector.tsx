@@ -204,11 +204,15 @@ const DoubanCustomSelector: React.FC<DoubanCustomSelectorProps> = ({
     const container = e.currentTarget as HTMLDivElement;
     if (container.scrollWidth <= container.clientWidth) return;
 
-    const isVerticalScroll = Math.abs(e.deltaY) > Math.abs(e.deltaX);
-    if (!isVerticalScroll) return;
+    const horizontalDelta = e.shiftKey
+      ? e.deltaY
+      : Math.abs(e.deltaX) > Math.abs(e.deltaY)
+        ? e.deltaX
+        : 0;
+    if (horizontalDelta === 0) return;
 
     const { scrollLeft, scrollWidth, clientWidth } = container;
-    const delta = e.deltaY;
+    const delta = horizontalDelta;
 
     const canScrollRight = scrollLeft + clientWidth < scrollWidth - 1;
     const canScrollLeft = scrollLeft > 1;
@@ -230,6 +234,127 @@ const DoubanCustomSelector: React.FC<DoubanCustomSelectorProps> = ({
     }
   }, [handleWheel, secondaryOptions]);
 
+  const handlePageScrollKeys = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      const isScrollFnSupported = typeof window !== 'undefined';
+      if (!isScrollFnSupported) return;
+
+      const scrollDistance = window.innerHeight * 0.9;
+
+      const doScroll = (distance: number) => {
+        // Try modern behavior
+        try {
+          const scrollEl = (document.scrollingElement ||
+            document.documentElement ||
+            document.body ||
+            window) as unknown as Element;
+          if (typeof scrollEl.scrollBy === 'function') {
+            scrollEl.scrollBy({ top: distance, behavior: 'smooth' });
+            return;
+          }
+        } catch {
+          // ignore
+        }
+
+        // Fallbacks
+        try {
+          window.scrollBy(0, distance);
+        } catch {
+          /* ignore */
+        }
+        try {
+          document.documentElement.scrollTop += distance;
+        } catch {
+          /* ignore */
+        }
+        try {
+          document.body.scrollTop += distance;
+        } catch {
+          /* ignore */
+        }
+      };
+
+      const doScrollTo = (position: number) => {
+        try {
+          const scrollEl = (document.scrollingElement ||
+            document.documentElement ||
+            document.body ||
+            window) as unknown as Element;
+          if (typeof scrollEl.scrollTo === 'function') {
+            scrollEl.scrollTo({ top: position, behavior: 'smooth' });
+            return;
+          }
+        } catch {
+          // ignore
+        }
+
+        try {
+          window.scrollTo(0, position);
+        } catch {
+          /* ignore */
+        }
+        try {
+          document.documentElement.scrollTop = position;
+        } catch {
+          /* ignore */
+        }
+        try {
+          document.body.scrollTop = position;
+        } catch {
+          /* ignore */
+        }
+      };
+
+      switch (e.key) {
+        case 'PageUp':
+          e.preventDefault();
+          doScroll(-scrollDistance);
+          break;
+        case 'PageDown':
+          e.preventDefault();
+          doScroll(scrollDistance);
+          break;
+        case 'Home':
+          e.preventDefault();
+          doScrollTo(0);
+          break;
+        case 'End': {
+          e.preventDefault();
+          const h =
+            document.body.scrollHeight || document.documentElement.scrollHeight;
+          doScrollTo(h);
+          break;
+        }
+      }
+    },
+    [],
+  );
+
+  const handleVerticalWheelPassThrough = useCallback(
+    (e: React.WheelEvent<HTMLDivElement>) => {
+      // If user is actually scrolling horizontally, let the container handle it natively
+      if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+      if (e.deltaY === 0) return;
+
+      // Vertical scroll over horizontal container:
+      // Prevent the container from eating the event or causing weird behavior on some older browsers
+      e.preventDefault();
+
+      if (
+        typeof window !== 'undefined' &&
+        typeof window.scrollBy === 'function'
+      ) {
+        try {
+          // Attempt modern smooth scroll, or auto
+          window.scrollBy({ top: e.deltaY, behavior: 'auto' });
+        } catch {
+          // Fallback for older browsers
+          window.scrollBy(0, e.deltaY);
+        }
+      }
+    },
+    [],
+  );
   // Render Helper
   const renderCapsuleSelector = (
     options: { label: string; value: string }[],
@@ -249,6 +374,8 @@ const DoubanCustomSelector: React.FC<DoubanCustomSelectorProps> = ({
       <div
         ref={containerRef}
         className='relative flex items-center overflow-x-auto bg-gray-200/60 dark:bg-gray-700/60 rounded-full p-1 backdrop-blur-sm [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]'
+        onKeyDownCapture={handlePageScrollKeys}
+        onWheelCapture={handleVerticalWheelPassThrough}
       >
         {/* Animated Background Indicator */}
         <div
