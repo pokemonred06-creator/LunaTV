@@ -3,6 +3,7 @@
 import { Redis } from '@upstash/redis';
 
 import { AdminConfig } from './admin.types';
+import { hashPassword, isPasswordHash, verifyStoredPassword } from './password';
 import {
   Favorite,
   IAdminStorage,
@@ -164,8 +165,9 @@ export class UpstashRedisStorage
   }
 
   async registerUser(userName: string, password: string): Promise<void> {
-    // 简单存储明文密码，生产环境应加密
-    await withRetry(() => this.client.set(this.userPwdKey(userName), password));
+    await withRetry(() =>
+      this.client.set(this.userPwdKey(userName), hashPassword(password)),
+    );
   }
 
   async verifyUser(userName: string, password: string): Promise<boolean> {
@@ -173,8 +175,16 @@ export class UpstashRedisStorage
       this.client.get(this.userPwdKey(userName)),
     );
     if (stored === null) return false;
-    // 确保比较时都是字符串类型
-    return ensureString(stored) === password;
+    const normalized = ensureString(stored);
+    const isValid = verifyStoredPassword(password, normalized);
+
+    if (isValid && !isPasswordHash(normalized)) {
+      await withRetry(() =>
+        this.client.set(this.userPwdKey(userName), hashPassword(password)),
+      );
+    }
+
+    return isValid;
   }
 
   // 检查用户是否存在
@@ -188,9 +198,8 @@ export class UpstashRedisStorage
 
   // 修改用户密码
   async changePassword(userName: string, newPassword: string): Promise<void> {
-    // 简单存储明文密码，生产环境应加密
     await withRetry(() =>
-      this.client.set(this.userPwdKey(userName), newPassword),
+      this.client.set(this.userPwdKey(userName), hashPassword(newPassword)),
     );
   }
 

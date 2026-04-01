@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getAuthInfoFromCookie } from '@/lib/auth/server';
+import { isOwnerUsername } from '@/lib/auth/shared';
 import { resetConfig } from '@/lib/config';
 
 export const runtime = 'nodejs';
@@ -12,7 +13,7 @@ export async function GET(request: NextRequest) {
   }
   const username = authInfo.username;
 
-  if (username !== process.env.USERNAME) {
+  if (!isOwnerUsername(username)) {
     return NextResponse.json({ error: '仅支持站长重置配置' }, { status: 401 });
   }
 

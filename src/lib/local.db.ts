@@ -1,9 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
 import { AdminConfig } from './admin.types';
+import { hashPassword, isPasswordHash, verifyStoredPassword } from './password';
 import {
   Favorite,
   IAdminStorage,
@@ -13,43 +13,6 @@ import {
   PlayRecord,
   SkipConfig,
 } from './types';
-
-// Password hashing configuration
-const HASH_ITERATIONS = 100_000;
-const HASH_KEYLEN = 64;
-const HASH_DIGEST = 'sha512';
-const SALT_LEN = 16;
-
-/**
- * Hash a password with a random salt
- * Returns format: salt:hash (both hex encoded)
- */
-function hashPassword(password: string): string {
-  const salt = crypto.randomBytes(SALT_LEN).toString('hex');
-  const hash = crypto
-    .pbkdf2Sync(password, salt, HASH_ITERATIONS, HASH_KEYLEN, HASH_DIGEST)
-    .toString('hex');
-  return `${salt}:${hash}`;
-}
-
-/**
- * Verify a password against a stored hash
- * Also handles legacy plaintext passwords (auto-upgrade on verify)
- */
-function verifyPassword(password: string, stored: string): boolean {
-  // Check if stored value is a hashed password (contains colon separator)
-  if (stored.includes(':')) {
-    const [salt, hash] = stored.split(':');
-    const verify = crypto
-      .pbkdf2Sync(password, salt, HASH_ITERATIONS, HASH_KEYLEN, HASH_DIGEST)
-      .toString('hex');
-    // Timing-safe comparison
-    if (hash.length !== verify.length) return false;
-    return crypto.timingSafeEqual(Buffer.from(hash), Buffer.from(verify));
-  }
-  // Legacy plaintext comparison (will be upgraded on changePassword)
-  return stored === password;
-}
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
@@ -192,10 +155,10 @@ export class FileStorage
     const stored = this.data[this.userPwdKey(userName)];
     if (!stored) return false;
 
-    const isValid = verifyPassword(password, stored);
+    const isValid = verifyStoredPassword(password, stored);
 
     // Auto-upgrade legacy plaintext passwords to hashed on successful login
-    if (isValid && !stored.includes(':')) {
+    if (isValid && !isPasswordHash(stored)) {
       this.data[this.userPwdKey(userName)] = hashPassword(password);
       this.save();
     }

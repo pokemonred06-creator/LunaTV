@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getAuthInfoFromCookie } from '@/lib/auth/server';
+import { isOwnerUsername } from '@/lib/auth/shared';
 import { getConfig } from '@/lib/config';
 import { db } from '@/lib/db';
 import { PlayRecord } from '@/lib/types';
@@ -16,7 +17,7 @@ export async function GET(request: NextRequest) {
     }
 
     const config = await getConfig();
-    if (authInfo.username !== process.env.USERNAME) {
+    if (!isOwnerUsername(authInfo.username)) {
       // 非站长，检查用户存在或被封禁
       const user = config.UserConfig.Users.find(
         (u) => u.username === authInfo.username,
@@ -71,7 +72,7 @@ export async function POST(request: NextRequest) {
     }
 
     const config = await getConfig();
-    if (authInfo.username !== process.env.USERNAME) {
+    if (!isOwnerUsername(authInfo.username)) {
       // 非站长，检查用户存在或被封禁
       const user = config.UserConfig.Users.find(
         (u) => u.username === authInfo.username,
@@ -137,7 +138,7 @@ export async function DELETE(request: NextRequest) {
     }
 
     const config = await getConfig();
-    if (authInfo.username !== process.env.USERNAME) {
+    if (!isOwnerUsername(authInfo.username)) {
       // 非站长，检查用户存在或被封禁
       const user = config.UserConfig.Users.find(
         (u) => u.username === authInfo.username,

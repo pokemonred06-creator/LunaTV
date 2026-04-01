@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getAuthInfoFromCookie } from '@/lib/auth/server';
+import { isOwnerUsername } from '@/lib/auth/shared';
 
 export const runtime = 'nodejs';
 
@@ -12,7 +13,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    if (authInfo.username !== process.env.USERNAME) {
+    if (!isOwnerUsername(authInfo.username)) {
       return NextResponse.json(
         { error: '权限不足，只有站长可以拉取配置订阅' },
         { status: 401 },

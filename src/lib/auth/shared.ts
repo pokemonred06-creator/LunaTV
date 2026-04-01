@@ -6,6 +6,14 @@ export function safeDecodeCookie(value: string): string {
   }
 }
 
+export function getOwnerUsername(): string {
+  return process.env.USERNAME || 'admin';
+}
+
+export function isOwnerUsername(username: string | null | undefined): boolean {
+  return typeof username === 'string' && username === getOwnerUsername();
+}
+
 /**
  * Handles potential double-encoding from proxies/browsers safely.
  * Only attempts second decode if URL-encoded pattern is detected.

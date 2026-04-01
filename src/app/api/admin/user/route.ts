@@ -3,6 +3,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getAuthInfoFromCookie } from '@/lib/auth/server';
+import { getOwnerUsername } from '@/lib/auth/shared';
 import { getConfig } from '@/lib/config';
 import { db } from '@/lib/db';
 
@@ -10,7 +11,7 @@ export const runtime = 'nodejs';
 
 // --- Constants & Policies ---
 
-const OWNER_USERNAME = process.env.USERNAME;
+const OWNER_USERNAME = getOwnerUsername();
 
 // Supported actions
 const ACTIONS = [

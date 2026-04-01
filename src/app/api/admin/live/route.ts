@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getAuthInfoFromCookie } from '@/lib/auth/server';
+import { isOwnerUsername } from '@/lib/auth/shared';
 import { getConfig } from '@/lib/config';
 import { db } from '@/lib/db';
 import { deleteCachedLiveChannels, refreshLiveChannels } from '@/lib/live';
@@ -18,7 +19,7 @@ export async function GET(request: NextRequest) {
 
     // Auth Check
     let isPrivileged = false;
-    if (authInfo.username === process.env.USERNAME) {
+    if (isOwnerUsername(authInfo.username)) {
       isPrivileged = true;
     } else {
       const user = config.UserConfig.Users.find(
@@ -51,7 +52,7 @@ export async function POST(request: NextRequest) {
     const authInfo = await getAuthInfoFromCookie(request);
     const username = authInfo?.username;
     const config = await getConfig();
-    if (username !== process.env.USERNAME) {
+    if (!isOwnerUsername(username)) {
       // 管理员
       const user = config.UserConfig.Users.find((u) => u.username === username);
       if (!user || user.role !== 'owner' || user.banned) {

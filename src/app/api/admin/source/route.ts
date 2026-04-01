@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { AdminConfig } from '@/lib/admin.types'; // Assuming types are here, adjust if needed
 import { getAuthInfoFromCookie } from '@/lib/auth/server';
+import { isOwnerUsername } from '@/lib/auth/shared';
 import { getConfig } from '@/lib/config';
 import { db } from '@/lib/db';
 
@@ -11,6 +12,7 @@ export const runtime = 'nodejs';
 
 type Action =
   | 'add'
+  | 'edit'
   | 'disable'
   | 'enable'
   | 'delete'
@@ -73,7 +75,7 @@ export async function GET(request: NextRequest) {
 
     // Authorization: Owner or Admin
     let isWriter = false;
-    if (authInfo.username === process.env.USERNAME) {
+    if (isOwnerUsername(authInfo.username)) {
       isWriter = true;
     } else {
       const user = config.UserConfig.Users.find(
@@ -116,7 +118,7 @@ export async function POST(request: NextRequest) {
     const config = await getConfig();
 
     // 3. Authorization (Strict: Owner or Env Root User only)
-    const isRoot = authInfo.username === process.env.USERNAME;
+    const isRoot = isOwnerUsername(authInfo.username);
     const user = config.UserConfig.Users.find(
       (u) => u.username === authInfo.username,
     );
@@ -158,6 +160,29 @@ export async function POST(request: NextRequest) {
           from: 'custom',
           disabled: false,
         });
+        break;
+      }
+
+      case 'edit': {
+        const { key, name, api, detail } = body;
+        if (!key || !name || !api) {
+          return NextResponse.json(
+            { error: '缺少必要参数 (key, name, api)' },
+            { status: 400 },
+          );
+        }
+
+        const target = config.SourceConfig.find((s) => s.key === key);
+        if (!target) {
+          return NextResponse.json(
+            { error: 'Source not found' },
+            { status: 404 },
+          );
+        }
+
+        target.name = name;
+        target.api = api;
+        target.detail = detail || target.detail || '';
         break;
       }
 

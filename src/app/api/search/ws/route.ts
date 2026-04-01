@@ -3,6 +3,7 @@
 import { NextRequest } from 'next/server';
 
 import { getAuthInfoFromCookie } from '@/lib/auth/server';
+import { isOwnerUsername } from '@/lib/auth/shared';
 import { getAvailableApiSites, getConfig } from '@/lib/config';
 import { searchFromApi } from '@/lib/downstream';
 
@@ -68,8 +69,7 @@ export async function GET(request: NextRequest) {
   const config = await getConfig();
 
   let applyFilter = !config.SiteConfig?.DisableYellowFilter;
-  const OWNER_USERNAME = process.env.USERNAME;
-  const isOwner = !!OWNER_USERNAME && authInfo.username === OWNER_USERNAME;
+  const isOwner = isOwnerUsername(authInfo.username);
 
   if (applyFilter) {
     if (isOwner) {

@@ -2,6 +2,7 @@ import { createClient, RedisClientType } from 'redis';
 import 'server-only';
 
 import type { AdminConfig } from './admin.types';
+import { hashPassword, isPasswordHash, verifyStoredPassword } from './password';
 import {
   Favorite,
   IAdminStorage,
@@ -136,13 +137,20 @@ export class RedisStorage
 
   async registerUser(userName: string, pass: string): Promise<void> {
     await this.ensureConnected();
-    await this.client.set(`u:${userName}:pwd`, pass);
+    await this.client.set(`u:${userName}:pwd`, hashPassword(pass));
   }
 
   async verifyUser(userName: string, pass: string): Promise<boolean> {
     await this.ensureConnected();
     const stored = await this.client.get(`u:${userName}:pwd`);
-    return stored === pass;
+    if (!stored) return false;
+
+    const isValid = verifyStoredPassword(pass, stored);
+    if (isValid && !isPasswordHash(stored)) {
+      await this.client.set(`u:${userName}:pwd`, hashPassword(pass));
+    }
+
+    return isValid;
   }
 
   async checkUserExist(userName: string): Promise<boolean> {
@@ -153,7 +161,7 @@ export class RedisStorage
 
   async changePassword(userName: string, newPass: string): Promise<void> {
     await this.ensureConnected();
-    await this.client.set(`u:${userName}:pwd`, newPass);
+    await this.client.set(`u:${userName}:pwd`, hashPassword(newPass));
   }
 
   async deleteUser(userName: string): Promise<void> {

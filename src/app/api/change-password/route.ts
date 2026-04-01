@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getAuthInfoFromCookie } from '@/lib/auth/server';
+import { isOwnerUsername } from '@/lib/auth/shared';
 import { db } from '@/lib/db';
 
 export const runtime = 'nodejs';
@@ -36,7 +37,7 @@ export async function POST(request: NextRequest) {
     const username = authInfo.username;
 
     // 不允许站长修改密码（站长用户名等于 process.env.USERNAME）
-    if (username === process.env.USERNAME) {
+    if (isOwnerUsername(username)) {
       return NextResponse.json(
         { error: '站长不能通过此接口修改密码' },
         { status: 403 },

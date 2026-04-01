@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { AdminConfig } from '@/lib/admin.types';
 import { getAuthInfoFromCookie } from '@/lib/auth/server';
+import { isOwnerUsername } from '@/lib/auth/shared';
 import { getAvailableApiSites, getConfig } from '@/lib/config';
 import { searchFromApi } from '@/lib/downstream';
 import {
@@ -34,8 +35,7 @@ export async function GET(request: NextRequest) {
     const query = OPENCC_CONVERTER(rawQuery);
 
     let applyFilter = !config.SiteConfig?.DisableYellowFilter;
-    const OWNER_USERNAME = process.env.USERNAME;
-    const isOwner = !!OWNER_USERNAME && authInfo.username === OWNER_USERNAME;
+    const isOwner = isOwnerUsername(authInfo.username);
 
     if (applyFilter) {
       if (isOwner) {

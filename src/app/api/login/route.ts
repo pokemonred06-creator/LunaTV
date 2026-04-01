@@ -1,6 +1,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from 'next/server';
 
+import { calculateSignature } from '@/lib/auth/server';
+import { getOwnerUsername } from '@/lib/auth/shared';
 import { getConfig } from '@/lib/config';
 import { db } from '@/lib/db';
 
@@ -14,9 +16,6 @@ const STORAGE_TYPE =
     | 'upstash'
     | 'kvrocks'
     | undefined) || 'localstorage';
-
-import { calculateSignature } from '@/lib/auth/server';
-
 // 生成认证Cookie（带签名）
 async function generateAuthCookie(
   username?: string,
@@ -64,6 +63,7 @@ export async function POST(req: NextRequest) {
     // 本地 / localStorage 模式——仅校验固定密码
     if (STORAGE_TYPE === 'localstorage') {
       const envPassword = process.env.PASSWORD;
+      const ownerUsername = getOwnerUsername();
       console.log('[Login] Mode: LocalStorage');
 
       // 未配置 PASSWORD 时直接放行
@@ -113,13 +113,12 @@ export async function POST(req: NextRequest) {
 
       // If username was provided, also validate it matches the env USERNAME (or defaults to 'admin')
       if (username) {
-        const envUsername = (process.env.USERNAME || 'admin').toLowerCase();
-        if (username.toLowerCase() !== envUsername) {
+        if (username.toLowerCase() !== ownerUsername.toLowerCase()) {
           console.log(
             '[Login] Username mismatch:',
             username,
             'Expected:',
-            envUsername,
+            ownerUsername,
           );
           return NextResponse.json(
             { ok: false, error: '用户名或密码错误' },
@@ -131,7 +130,11 @@ export async function POST(req: NextRequest) {
       console.log('[Login] LocalStorage Success');
       // 验证成功，设置认证cookie
       const response = NextResponse.json({ ok: true });
-      const cookieValue = await generateAuthCookie('admin', password, 'owner');
+      const cookieValue = await generateAuthCookie(
+        ownerUsername,
+        password,
+        'owner',
+      );
       const expires = new Date();
       expires.setDate(expires.getDate() + 7); // 7天过期
 
@@ -153,7 +156,7 @@ export async function POST(req: NextRequest) {
         'auth-user',
         encodeURIComponent(
           JSON.stringify({
-            username: 'admin',
+            username: ownerUsername,
             role: 'owner',
             disableYellowFilter: true, // Owner always exempt
           }),
@@ -189,7 +192,8 @@ export async function POST(req: NextRequest) {
     }
 
     const lowerUsername = username.toLowerCase();
-    const envUsername = (process.env.USERNAME || 'admin').toLowerCase();
+    const ownerUsername = getOwnerUsername();
+    const envUsername = ownerUsername.toLowerCase();
     const envPassword = process.env.PASSWORD;
 
     console.log('[Login] Check Env Match:', {
@@ -204,7 +208,7 @@ export async function POST(req: NextRequest) {
       // 验证成功，设置认证cookie
       const response = NextResponse.json({ ok: true });
       const cookieValue = await generateAuthCookie(
-        lowerUsername,
+        ownerUsername,
         password,
         'owner',
       );
@@ -228,7 +232,7 @@ export async function POST(req: NextRequest) {
         'auth-user',
         encodeURIComponent(
           JSON.stringify({
-            username: lowerUsername,
+            username: ownerUsername,
             role: 'owner',
             disableYellowFilter: true, // Owner always exempt
           }),

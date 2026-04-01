@@ -5,8 +5,10 @@ import { promisify } from 'util';
 import { gzip } from 'zlib';
 
 import { getAuthInfoFromCookie } from '@/lib/auth/server';
+import { getOwnerUsername, isOwnerUsername } from '@/lib/auth/shared';
 import { ServerCrypto } from '@/lib/crypto';
 import { db } from '@/lib/db';
+import { getStoredUserPasswordHash } from '@/lib/storage-credentials';
 import { CURRENT_VERSION } from '@/lib/version';
 
 export const runtime = 'nodejs';
@@ -31,7 +33,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 检查用户权限（只有站长可以导出数据）
-    if (authInfo.username !== process.env.USERNAME) {
+    if (!isOwnerUsername(authInfo.username)) {
       return NextResponse.json(
         { error: '权限不足，只有站长可以导出数据' },
         { status: 401 },
@@ -64,7 +66,7 @@ export async function POST(req: NextRequest) {
     // 获取所有用户
     let allUsers = await db.getAllUsers();
     // 添加站长用户
-    allUsers.push(process.env.USERNAME);
+    allUsers.push(getOwnerUsername());
     allUsers = Array.from(new Set(allUsers));
 
     // 为每个用户收集数据
@@ -78,16 +80,12 @@ export async function POST(req: NextRequest) {
         searchHistory: await db.getSearchHistory(username),
         // 跳过片头片尾配置
         skipConfigs: await db.getAllSkipConfigs(username),
-        // 用户密码（通过验证空密码来检查用户是否存在，然后获取密码）
-        password: await getUserPassword(username),
+        // Password snapshots are exported only as non-recoverable hashes.
+        passwordHash: await getUserPasswordHash(username),
       };
 
       exportData.data.userData[username] = userData;
     }
-
-    // 覆盖站长密码
-    exportData.data.userData[process.env.USERNAME].password =
-      process.env.PASSWORD;
 
     // 将数据转换为JSON字符串
     const jsonData = JSON.stringify(exportData);
@@ -127,18 +125,11 @@ export async function POST(req: NextRequest) {
 }
 
 // 辅助函数：获取用户密码（通过数据库直接访问）
-async function getUserPassword(username: string): Promise<string | null> {
+async function getUserPasswordHash(username: string): Promise<string | null> {
   try {
-    // 使用 Redis 存储的直接访问方法
-    const storage = (db as any).storage;
-    if (storage && typeof storage.client?.get === 'function') {
-      const passwordKey = `u:${username}:pwd`;
-      const password = await storage.client.get(passwordKey);
-      return password;
-    }
-    return null;
+    return await getStoredUserPasswordHash((db as any).storage, username);
   } catch (error) {
-    console.error(`获取用户 ${username} 密码失败:`, error);
+    console.error(`获取用户 ${username} 密码哈希失败:`, error);
     return null;
   }
 }

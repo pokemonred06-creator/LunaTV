@@ -86,41 +86,33 @@ async function validateSafeUrl(urlStr: string) {
     }
 
     const ipType = net.isIP(u.hostname);
-    if (ipType === 6) return false;
+    if (ipType === 6) return !isBlockedIp(u.hostname);
     if (ipType === 4) {
       const blocked = isBlockedIp(u.hostname);
       if (blocked) console.warn('[Proxy SSRF] Blocked IP:', u.hostname, urlStr);
       return !blocked;
     }
-    const addrs = await dns
-      .lookup(u.hostname, { all: true, verbatim: true })
-      .catch(() => []);
+    const addrs = await dns.lookup(u.hostname, { all: true, verbatim: true });
     if (!addrs.length) {
-      console.warn(
-        '[Proxy SSRF] DNS ENOTFOUND, allowing attempt as fallback:',
-        u.hostname,
-      );
-      return true; // Allow it to fall through to fetch() if DNS lookup fails here
+      console.warn('[Proxy SSRF] Empty DNS result:', u.hostname, urlStr);
+      return false;
     }
 
-    const ipv4Addrs = addrs.filter((a) => a.family === 4);
-    if (!ipv4Addrs.length) return true; // IPv6? Allow fetch() to handle
-    const allPublic = ipv4Addrs.every((a) => !isBlockedIp(a.address));
+    const allPublic = addrs.every((a) => {
+      if (a.family !== 4 && a.family !== 6) return false;
+      return !isBlockedIp(a.address);
+    });
     if (!allPublic) {
       console.warn(
-        '[Proxy SSRF] Blocked resolved IP:',
-        ipv4Addrs.map((a) => a.address),
+        '[Proxy SSRF] Blocked resolved address:',
+        addrs.map((a) => a.address),
         urlStr,
       );
     }
     return allPublic;
   } catch (err) {
-    console.warn(
-      '[Proxy SSRF] Validation Error, allowing attempt as fallback:',
-      err,
-      urlStr,
-    );
-    return true; // Fallback to raw fetch()
+    console.warn('[Proxy SSRF] Validation Error:', err, urlStr);
+    return false;
   }
 }
 

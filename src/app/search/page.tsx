@@ -48,6 +48,7 @@ function SearchPageClient() {
 
   // Streaming State
   const eventSourceRef = useRef<EventSource | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [totalSources, setTotalSources] = useState(0);
   const [completedSources, setCompletedSources] = useState(0);
   const pendingResultsRef = useRef<SearchResult[]>([]);
@@ -621,7 +622,7 @@ function SearchPageClient() {
   }, []);
 
   useEffect(() => {
-    if (!searchParams.get('q')) document.getElementById('searchInput')?.focus();
+    if (!searchParams.get('q')) searchInputRef.current?.focus();
     getSearchHistory().then(setSearchHistory);
     const unsubscribe = subscribeToDataUpdates(
       'searchHistoryUpdated',
@@ -644,6 +645,7 @@ function SearchPageClient() {
     e.preventDefault();
     const trimmed = searchQuery.trim().replace(/\s+/g, ' ');
     if (!trimmed) return;
+    searchInputRef.current?.blur();
     setSearchQuery(trimmed);
     setIsLoading(true);
     setShowResults(true);
@@ -652,6 +654,7 @@ function SearchPageClient() {
   };
 
   const handleSuggestionSelect = (suggestion: string) => {
+    searchInputRef.current?.blur();
     setSearchQuery(suggestion);
     setShowSuggestions(false);
     setIsLoading(true);
@@ -676,6 +679,7 @@ function SearchPageClient() {
             <div className='relative'>
               <Search className='absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400 dark:text-gray-500' />
               <input
+                ref={searchInputRef}
                 id='searchInput'
                 type='text'
                 value={searchQuery}
@@ -683,7 +687,7 @@ function SearchPageClient() {
                 onFocus={handleInputFocus}
                 placeholder='搜索电影、电视剧...'
                 autoComplete='off'
-                className='w-full h-12 rounded-lg bg-gray-50/80 py-3 pl-10 pr-12 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-green-400 focus:bg-white border border-gray-200/50 shadow-sm dark:bg-gray-800 dark:text-gray-300 dark:placeholder-gray-500 dark:focus:bg-gray-700 dark:border-gray-700'
+                className='w-full h-12 rounded-lg bg-gray-50/80 py-3 pl-10 pr-12 text-base md:text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-green-400 focus:bg-white border border-gray-200/50 shadow-sm dark:bg-gray-800 dark:text-gray-300 dark:placeholder-gray-500 dark:focus:bg-gray-700 dark:border-gray-700'
               />
               {searchQuery && (
                 <button
@@ -691,7 +695,7 @@ function SearchPageClient() {
                   onClick={() => {
                     setSearchQuery('');
                     setShowSuggestions(false);
-                    document.getElementById('searchInput')?.focus();
+                    searchInputRef.current?.focus();
                   }}
                   className='absolute right-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors dark:text-gray-500 dark:hover:text-gray-300'
                 >
@@ -706,6 +710,7 @@ function SearchPageClient() {
                 onEnterKey={() => {
                   const trimmed = searchQuery.trim().replace(/\s+/g, ' ');
                   if (!trimmed) return;
+                  searchInputRef.current?.blur();
                   setSearchQuery(trimmed);
                   setIsLoading(true);
                   setShowResults(true);

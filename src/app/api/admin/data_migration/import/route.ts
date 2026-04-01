@@ -5,9 +5,12 @@ import { promisify } from 'util';
 import { gunzip } from 'zlib';
 
 import { getAuthInfoFromCookie } from '@/lib/auth/server';
+import { isOwnerUsername } from '@/lib/auth/shared';
 import { configSelfCheck, setCachedConfig } from '@/lib/config';
 import { ServerCrypto } from '@/lib/crypto';
 import { db } from '@/lib/db';
+import { isPasswordHash } from '@/lib/password';
+import { setStoredUserPasswordHash } from '@/lib/storage-credentials';
 
 export const runtime = 'nodejs';
 
@@ -31,7 +34,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 检查用户权限（只有站长可以导入数据）
-    if (authInfo.username !== process.env.USERNAME) {
+    if (!isOwnerUsername(authInfo.username)) {
       return NextResponse.json(
         { error: '权限不足，只有站长可以导入数据' },
         { status: 401 },
@@ -105,8 +108,17 @@ export async function POST(req: NextRequest) {
     for (const username in userData) {
       const user = userData[username];
 
-      // 重新注册用户（包含密码）
-      if (user.password) {
+      // Restore password hashes from new backups, or re-hash plaintext from legacy backups.
+      if (
+        typeof user.passwordHash === 'string' &&
+        isPasswordHash(user.passwordHash)
+      ) {
+        await setStoredUserPasswordHash(
+          (db as any).storage,
+          username,
+          user.passwordHash,
+        );
+      } else if (user.password) {
         await db.registerUser(username, user.password);
       }
 

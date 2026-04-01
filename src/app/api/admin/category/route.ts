@@ -3,6 +3,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getAuthInfoFromCookie } from '@/lib/auth/server';
+import { isOwnerUsername } from '@/lib/auth/shared';
 import { getConfig } from '@/lib/config';
 import { db } from '@/lib/db';
 
@@ -25,7 +26,7 @@ export async function GET(request: NextRequest) {
     const config = await getConfig();
 
     let isAuthorized = false;
-    if (authInfo.username === process.env.USERNAME) {
+    if (isOwnerUsername(authInfo.username)) {
       isAuthorized = true;
     } else {
       const user = config.UserConfig.Users.find(
@@ -73,7 +74,7 @@ export async function POST(request: NextRequest) {
     const adminConfig = await getConfig();
 
     // 权限与身份校验
-    if (username !== process.env.USERNAME) {
+    if (!isOwnerUsername(username)) {
       const userEntry = adminConfig.UserConfig.Users.find(
         (u) => u.username === username,
       );
