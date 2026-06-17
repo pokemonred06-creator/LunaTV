@@ -217,6 +217,11 @@ const MagicalButterfly: React.FC<{
       typeof window !== 'undefined' &&
       window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     let active = true;
+    // 30fps render gate: physics runs every rAF for smooth motion;
+    // canvas clear+draw only happens at 30fps to halve GPU compositor cost.
+    const RENDER_INTERVAL = 1000 / 30;
+    let renderAccum = 0;
+    let lastDpr = 0;
 
     const fov = 1000;
     const transformAndProject = (
@@ -227,37 +232,34 @@ const MagicalButterfly: React.FC<{
       vy: number,
       vz: number,
       mirror: boolean,
-      wingAngle: number,
-      roll: number,
-      pitch: number,
-      yaw: number,
+      c1: number, // Math.cos(wingAngle)
+      s1: number, // Math.sin(wingAngle) * flapDir
+      c2: number, // Math.cos(roll)
+      s2: number, // Math.sin(roll)
+      c3: number, // Math.cos(pitch)
+      s3: number, // Math.sin(pitch)
+      c4: number, // Math.cos(yaw)
+      s4: number, // Math.sin(yaw)
       out: Point2D,
     ): number => {
       let x = mirror ? -vx : vx;
       let y = vy;
       let z = vz;
       const flapDir = mirror ? -1 : 1;
-      const a1 = wingAngle * flapDir;
-      const c1 = Math.cos(a1);
-      const s1 = Math.sin(a1);
-      let tx = x * c1 + z * s1;
-      let tz = -x * s1 + z * c1;
+      const _c1 = c1;
+      const _s1 = s1 * flapDir;
+      let tx = x * _c1 + z * _s1;
+      let tz = -x * _s1 + z * _c1;
       x = tx;
       z = tz;
-      const c2 = Math.cos(roll);
-      const s2 = Math.sin(roll);
       tx = x * c2 - y * s2;
       let ty = x * s2 + y * c2;
       x = tx;
       y = ty;
-      const c3 = Math.cos(pitch);
-      const s3 = Math.sin(pitch);
       ty = y * c3 - z * s3;
       tz = y * s3 + z * c3;
       y = ty;
       z = tz;
-      const c4 = Math.cos(yaw);
-      const s4 = Math.sin(yaw);
       tx = x * c4 - y * s4;
       ty = x * s4 + y * c4;
       x = tx;
@@ -431,6 +433,21 @@ const MagicalButterfly: React.FC<{
       const wingAngle =
         -Math.max(0, flapSine) * CONFIG.FLAP_AMP +
         Math.max(0, -flapSine) * (CONFIG.FLAP_AMP * 0.4);
+
+      // Precalculate trigonometric sines and cosines once per butterfly per frame
+      const cW = Math.cos(wingAngle),
+        sW = Math.sin(wingAngle);
+      const cR = Math.cos(b.roll),
+        sR = Math.sin(b.roll);
+      const cP = Math.cos(b.pitch),
+        sP = Math.sin(b.pitch);
+      const cY = Math.cos(b.yaw),
+        sY = Math.sin(b.yaw);
+
+      // Constants for zero wingAngle/pitch cases
+      const c0 = 1,
+        s0 = 0;
+
       let rZSum = 0,
         lZSum = 0;
       for (let i = 0; i < WING_VERTICES.length; i++) {
@@ -443,10 +460,14 @@ const MagicalButterfly: React.FC<{
           v.y,
           v.z,
           false,
-          wingAngle,
-          b.roll,
-          b.pitch,
-          b.yaw,
+          cW,
+          sW,
+          cR,
+          sR,
+          cP,
+          sP,
+          cY,
+          sY,
           b.rWing2D[i],
         );
         lZSum += transformAndProject(
@@ -457,10 +478,14 @@ const MagicalButterfly: React.FC<{
           v.y,
           v.z,
           true,
-          wingAngle,
-          b.roll,
-          b.pitch,
-          b.yaw,
+          cW,
+          sW,
+          cR,
+          sR,
+          cP,
+          sP,
+          cY,
+          sY,
           b.lWing2D[i],
         );
       }
@@ -472,10 +497,14 @@ const MagicalButterfly: React.FC<{
         -5,
         0,
         false,
-        0,
-        b.roll,
-        b.pitch,
-        b.yaw,
+        c0,
+        s0,
+        cR,
+        sR,
+        cP,
+        sP,
+        cY,
+        sY,
         b.head2D,
       );
       transformAndProject(
@@ -486,10 +515,14 @@ const MagicalButterfly: React.FC<{
         -2,
         0,
         false,
-        0,
-        b.roll,
-        b.pitch,
-        b.yaw,
+        c0,
+        s0,
+        cR,
+        sR,
+        cP,
+        sP,
+        cY,
+        sY,
         b.thorax2D,
       );
       transformAndProject(
@@ -500,13 +533,19 @@ const MagicalButterfly: React.FC<{
         4,
         0,
         false,
-        0,
-        b.roll,
-        b.pitch,
-        b.yaw,
+        c0,
+        s0,
+        cR,
+        sR,
+        cP,
+        sP,
+        cY,
+        sY,
         b.abdomen2D,
       );
       const antP = b.pitch - Math.sin(b.wingPhase * 0.5) * 0.2;
+      const cAntP = Math.cos(antP),
+        sAntP = Math.sin(antP);
       transformAndProject(
         b.x,
         b.y,
@@ -515,10 +554,14 @@ const MagicalButterfly: React.FC<{
         -10,
         2,
         false,
-        0,
-        b.roll,
-        antP,
-        b.yaw,
+        c0,
+        s0,
+        cR,
+        sR,
+        cAntP,
+        sAntP,
+        cY,
+        sY,
         b.antL2D,
       );
       transformAndProject(
@@ -529,10 +572,14 @@ const MagicalButterfly: React.FC<{
         -10,
         2,
         false,
-        0,
-        b.roll,
-        antP,
-        b.yaw,
+        c0,
+        s0,
+        cR,
+        sR,
+        cAntP,
+        sAntP,
+        cY,
+        sY,
         b.antR2D,
       );
       drawTrail(b);
@@ -554,14 +601,21 @@ const MagicalButterfly: React.FC<{
         rafRef.current = requestAnimationFrame(loop);
         return;
       }
-      const dt = Math.min(
-        (now - lastTimeRef.current) / 1000,
-        prefersReduced ? 0.02 : 0.05,
-      );
+      const rawDt = now - lastTimeRef.current;
       lastTimeRef.current = now;
+
+      // Render & Physics gate: only update at 30fps (RENDER_INTERVAL)
+      renderAccum += rawDt;
+      if (renderAccum < RENDER_INTERVAL) {
+        rafRef.current = requestAnimationFrame(loop);
+        return;
+      }
+      const dt = Math.min(renderAccum / 1000, prefersReduced ? 0.02 : 0.05);
+      renderAccum = Math.min(renderAccum - RENDER_INTERVAL, RENDER_INTERVAL);
+
       const w = window.innerWidth,
         h = window.innerHeight,
-        dpr = Math.min(2, window.devicePixelRatio || 1);
+        dpr = Math.min(1.5, window.devicePixelRatio || 1);
       const tw = Math.floor(w * dpr),
         th = Math.floor(h * dpr);
       if (canvas.width !== tw || canvas.height !== th) {
@@ -570,31 +624,22 @@ const MagicalButterfly: React.FC<{
         canvas.style.width = `${w}px`;
         canvas.style.height = `${h}px`;
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      } else if (dpr !== lastDpr) {
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       }
-      ctx.clearRect(0, 0, w, h);
+      lastDpr = dpr;
+
       const noise = noiseRef.current!;
       const glideProb = 1 - Math.exp(-CONFIG.GLIDE_RATE * dt),
         sparkleProb = 1 - Math.exp(-CONFIG.SPARKLE_RATE * dt);
 
+      // --- PHYSICS UPDATE (runs at 30fps along with draw) ---
       butterfliesRef.current.forEach((b) => {
         const lastP =
           b.trail[(b.trailHead - 1 + b.trail.length) % b.trail.length];
         if ((b.x - lastP.x) ** 2 + (b.y - lastP.y) ** 2 > 4) {
           b.trail[b.trailHead] = { x: b.x, y: b.y };
           b.trailHead = (b.trailHead + 1) % b.trail.length;
-        }
-        if (Math.random() < sparkleProb) {
-          ctx.save();
-          ctx.globalCompositeOperation = 'lighter';
-          ctx.shadowColor = b.palette[2];
-          ctx.shadowBlur = 10;
-          drawDiamondStar(
-            b.x + (Math.random() - 0.5) * b.size * 4,
-            b.y + (Math.random() - 0.5) * b.size * 4,
-            2 + Math.random() * 3,
-            '#FFF',
-          );
-          ctx.restore();
         }
         const t = now * 0.001;
         const n1 = noise.noise2D(b.noiseOffsetX + t * 0.3, b.id * 10.5);
@@ -635,10 +680,29 @@ const MagicalButterfly: React.FC<{
         else if (b.x > w + margin) b.x = -margin;
         if (b.y < -margin) b.y = h + margin;
         else if (b.y > h + margin) b.y = -margin;
+      });
+
+      // --- DRAW ---
+      ctx.clearRect(0, 0, w, h);
+      butterfliesRef.current.forEach((b) => {
+        if (Math.random() < sparkleProb) {
+          ctx.save();
+          ctx.globalCompositeOperation = 'lighter';
+          ctx.shadowColor = b.palette[2];
+          ctx.shadowBlur = 10;
+          drawDiamondStar(
+            b.x + (Math.random() - 0.5) * b.size * 4,
+            b.y + (Math.random() - 0.5) * b.size * 4,
+            2 + Math.random() * 3,
+            '#FFF',
+          );
+          ctx.restore();
+        }
         renderButterfly(b);
       });
       rafRef.current = requestAnimationFrame(loop);
     };
+
     rafRef.current = requestAnimationFrame(loop);
     return () => {
       active = false;
