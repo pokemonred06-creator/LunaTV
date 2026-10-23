@@ -1,0 +1,68 @@
+{
+  "source": {
+    "commit": "f2ce6ffa67e1348b47e4dfa317b7e39ebad85eeb",
+    "base": "1f4fb153734f1a5163882720ba2afcf2b4dedff1",
+    "branch": "refs/heads/codex/mobile-overlay-fix-20261023"
+  },
+  "deployment": {
+    "imageTag": "lunatv:pause-fix-20261023",
+    "imageId": "sha256:ca2bf521c6249a40c236e2cf6d2a420f9fbb8e35ccda38af29fb619b10091fa7",
+    "health": "healthy",
+    "restarts": 0,
+    "oomKilled": false,
+    "previousImage": "sha256:ae4db2f62ae659b3fb4a521a40f71759edc3a5fbd7ce6faaf07c7b5fb2cf9a14",
+    "rollbackTag": "lunatv-pause-rollback/lunatv:20261023",
+    "deployedAt": "2026-10-23T14:15:59.752212+00:00",
+    "node": "v22.23.4",
+    "unchangedOtherContainers": 51,
+    "rollbackRoot": "/volume5/docker/.lunatv-pause-fix-20261023"
+  },
+  "candidate": {
+    "success": true,
+    "checks": [
+      {
+        "name": "candidate_login",
+        "status": 200,
+        "pass": true
+      },
+      {
+        "name": "candidate_play_page",
+        "status": 200,
+        "pass": true
+      },
+      {
+        "name": "anonymous_proxy_denied",
+        "status": 401,
+        "pass": true
+      }
+    ]
+  },
+  "browser": {
+    "controls": {
+      "pause": true,
+      "resume": true,
+      "playbackAdvances": true,
+      "rotatedFullscreen": true,
+      "exitRotatedFullscreen": true,
+      "noDuplicateOverlay": true
+    },
+    "overlayCount": 0,
+    "time": 97.99039559212845,
+    "frames": 2419,
+    "width": 1280,
+    "height": 640,
+    "readyState": 4,
+    "paused": false,
+    "mediaError": null
+  },
+  "checks": {
+    "tests": 119,
+    "suites": 14,
+    "typecheck": true,
+    "webLint": true,
+    "linuxAmd64ProductionBuild": true
+  },
+  "scope": "Only mobileUi touchControls are disabled; custom controls and plugin fullscreen settings are retained.",
+  "physicalIPhoneTested": false,
+  "browserKnownUnrelatedErrors": "Provider poster CORS and /api/log 404 existed before and after; playback has no media error."
+}
