@@ -1,0 +1,457 @@
+{
+  "verifiedAt": "2026-10-23T14:00:14.857693+00:00",
+  "image": "lunatv:dependencies-20261023",
+  "imageId": "sha256:ae4db2f62ae659b3fb4a521a40f71759edc3a5fbd7ce6faaf07c7b5fb2cf9a14",
+  "health": "healthy",
+  "restarts": 0,
+  "oomKilled": false,
+  "source": {
+    "commit": "59a3d055acad1fc13261bdff34d9538c42510799",
+    "parent": "6198b7a76e83d09638f1fe0c52612747eda4186e",
+    "branch": "codex/safari-dependencies-20261023",
+    "files": [
+      "package.json",
+      "pnpm-lock.yaml",
+      "package-lock.json",
+      "pnpm-workspace.yaml",
+      "Dockerfile",
+      "eslint.config.mjs",
+      "next.config.js",
+      "src/lib/utils.ts",
+      "src/effects/renderer/canvas2dRenderer.ts",
+      "docs/dependency-update-2026-10-23.md",
+      "docs/dependency-update-2026-10-23.json",
+      "patches/eslint-plugin-react.patch"
+    ]
+  },
+  "safariFixCommit": "6198b7a76e83d09638f1fe0c52612747eda4186e",
+  "previousSafariImage": "sha256:a394b160c9c5b21c44881029de35f58de4467f34688c61418a4fc595ccbc223f",
+  "verification": {
+    "tests": 119,
+    "suites": 14,
+    "typecheck": "pass",
+    "webLint": "pass",
+    "linuxBuild": "pass",
+    "dedicatedSourceChecks": "pass",
+    "productionAuditAdvisories": 0
+  },
+  "candidate": {
+    "success": true,
+    "checks": [
+      {
+        "kind": "SSR-Douban-cover",
+        "status": 200,
+        "ssrError": false
+      },
+      {
+        "kind": "anonymous-proxy",
+        "status": 401,
+        "expected": 401
+      },
+      {
+        "kind": "unknown-vod",
+        "status": 401,
+        "expected": 401
+      },
+      {
+        "kind": "private-target",
+        "status": 403,
+        "expected": 403
+      },
+      {
+        "kind": "anonymous-live",
+        "status": 401,
+        "expected": 401
+      },
+      {
+        "kind": "private-image",
+        "status": 403,
+        "expected": 403
+      }
+    ]
+  },
+  "safariHttp": {
+    "checkedAt": "2026-10-23T13:57:28.423Z",
+    "origin": "https://tv.fishred.duckdns.org",
+    "node": "v22.23.4",
+    "fixture": {
+      "source": "ffzy",
+      "videoId": "99489",
+      "title": "",
+      "episodeCount": 24
+    },
+    "checks": [
+      {
+        "name": "owner_login",
+        "pass": true,
+        "status": 200
+      },
+      {
+        "name": "exact_detail",
+        "pass": true,
+        "status": 200
+      },
+      {
+        "name": "anonymous_initial",
+        "pass": true,
+        "status": 401
+      },
+      {
+        "name": "unknown_vod_source",
+        "pass": true,
+        "status": 401
+      },
+      {
+        "name": "vod_does_not_grant_live_access",
+        "pass": true,
+        "status": 401
+      },
+      {
+        "name": "unknown_user",
+        "pass": true,
+        "status": 401
+      },
+      {
+        "name": "manifest_0_none",
+        "pass": true,
+        "range": null,
+        "status": 200,
+        "bytes": 336,
+        "contentType": "application/vnd.apple.mpegurl",
+        "contentRange": null,
+        "signedChildCount": 1,
+        "sameAsFull": true
+      },
+      {
+        "name": "manifest_0_bytes=0-1",
+        "pass": true,
+        "range": "bytes=0-1",
+        "status": 200,
+        "bytes": 336,
+        "contentType": "application/vnd.apple.mpegurl",
+        "contentRange": null,
+        "signedChildCount": 1,
+        "sameAsFull": true
+      },
+      {
+        "name": "manifest_0_bytes=0-",
+        "pass": true,
+        "range": "bytes=0-",
+        "status": 200,
+        "bytes": 336,
+        "contentType": "application/vnd.apple.mpegurl",
+        "contentRange": null,
+        "signedChildCount": 1,
+        "sameAsFull": true
+      },
+      {
+        "name": "manifest_0_bytes=2-",
+        "pass": true,
+        "range": "bytes=2-",
+        "status": 200,
+        "bytes": 336,
+        "contentType": "application/vnd.apple.mpegurl",
+        "contentRange": null,
+        "signedChildCount": 1,
+        "sameAsFull": true
+      },
+      {
+        "name": "tampered_signed_child_0",
+        "pass": true,
+        "status": 401
+      },
+      {
+        "name": "manifest_1_none",
+        "pass": true,
+        "range": null,
+        "status": 200,
+        "bytes": 192518,
+        "contentType": "application/vnd.apple.mpegurl",
+        "contentRange": null,
+        "signedChildCount": 641,
+        "sameAsFull": true
+      },
+      {
+        "name": "manifest_1_bytes=0-1",
+        "pass": true,
+        "range": "bytes=0-1",
+        "status": 200,
+        "bytes": 192518,
+        "contentType": "application/vnd.apple.mpegurl",
+        "contentRange": null,
+        "signedChildCount": 641,
+        "sameAsFull": true
+      },
+      {
+        "name": "manifest_1_bytes=0-",
+        "pass": true,
+        "range": "bytes=0-",
+        "status": 200,
+        "bytes": 192518,
+        "contentType": "application/vnd.apple.mpegurl",
+        "contentRange": null,
+        "signedChildCount": 641,
+        "sameAsFull": true
+      },
+      {
+        "name": "manifest_1_bytes=2-",
+        "pass": true,
+        "range": "bytes=2-",
+        "status": 200,
+        "bytes": 192518,
+        "contentType": "application/vnd.apple.mpegurl",
+        "contentRange": null,
+        "signedChildCount": 641,
+        "sameAsFull": true
+      },
+      {
+        "name": "tampered_signed_child_1",
+        "pass": true,
+        "status": 401
+      },
+      {
+        "name": "signed_media_prefix",
+        "pass": true,
+        "status": 200,
+        "bytes": 16384,
+        "contentType": "video/mp2t"
+      },
+      {
+        "name": "signed_media_bytes=0-1",
+        "pass": true,
+        "range": "bytes=0-1",
+        "status": 206,
+        "bytes": 2,
+        "contentRange": "bytes 0-1/469812",
+        "correctBytes": true
+      },
+      {
+        "name": "signed_media_bytes=2-17",
+        "pass": true,
+        "range": "bytes=2-17",
+        "status": 206,
+        "bytes": 16,
+        "contentRange": "bytes 2-17/469812",
+        "correctBytes": true
+      }
+    ],
+    "failures": [],
+    "restrictedUser": "No existing restricted principal; no accounts modified",
+    "success": true
+  },
+  "httpAuthBackup": {
+    "checks": [
+      {
+        "origin": "internal",
+        "path": "/login",
+        "expected": 200,
+        "actual": 200
+      },
+      {
+        "origin": "internal",
+        "path": "/api/proxy/mp4",
+        "expected": 401,
+        "actual": 401
+      },
+      {
+        "origin": "internal",
+        "path": "/api/live/m3u",
+        "expected": 401,
+        "actual": 401
+      },
+      {
+        "origin": "internal",
+        "path": "/api/live/precheck",
+        "expected": 401,
+        "actual": 401
+      },
+      {
+        "origin": "internal",
+        "path": "/api/live/sources",
+        "expected": 401,
+        "actual": 401
+      },
+      {
+        "origin": "public-https",
+        "path": "/login",
+        "expected": 200,
+        "actual": 200
+      },
+      {
+        "origin": "public-https",
+        "path": "/api/proxy/mp4",
+        "expected": 401,
+        "actual": 401
+      },
+      {
+        "origin": "public-https",
+        "path": "/api/live/m3u",
+        "expected": 401,
+        "actual": 401
+      },
+      {
+        "origin": "public-https",
+        "path": "/api/live/precheck",
+        "expected": 401,
+        "actual": 401
+      },
+      {
+        "origin": "public-https",
+        "path": "/api/live/sources",
+        "expected": 401,
+        "actual": 401
+      },
+      {
+        "origin": "public-https",
+        "path": "/api/login",
+        "expected": 200,
+        "actual": 200
+      },
+      {
+        "origin": "public-https",
+        "path": "/",
+        "expected": 200,
+        "actual": 200
+      },
+      {
+        "origin": "public-https",
+        "path": "/live",
+        "expected": 200,
+        "actual": 200
+      },
+      {
+        "origin": "public-https",
+        "path": "/douban",
+        "expected": 200,
+        "actual": 200
+      },
+      {
+        "origin": "public-https",
+        "path": "/api/live/sources",
+        "expected": 200,
+        "actual": 200
+      },
+      {
+        "origin": "public-https",
+        "path": "/api/live/sources",
+        "expected": 401,
+        "actual": 401
+      },
+      {
+        "origin": "public-https",
+        "path": "/api/live/sources",
+        "expected": 401,
+        "actual": 401
+      },
+      {
+        "origin": "public-https",
+        "path": "/api/live/sources",
+        "expected": 401,
+        "actual": 401
+      },
+      {
+        "origin": "go-loopback",
+        "path": "/api/proxy/m3u8",
+        "expected": 403,
+        "actual": 403
+      },
+      {
+        "origin": "public-https",
+        "path": "/api/image-proxy",
+        "expected": [
+          415,
+          403
+        ],
+        "actual": 415
+      },
+      {
+        "origin": "public-https",
+        "path": "/api/image-proxy",
+        "expected": 403,
+        "actual": 403
+      },
+      {
+        "origin": "internal",
+        "path": "/api/admin/config",
+        "expected": 200,
+        "actual": 200
+      },
+      {
+        "origin": "internal",
+        "path": "/api/admin/data_migration/export",
+        "expected": 200,
+        "actual": 200
+      }
+    ],
+    "node": "v22.23.4",
+    "sourceAcl": "no existing restricted-live account available; covered by regression tests",
+    "availableLiveSourceCount": 1,
+    "vodSourceCount": 25,
+    "userCount": 6,
+    "backup": {
+      "encryptedBytes": 81650,
+      "exportedUsers": 6,
+      "decryptedSuccessfully": true
+    },
+    "success": true
+  },
+  "liveTransport": {
+    "success": true,
+    "channelCount": 1225,
+    "signedPlaylistEntries": 1225,
+    "tamperedTargetStatus": 401,
+    "nativePlayback": {
+      "channel": "CGTN英语",
+      "status": 200,
+      "mime": "application/vnd.apple.mpegurl",
+      "receivedBytes": 1249,
+      "childStatus": 200,
+      "childBytes": 16384
+    }
+  },
+  "browser": {
+    "engine": "Playwright WebKit native HLS on macOS",
+    "fixture": {
+      "source": "ffzy",
+      "id": "99489"
+    },
+    "resolution": [
+      1280,
+      640
+    ],
+    "samples": [
+      {
+        "seconds": 29.001893522931272,
+        "frames": 707
+      },
+      {
+        "seconds": 65.08462938697932,
+        "frames": 1606
+      }
+    ],
+    "readyState": 4,
+    "videoError": null,
+    "sourceUnavailableMessage": false,
+    "physicalIPhoneDirectlyTested": false,
+    "screenshot": "output/playwright/safari-dependencies-final-20261023.png"
+  },
+  "preservation": {
+    "onlyLunaTVChanged": true,
+    "unrelatedContainersUnchanged": 51,
+    "environmentMountsNetworksResourcesHealthcheckUnchanged": true,
+    "users": 6,
+    "enabledVodSources": 25,
+    "enabledLiveSources": 1
+  },
+  "rollback": {
+    "image": "lunatv-dependencies-rollback/lunatv:20261023",
+    "root": "/volume5/docker/.lunatv-dependencies-20261023",
+    "command": "ssh synology 'python3 /volume5/docker/.lunatv-dependencies-20261023/rollout.py rollback lunatv --root /volume5/docker/.lunatv-dependencies-20261023'"
+  },
+  "lockSha256": {
+    "package.json": "8455e53572331ae5136c219a2034d54294c64f26f9fcba1198898629765f5ed7",
+    "pnpm-lock.yaml": "e66c4813c5f2b2e33cf0962dd44426ded40386d29c1edf6af4a047a214b09398",
+    "package-lock.json": "f3bed1e67325f8d8d75812ac17f29f24d227875575378e1ebe98a4f86dbd61c0",
+    "pnpm-workspace.yaml": "34ddfdc8e53b4d305c38feca867d55e98064da344c18de4411da464891714ce2"
+  }
+}
