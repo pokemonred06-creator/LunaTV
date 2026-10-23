@@ -25,6 +25,10 @@ export default tseslint.config(
       '**/dist/**',
       '**/.next/**',
       '**/out/**',
+      'apps/**',
+      '.idea/**',
+      '**/coverage/**',
+      'test-results/**',
       'public/sw.js',
       'public/workbox-*.js',
     ],
@@ -163,5 +167,4 @@ export default tseslint.config(
       'no-undef': 'off',
     },
   },
-
 );

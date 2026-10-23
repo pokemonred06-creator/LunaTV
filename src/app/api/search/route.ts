@@ -91,17 +91,30 @@ export async function GET(request: NextRequest) {
   const apiSites = rawApiSites.slice(0, 20);
 
   // 7. CONCURRENT SEARCH EXECUTION
-  const searchPromises = apiSites.map((site) =>
-    Promise.race([
-      searchFromApi(site, convertedQuery),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error(`${site.name} timeout`)), 20000),
-      ),
-    ]).catch((err) => {
-      console.warn(`Search failed ${site.name}:`, err.message);
+  const searchPromises = apiSites.map(async (site) => {
+    const controller = new AbortController();
+    const onAbort = () => controller.abort();
+    request.signal.addEventListener('abort', onAbort, { once: true });
+    if (request.signal.aborted) controller.abort();
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        searchFromApi(site, convertedQuery, { signal: controller.signal }),
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(() => {
+            controller.abort();
+            reject(new Error(`${site.name} timeout`));
+          }, 20000);
+        }),
+      ]);
+    } catch (err) {
+      console.warn(`Search failed for ${site.name}:`, err);
       return [];
-    }),
-  );
+    } finally {
+      clearTimeout(timeout);
+      request.signal.removeEventListener('abort', onAbort);
+    }
+  });
 
   try {
     const results = await Promise.allSettled(searchPromises);

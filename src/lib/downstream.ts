@@ -42,8 +42,10 @@ async function searchWithCache(
   timeoutMs = 8000,
   signal?: AbortSignal,
 ): Promise<{ results: SearchResult[]; pageCount?: number }> {
+  if (signal?.aborted) return { results: [] };
   // 1. Check Cache
   const cached = await getCachedSearchPage(apiSite.key, query, page);
+  if (signal?.aborted) return { results: [] };
   if (cached) {
     if (cached.status === 'ok') {
       return { results: cached.data, pageCount: cached.pageCount };
@@ -71,8 +73,6 @@ async function searchWithCache(
       headers: API_CONFIG.search.headers,
       signal: controller.signal,
     });
-
-    clearTimeout(timeoutId);
 
     if (!response.ok) {
       if (response.status === 403) {
@@ -168,6 +168,7 @@ async function searchWithCache(
 
     return { results: [] };
   } finally {
+    clearTimeout(timeoutId);
     // [FIX] Remove listener to prevent memory leaks
     if (signal) {
       signal.removeEventListener('abort', onAbort);
@@ -197,7 +198,8 @@ export async function searchFromApi(
       8000,
       options?.signal,
     );
-    const results = firstPageResult.results;
+    // Aggregation must not mutate the first-page array held by the cache.
+    const results = [...firstPageResult.results];
     const pageCountFromFirst = firstPageResult.pageCount;
 
     const config = await getConfig();
@@ -279,7 +281,13 @@ export async function getDetailFromApi(
         headers: API_CONFIG.detail.headers,
         signal: controller.signal,
       });
-      return res;
+      if (!res.ok) {
+        await res.body?.cancel();
+        return { ok: false, status: res.status, data: null };
+      }
+      // Keep the deadline active until the body has been consumed.
+      const data = await res.json();
+      return { ok: true, status: res.status, data };
     } finally {
       clearTimeout(timeoutId);
     }
@@ -299,7 +307,6 @@ export async function getDetailFromApi(
   }
 
   const detailCandidates = buildDetailCandidateUrls(apiSite.api, id);
-  const detailUrl = detailCandidates[0];
 
   // Route through Go proxy when available; fall back to direct fetch
   const goProxyUrl = process.env.GO_PROXY_URL;
@@ -308,7 +315,7 @@ export async function getDetailFromApi(
       ? `${goProxyUrl}/api/detail-proxy?upstream=${encodeURIComponent(upstream)}`
       : '';
 
-  let response: Response | null = null;
+  let response: Awaited<ReturnType<typeof fetchWithTimeout>> | null = null;
 
   for (const candidate of detailCandidates) {
     const proxyUrl = proxyUrlFor(candidate);
@@ -338,7 +345,7 @@ export async function getDetailFromApi(
       continue;
     }
 
-    const data = await response.json();
+    const data = response.data;
     if (
       !data ||
       !data.list ||
@@ -416,18 +423,20 @@ async function handleSpecialSourceDetail(
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-  const response = await fetch(detailUrl, {
-    headers: API_CONFIG.detail.headers,
-    signal: controller.signal,
-  });
-
-  clearTimeout(timeoutId);
-
-  if (!response.ok) {
-    throw new Error(`详情页请求失败: ${response.status}`);
+  let html: string;
+  try {
+    const response = await fetch(detailUrl, {
+      headers: API_CONFIG.detail.headers,
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      await response.body?.cancel();
+      throw new Error(`详情页请求失败: ${response.status}`);
+    }
+    html = await response.text();
+  } finally {
+    clearTimeout(timeoutId);
   }
-
-  const html = await response.text();
   let matches: string[] = [];
 
   if (apiSite.key === 'ffzy') {

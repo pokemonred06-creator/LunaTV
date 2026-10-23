@@ -458,7 +458,7 @@ export async function getAvailableApiSites(user?: string): Promise<ApiSite[]> {
   if (!user) return allApiSites;
 
   const userConfig = config.UserConfig.Users.find((u) => u.username === user);
-  if (!userConfig) return []; // Fail Closed
+  if (!userConfig || userConfig.banned) return []; // Fail Closed
 
   // 1. Explicit Allowlist
   if (userConfig.enabledApis?.length) {
@@ -467,15 +467,13 @@ export async function getAvailableApiSites(user?: string): Promise<ApiSite[]> {
   }
 
   // 2. Tags
-  if (userConfig.tags?.length && config.UserConfig.Tags?.length) {
+  if (userConfig.tags?.length) {
     const enabledFromTags = new Set<string>();
     for (const tagName of userConfig.tags) {
-      const tag = config.UserConfig.Tags.find((t) => t.name === tagName);
+      const tag = config.UserConfig.Tags?.find((t) => t.name === tagName);
       tag?.enabledApis?.forEach((key) => enabledFromTags.add(key));
     }
-    if (enabledFromTags.size > 0) {
-      return allApiSites.filter((s) => enabledFromTags.has(s.key));
-    }
+    return allApiSites.filter((s) => enabledFromTags.has(s.key));
   }
 
   // 3. Permissive Fallback
@@ -491,7 +489,7 @@ export async function getAvailableLiveSources(
   if (!user) return allLives;
 
   const userConfig = config.UserConfig.Users.find((u) => u.username === user);
-  if (!userConfig) return []; // Fail Closed
+  if (!userConfig || userConfig.banned) return []; // Fail Closed
 
   // 1. Explicit Allowlist
   if (userConfig.enabledLives?.length) {
@@ -500,15 +498,13 @@ export async function getAvailableLiveSources(
   }
 
   // 2. Tags
-  if (userConfig.tags?.length && config.UserConfig.Tags?.length) {
+  if (userConfig.tags?.length) {
     const enabledFromTags = new Set<string>();
     for (const tagName of userConfig.tags) {
-      const tag = config.UserConfig.Tags.find((t) => t.name === tagName);
+      const tag = config.UserConfig.Tags?.find((t) => t.name === tagName);
       tag?.enabledLives?.forEach((key) => enabledFromTags.add(key));
     }
-    if (enabledFromTags.size > 0) {
-      return allLives.filter((l) => enabledFromTags.has(l.key));
-    }
+    return allLives.filter((l) => enabledFromTags.has(l.key));
   }
 
   // 3. Permissive Fallback

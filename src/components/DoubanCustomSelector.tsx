@@ -330,31 +330,6 @@ const DoubanCustomSelector: React.FC<DoubanCustomSelectorProps> = ({
     [],
   );
 
-  const handleVerticalWheelPassThrough = useCallback(
-    (e: React.WheelEvent<HTMLDivElement>) => {
-      // If user is actually scrolling horizontally, let the container handle it natively
-      if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
-      if (e.deltaY === 0) return;
-
-      // Vertical scroll over horizontal container:
-      // Prevent the container from eating the event or causing weird behavior on some older browsers
-      e.preventDefault();
-
-      if (
-        typeof window !== 'undefined' &&
-        typeof window.scrollBy === 'function'
-      ) {
-        try {
-          // Attempt modern smooth scroll, or auto
-          window.scrollBy({ top: e.deltaY, behavior: 'auto' });
-        } catch {
-          // Fallback for older browsers
-          window.scrollBy(0, e.deltaY);
-        }
-      }
-    },
-    [],
-  );
   // Render Helper
   const renderCapsuleSelector = (
     options: { label: string; value: string }[],
@@ -375,7 +350,6 @@ const DoubanCustomSelector: React.FC<DoubanCustomSelectorProps> = ({
         ref={containerRef}
         className='relative flex items-center overflow-x-auto bg-gray-200/60 dark:bg-gray-700/60 rounded-full p-1 backdrop-blur-sm [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]'
         onKeyDownCapture={handlePageScrollKeys}
-        onWheelCapture={handleVerticalWheelPassThrough}
       >
         {/* Animated Background Indicator */}
         <div

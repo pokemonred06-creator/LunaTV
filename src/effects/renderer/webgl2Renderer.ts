@@ -19,6 +19,24 @@ export class WebGL2Renderer implements Renderer {
   private texDistort: WebGLTexture | null = null;
   private texBG: WebGLTexture | null = null;
   private lastUploadedBG: HTMLImageElement | null = null;
+  private dropInstCapacity = 0;
+  private trailInstCapacity = 0;
+  private dropInstanceData = new Float32Array(0);
+  private trailInstanceData = new Float32Array(0);
+  private spriteInstanceData = new Float32Array(0);
+  // Track last uploaded versions to skip redundant GPU buffer uploads
+  private lastDropsVersion = -1;
+  private lastTrailsVersion = -1;
+  private uDropRes: WebGLUniformLocation | null = null;
+  private uTrailRes: WebGLUniformLocation | null = null;
+  private uTrailPass: WebGLUniformLocation | null = null;
+  private uCompositeTexBG: WebGLUniformLocation | null = null;
+  private uCompositeTexDistort: WebGLUniformLocation | null = null;
+  private uCompositeRes: WebGLUniformLocation | null = null;
+  private uCompositeFlash: WebGLUniformLocation | null = null;
+  private uCompositeBgScale: WebGLUniformLocation | null = null;
+  private uSpriteRes: WebGLUniformLocation | null = null;
+  private uSpriteTextures: WebGLUniformLocation | null = null;
 
   // CSS pixel size (logical coordinates used by the physics/state).
   private cssWidth = 0;
@@ -122,6 +140,21 @@ export class WebGL2Renderer implements Renderer {
     this.texSprites = null;
     this.bufSpriteQuad = null;
     this.spriteInstCapacity = 0;
+    this.dropInstCapacity = 0;
+    this.trailInstCapacity = 0;
+    this.dropInstanceData = new Float32Array(0);
+    this.trailInstanceData = new Float32Array(0);
+    this.spriteInstanceData = new Float32Array(0);
+    this.uDropRes = null;
+    this.uTrailRes = null;
+    this.uTrailPass = null;
+    this.uCompositeTexBG = null;
+    this.uCompositeTexDistort = null;
+    this.uCompositeRes = null;
+    this.uCompositeFlash = null;
+    this.uCompositeBgScale = null;
+    this.uSpriteRes = null;
+    this.uSpriteTextures = null;
   }
 
   async init(): Promise<void> {
@@ -148,6 +181,26 @@ export class WebGL2Renderer implements Renderer {
     this.programDrop = this.createProgram(vsDrop, fsDrop);
     this.programTrail = this.createProgram(vsTrail, fsTrail);
     this.programComposite = this.createProgram(vsComposite, fsComposite);
+    this.uDropRes = gl.getUniformLocation(this.programDrop, 'u_res');
+    this.uTrailRes = gl.getUniformLocation(this.programTrail, 'u_res');
+    this.uTrailPass = gl.getUniformLocation(this.programTrail, 'u_pass');
+    this.uCompositeTexBG = gl.getUniformLocation(
+      this.programComposite,
+      'u_texBG',
+    );
+    this.uCompositeTexDistort = gl.getUniformLocation(
+      this.programComposite,
+      'u_texDistort',
+    );
+    this.uCompositeRes = gl.getUniformLocation(this.programComposite, 'u_res');
+    this.uCompositeFlash = gl.getUniformLocation(
+      this.programComposite,
+      'u_flash',
+    );
+    this.uCompositeBgScale = gl.getUniformLocation(
+      this.programComposite,
+      'u_bgScale',
+    );
 
     this.initBuffers();
     this.initFBOs();
@@ -213,14 +266,19 @@ export class WebGL2Renderer implements Renderer {
     gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
 
     // Instance Buffer (Dynamic)
-    // x, y, r, stretch, vx, vy
+    // x, y, r, stretch, vx, vy, seed, wobble, falling
     const bufDropInst = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, bufDropInst);
-    // Reserve space for ~1000 drops (increased to 7 floats per drop)
-    gl.bufferData(gl.ARRAY_BUFFER, 1000 * 7 * 4, gl.DYNAMIC_DRAW);
+    this.dropInstCapacity = 1000;
+    this.dropInstanceData = new Float32Array(this.dropInstCapacity * 9);
+    gl.bufferData(
+      gl.ARRAY_BUFFER,
+      this.dropInstanceData.byteLength,
+      gl.DYNAMIC_DRAW,
+    );
 
-    // Stride = 7 * 4 = 28 bytes
-    const stride = 28;
+    // Stride = 9 * 4 = 36 bytes
+    const stride = 36;
 
     gl.enableVertexAttribArray(1); // i_pos (x,y)
     gl.vertexAttribPointer(1, 2, gl.FLOAT, false, stride, 0);
@@ -252,7 +310,13 @@ export class WebGL2Renderer implements Renderer {
     // x1, y1, x2, y2, w, life
     const bufTrailInst = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, bufTrailInst);
-    gl.bufferData(gl.ARRAY_BUFFER, 2000 * 6 * 4, gl.DYNAMIC_DRAW);
+    this.trailInstCapacity = 2000;
+    this.trailInstanceData = new Float32Array(this.trailInstCapacity * 6);
+    gl.bufferData(
+      gl.ARRAY_BUFFER,
+      this.trailInstanceData.byteLength,
+      gl.DYNAMIC_DRAW,
+    );
 
     gl.enableVertexAttribArray(1); // i_p1
     gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 24, 0);
@@ -389,6 +453,52 @@ export class WebGL2Renderer implements Renderer {
   private bufSpriteInst: WebGLBuffer | null = null;
   private spriteInstCapacity = 0;
 
+  private ensureDropCapacity(required: number) {
+    const gl = this.gl;
+    if (!gl || !this.bufDropInst || required <= this.dropInstCapacity) return;
+    let nextCap = Math.max(1, this.dropInstCapacity);
+    while (nextCap < required) nextCap = Math.ceil(nextCap * 1.5);
+    this.dropInstCapacity = nextCap;
+    this.dropInstanceData = new Float32Array(this.dropInstCapacity * 9);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.bufDropInst);
+    gl.bufferData(
+      gl.ARRAY_BUFFER,
+      this.dropInstanceData.byteLength,
+      gl.DYNAMIC_DRAW,
+    );
+  }
+
+  private ensureTrailCapacity(required: number) {
+    const gl = this.gl;
+    if (!gl || !this.bufTrailInst || required <= this.trailInstCapacity) return;
+    let nextCap = Math.max(1, this.trailInstCapacity);
+    while (nextCap < required) nextCap = Math.ceil(nextCap * 1.5);
+    this.trailInstCapacity = nextCap;
+    this.trailInstanceData = new Float32Array(this.trailInstCapacity * 6);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.bufTrailInst);
+    gl.bufferData(
+      gl.ARRAY_BUFFER,
+      this.trailInstanceData.byteLength,
+      gl.DYNAMIC_DRAW,
+    );
+  }
+
+  private ensureSpriteCapacity(required: number) {
+    const gl = this.gl;
+    if (!gl || !this.bufSpriteInst || required <= this.spriteInstCapacity)
+      return;
+    let nextCap = Math.max(1, this.spriteInstCapacity);
+    while (nextCap < required) nextCap = Math.ceil(nextCap * 1.5);
+    this.spriteInstCapacity = nextCap;
+    this.spriteInstanceData = new Float32Array(this.spriteInstCapacity * 6);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.bufSpriteInst);
+    gl.bufferData(
+      gl.ARRAY_BUFFER,
+      this.spriteInstanceData.byteLength,
+      gl.DYNAMIC_DRAW,
+    );
+  }
+
   private async initSprites(assets: {
     snow?: HTMLImageElement[];
     leaves?: HTMLImageElement[];
@@ -473,9 +583,10 @@ export class WebGL2Renderer implements Renderer {
     this.bufSpriteInst = bufInst;
     gl.bindBuffer(gl.ARRAY_BUFFER, bufInst);
     this.spriteInstCapacity = 1000;
+    this.spriteInstanceData = new Float32Array(this.spriteInstCapacity * 6);
     gl.bufferData(
       gl.ARRAY_BUFFER,
-      this.spriteInstCapacity * 6 * 4,
+      this.spriteInstanceData.byteLength,
       gl.DYNAMIC_DRAW,
     );
 
@@ -490,6 +601,12 @@ export class WebGL2Renderer implements Renderer {
     gl.vertexAttribDivisor(2, 1);
 
     gl.vertexAttribDivisor(2, 1);
+
+    this.uSpriteRes = gl.getUniformLocation(this.programSprite, 'u_res');
+    this.uSpriteTextures = gl.getUniformLocation(
+      this.programSprite,
+      'u_textures',
+    );
 
     gl.bindVertexArray(null);
   }
@@ -549,37 +666,24 @@ export class WebGL2Renderer implements Renderer {
     gl.useProgram(prog);
 
     // Uniforms
-    const uRes = gl.getUniformLocation(prog, 'u_res');
     // Guard against 0-sized host during initial mount/layout.
-    gl.uniform2f(uRes, Math.max(1, this.cssWidth), Math.max(1, this.cssHeight));
+    gl.uniform2f(
+      this.uSpriteRes,
+      Math.max(1, this.cssWidth),
+      Math.max(1, this.cssHeight),
+    );
 
     // Texture
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.texSprites);
-    const uTex = gl.getUniformLocation(prog, 'u_textures');
-    gl.uniform1i(uTex, 0);
+    gl.uniform1i(this.uSpriteTextures, 0);
 
     // Instance Data
     const sprites = state.sprites;
     if (sprites.length === 0) return;
 
-    if (this.bufSpriteInst && sprites.length > this.spriteInstCapacity) {
-      // Grow buffer to avoid WebGL errors from bufferSubData overflow.
-      const gl2 = gl;
-      const nextCap = Math.max(
-        sprites.length,
-        Math.ceil(this.spriteInstCapacity * 1.5),
-      );
-      this.spriteInstCapacity = nextCap;
-      gl2.bindBuffer(gl2.ARRAY_BUFFER, this.bufSpriteInst);
-      gl2.bufferData(
-        gl2.ARRAY_BUFFER,
-        this.spriteInstCapacity * 6 * 4,
-        gl2.DYNAMIC_DRAW,
-      );
-    }
-
-    const data = new Float32Array(sprites.length * 6);
+    this.ensureSpriteCapacity(sprites.length);
+    const data = this.spriteInstanceData;
     for (let i = 0; i < sprites.length; i++) {
       const s = sprites[i];
       const offset = i * 6;
@@ -592,7 +696,7 @@ export class WebGL2Renderer implements Renderer {
     }
 
     gl.bindBuffer(gl.ARRAY_BUFFER, this.bufSpriteInst);
-    gl.bufferSubData(gl.ARRAY_BUFFER, 0, data);
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, data.subarray(0, sprites.length * 6));
 
     gl.bindVertexArray(vao);
     gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, sprites.length);
@@ -641,31 +745,49 @@ export class WebGL2Renderer implements Renderer {
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
 
-    if (state.trails.length > 0) {
-      const arr = new Float32Array(state.trails.length * 6);
-      for (let i = 0; i < state.trails.length; i++) {
-        const t = state.trails[i];
-        const off = i * 6;
-        arr[off + 0] = t.x1;
-        arr[off + 1] = t.y1;
-        arr[off + 2] = t.x2;
-        arr[off + 3] = t.y2;
-        arr[off + 4] = t.w;
-        arr[off + 5] = t.life;
+    const hasTrails = state.trailsData ? state.trailsData.length > 0 : state.trails.length > 0;
+    if (hasTrails) {
+      const needUpload = state.trailsVersion !== this.lastTrailsVersion;
+      if (needUpload) {
+        if (state.trailsData) {
+          const required = state.trailsData.length / 6;
+          this.ensureTrailCapacity(required);
+          gl.bindBuffer(gl.ARRAY_BUFFER, this.bufTrailInst);
+          gl.bufferSubData(gl.ARRAY_BUFFER, 0, state.trailsData);
+        } else {
+          this.ensureTrailCapacity(state.trails.length);
+          const arr = this.trailInstanceData;
+          for (let i = 0; i < state.trails.length; i++) {
+            const t = state.trails[i];
+            const off = i * 6;
+            arr[off + 0] = t.x1;
+            arr[off + 1] = t.y1;
+            arr[off + 2] = t.x2;
+            arr[off + 3] = t.y2;
+            arr[off + 4] = t.w;
+            arr[off + 5] = t.life;
+          }
+          gl.bindBuffer(gl.ARRAY_BUFFER, this.bufTrailInst);
+          gl.bufferSubData(
+            gl.ARRAY_BUFFER,
+            0,
+            arr.subarray(0, state.trails.length * 6),
+          );
+        }
+        this.lastTrailsVersion = state.trailsVersion;
       }
-      gl.bindBuffer(gl.ARRAY_BUFFER, this.bufTrailInst);
-      gl.bufferSubData(gl.ARRAY_BUFFER, 0, arr);
 
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
       gl.uniform2f(
-        gl.getUniformLocation(programTrail, 'u_res'),
+        this.uTrailRes,
         Math.max(1, this.cssWidth),
         Math.max(1, this.cssHeight),
       );
-      gl.uniform1i(gl.getUniformLocation(programTrail, 'u_pass'), 0); // Pass 0: Decay Accumulation
+      gl.uniform1i(this.uTrailPass, 0); // Pass 0: Decay Accumulation
       gl.bindVertexArray(this.vaoTrail);
-      gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, state.trails.length);
+      const numTrails = state.trailsData ? state.trailsData.length / 6 : state.trails.length;
+      gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, numTrails);
     }
 
     // --- PASS 2: Distortion Map (Normals / Offsets) ---
@@ -677,38 +799,59 @@ export class WebGL2Renderer implements Renderer {
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
     // A. Fill Distortion from Trails
-    if (state.trails.length > 0) {
+    if (hasTrails) {
       gl.useProgram(programTrail);
-      gl.uniform1i(gl.getUniformLocation(programTrail, 'u_pass'), 1); // Pass 1: Distortion/Normals
+      gl.uniform1i(this.uTrailPass, 1); // Pass 1: Distortion/Normals
       gl.bindVertexArray(this.vaoTrail);
-      gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, state.trails.length);
+      const numTrails = state.trailsData ? state.trailsData.length / 6 : state.trails.length;
+      gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, numTrails);
     }
 
     // B. Fill Distortion from Drops
-    if (state.drops.length > 0) {
+    const hasDrops = state.dropsData ? state.dropsData.length > 0 : state.drops.length > 0;
+    if (hasDrops) {
       gl.useProgram(programDrop);
-      const arr = new Float32Array(state.drops.length * 7);
-      for (let i = 0; i < state.drops.length; i++) {
-        const d = state.drops[i];
-        const off = i * 7;
-        arr[off + 0] = d.x;
-        arr[off + 1] = d.y;
-        arr[off + 2] = d.r;
-        arr[off + 3] = d.stretch;
-        arr[off + 4] = d.vx;
-        arr[off + 5] = d.vy;
-        arr[off + 6] = d.seed || 0; // Pass seed
+      const needUpload = state.dropsVersion !== this.lastDropsVersion;
+      if (needUpload) {
+        if (state.dropsData) {
+          const required = state.dropsData.length / 9;
+          this.ensureDropCapacity(required);
+          gl.bindBuffer(gl.ARRAY_BUFFER, this.bufDropInst);
+          gl.bufferSubData(gl.ARRAY_BUFFER, 0, state.dropsData);
+        } else {
+          this.ensureDropCapacity(state.drops.length);
+          const arr = this.dropInstanceData;
+          for (let i = 0; i < state.drops.length; i++) {
+            const d = state.drops[i];
+            const off = i * 9;
+            arr[off + 0] = d.x;
+            arr[off + 1] = d.y;
+            arr[off + 2] = d.r;
+            arr[off + 3] = d.stretch;
+            arr[off + 4] = d.vx;
+            arr[off + 5] = d.vy;
+            arr[off + 6] = d.seed || 0;
+            arr[off + 7] = d.wobble || 0;
+            arr[off + 8] = d.falling ? 1 : 0;
+          }
+          gl.bindBuffer(gl.ARRAY_BUFFER, this.bufDropInst);
+          gl.bufferSubData(
+            gl.ARRAY_BUFFER,
+            0,
+            arr.subarray(0, state.drops.length * 9),
+          );
+        }
+        this.lastDropsVersion = state.dropsVersion;
       }
-      gl.bindBuffer(gl.ARRAY_BUFFER, this.bufDropInst);
-      gl.bufferSubData(gl.ARRAY_BUFFER, 0, arr);
 
       gl.uniform2f(
-        gl.getUniformLocation(programDrop, 'u_res'),
+        this.uDropRes,
         Math.max(1, this.cssWidth),
         Math.max(1, this.cssHeight),
       );
       gl.bindVertexArray(this.vaoDrop);
-      gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, state.drops.length);
+      const numDrops = state.dropsData ? state.dropsData.length / 9 : state.drops.length;
+      gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, numDrops);
     }
 
     // --- PASS 3: Final Composite (Refractive) ---
@@ -720,23 +863,20 @@ export class WebGL2Renderer implements Renderer {
 
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.texBG);
-    gl.uniform1i(gl.getUniformLocation(programComposite, 'u_texBG'), 0);
+    gl.uniform1i(this.uCompositeTexBG, 0);
 
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, this.texDistort);
-    gl.uniform1i(gl.getUniformLocation(programComposite, 'u_texDistort'), 1);
+    gl.uniform1i(this.uCompositeTexDistort, 1);
 
     gl.uniform2f(
-      gl.getUniformLocation(programComposite, 'u_res'),
+      this.uCompositeRes,
       Math.max(1, this.cssWidth),
       Math.max(1, this.cssHeight),
     );
 
     // Pass Flash State
-    gl.uniform1f(
-      gl.getUniformLocation(programComposite, 'u_flash'),
-      state.flash,
-    );
+    gl.uniform1f(this.uCompositeFlash, state.flash);
 
     // Calculate Cover/Scale for BG
     let bgW = 1,
@@ -760,11 +900,7 @@ export class WebGL2Renderer implements Renderer {
       scaleX = (safeH * bgAspect) / safeW;
     }
 
-    gl.uniform2f(
-      gl.getUniformLocation(programComposite, 'u_bgScale'),
-      scaleX,
-      scaleY,
-    );
+    gl.uniform2f(this.uCompositeBgScale, scaleX, scaleY);
 
     gl.bindVertexArray(this.vaoQuad);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
@@ -864,24 +1000,36 @@ void main() {
   // Adaptive Stretch
   // Rain (r < 4.0): Allow full stretch (streak)
   // Blob (r > 4.0): Dampen stretch (slug)
-  
+
   float stretchFactor = 4.0;
   if (r > 4.5) { // Slightly higher threshold
-      stretchFactor = 1.5; 
+      stretchFactor = 1.5;
+  } else if (r <= 2.5) {
+      stretchFactor = 12.0; // Rain stretches a LOT
   }
-  
+
   float sy = 1.0 + stretch * stretchFactor;
-  float sx = 1.0 / sqrt(sy); 
-  
-  // Allow shrinking down to 0.25 (Thicker streaks)
-  sx = max(0.25, 1.0 - stretch * 0.5); 
+  float sx = max(0.15, 1.0 - stretch * 0.6);
 
   vec2 scale = vec2(r * sx, r * sy);
-  vec2 worldPos = i_pos + pos * 2.0 * scale; 
-  
+  vec2 scaledPos = pos * 2.0 * scale;
+
+  // Rotation based on velocity so streaks align with movement
+  float speed = length(i_vel);
+  vec2 dir = (speed > 10.0) ? (i_vel / speed) : vec2(0.0, 1.0);
+
+  // x' = x*dir.y + y*dir.x
+  // y' = -x*dir.x + y*dir.y
+  vec2 rotatedPos = vec2(
+    scaledPos.x * dir.y + scaledPos.y * dir.x,
+    -scaledPos.x * dir.x + scaledPos.y * dir.y
+  );
+
+  vec2 worldPos = i_pos + rotatedPos;
+
   gl_Position = vec4( (worldPos / u_res) * 2.0 - 1.0, 0.0, 1.0);
   gl_Position.y = -gl_Position.y; // Flip Y
-  
+
   v_uv = pos + 0.5; // 0..1
   v_localUV = pos;  // -0.5..0.5
   v_radius = r;
@@ -915,23 +1063,28 @@ void main() {
   float taper = 1.0 + (p.y + 0.5) * v_stretch * taperStrength * 2.0; 
   p.x *= taper;
   
-  // --- Organic Shape Distortion (User Request) ---
-  // 1. Angular Waviness (not perfect circle)
-  // Use v_seed so every drop is different but STABLE (no spinning)
-  float angle = atan(p.y, p.x);
-  float seed = v_seed * 13.54;
+  float d = length(p);
+  float noise = 0.0;
   
-  // Combine low-freq and high-freq sine waves to distort the edge
-  float wave = sin(angle * 3.0 + seed) * 0.04;     // Main shape wobble
-  wave += sin(angle * 7.0 - seed * 2.0) * 0.02;    // Finer detail
-  wave += sin(angle * 13.0 + seed * 5.0) * 0.01;   // Micro irregularities
-  
-  // 2. Alpha Erosion / Edge Roughness
-  // Simulate "imperfect wetting" by adding noise to the distance field
-  float noise = fract(sin(dot(v_uv * 10.0, vec2(12.9898, 78.233))) * 43758.5453);
-  float roughness = (noise - 0.5) * 0.03;
-
-  float d = length(p) + wave + roughness;
+  if (v_radius > 2.5) {
+      // --- Organic Shape Distortion (User Request) ---
+      // 1. Angular Waviness (not perfect circle)
+      // Use v_seed so every drop is different but STABLE (no spinning)
+      float angle = atan(p.y, p.x);
+      float seed = v_seed * 13.54;
+      
+      // Combine low-freq and high-freq sine waves to distort the edge
+      float wave = sin(angle * 3.0 + seed) * 0.04;     // Main shape wobble
+      wave += sin(angle * 7.0 - seed * 2.0) * 0.02;    // Finer detail
+      wave += sin(angle * 13.0 + seed * 5.0) * 0.01;   // Micro irregularities
+      
+      // 2. Alpha Erosion / Edge Roughness
+      // Simulate "imperfect wetting" by adding noise to the distance field
+      noise = fract(sin(dot(v_uv * 10.0, vec2(12.9898, 78.233))) * 43758.5453);
+      float roughness = (noise - 0.5) * 0.03;
+      
+      d += wave + roughness;
+  }
   
   if (d > 0.48) discard; // Slightly smaller cutoff to account for distortion
   
@@ -941,9 +1094,11 @@ void main() {
   float z = sqrt(max(0.0, 0.25 - d * d));
   vec3 normal = normalize(vec3(p.x, p.y, z));
   
-  // Add surface noise to normal (glass defects)
-  normal.xy += (noise - 0.5) * 0.1;
-  normal = normalize(normal);
+  if (v_radius > 2.5) {
+      // Add surface noise to normal (glass defects) for static drops only
+      normal.xy += (noise - 0.5) * 0.1;
+      normal = normalize(normal);
+  }
   
   // Specular highlight
   vec3 lightDir = normalize(vec3(0.5, 0.5, 1.0));
@@ -997,23 +1152,33 @@ void main() {
     fragColor = vec4(0.0, 0.0, 1.0, mask * 0.4);
   } else {
     // Normal/Distortion for trail
-    // 1. Cylinder profile for lens effect
     float x = v_localUV.x * 2.0; // -1.0 to 1.0
-    
-    // Add wobble to the trail path
-    float wobble = sin(v_localUV.y * 10.0 + v_life * 5.0) * 0.2;
-    x += wobble;
-    
-    float z = sqrt(max(0.0, 1.0 - x*x));
-    vec3 normal = normalize(vec3(x, wobble, z));
-    
-    // 2. Specular
+
+    // Organic wobble and unevenness (simplified to 1 sin call)
+    float wobble = sin(v_localUV.y * 15.0 + v_life * 3.0) * 0.15;
+
+    float adjustedX = x + wobble;
+    float dist = abs(adjustedX);
+    if (dist > 1.0) discard;
+
+    // Meniscus profile: flatter in middle, curved edges
+    float z = pow(1.0 - pow(dist, 3.0), 0.5);
+
+    vec3 normal = normalize(vec3(adjustedX, wobble * 2.0, z));
+
+    // Tighter, brighter specular highlight
     vec3 lightDir = normalize(vec3(0.5, 0.5, 1.0));
-    float spec = pow(max(dot(normal, lightDir), 0.0), 10.0) * mask;
+    float spec = pow(max(dot(normal, lightDir), 0.0), 25.0) * mask * 1.5;
+
+    // Breakup as the trail dries (older = lower life) - using a cheap repeating saw-tooth pattern
+    float edgeMask = smoothstep(1.0, 0.7, dist);
+    float breakup = smoothstep(0.1, 0.5, fract(v_localUV.y * 5.0) * 0.5 + v_life);
+
+    float finalMask = mask * edgeMask * breakup * 0.55;
+    if (finalMask < 0.01) discard;
 
     // Pack: RG=Normal, B=Spec, A=Mask
-    // Increase mask opacity for visibility (0.3 -> 0.6)
-    fragColor = vec4(normal.xy * 0.5 + 0.5, spec, mask * 0.6);
+    fragColor = vec4(normal.xy * 0.5 + 0.5, spec, finalMask);
   }
 }
 `;

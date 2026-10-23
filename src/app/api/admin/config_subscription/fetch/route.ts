@@ -2,8 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { getAuthInfoFromCookie } from '@/lib/auth/server';
 import { isOwnerUsername } from '@/lib/auth/shared';
+import { assertSafeRemoteUrl } from '@/lib/request-security';
 
 export const runtime = 'nodejs';
+const MAX_CONFIG_BYTES = 1024 * 1024;
 
 export async function POST(request: NextRequest) {
   try {
@@ -26,8 +28,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '缺少URL参数' }, { status: 400 });
     }
 
-    // 直接 fetch URL 获取配置内容
-    const response = await fetch(url);
+    const safeUrl = await assertSafeRemoteUrl(url);
+    const response = await fetch(safeUrl, {
+      redirect: 'error',
+      signal: AbortSignal.timeout(10_000),
+      cache: 'no-store',
+    });
 
     if (!response.ok) {
       return NextResponse.json(
@@ -36,7 +42,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const contentLength = Number(response.headers.get('content-length') || '0');
+    if (Number.isFinite(contentLength) && contentLength > MAX_CONFIG_BYTES) {
+      return NextResponse.json({ error: '配置文件过大' }, { status: 413 });
+    }
+
     const configContent = await response.text();
+    if (configContent.length > MAX_CONFIG_BYTES) {
+      return NextResponse.json({ error: '配置文件过大' }, { status: 413 });
+    }
 
     // 对 configContent 进行 base58 解码
     let decodedContent;

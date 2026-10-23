@@ -6,13 +6,32 @@
     <title>Huya FLV Repro</title>
     <link href="https://vjs.zencdn.net/8.23.4/video-js.css" rel="stylesheet" />
     <style>
-      body { font-family: Arial, sans-serif; padding: 16px; }
-      #log { white-space: pre-wrap; background: #111; color: #ddd; padding: 8px; height: 220px; overflow: auto; }
+      body {
+        font-family: Arial, sans-serif;
+        padding: 16px;
+      }
+      #log {
+        white-space: pre-wrap;
+        background: #111;
+        color: #ddd;
+        padding: 8px;
+        height: 220px;
+        overflow: auto;
+      }
     </style>
   </head>
   <body>
     <h1>Repro: FLV first-frame freeze style behavior</h1>
-    <video id="v" class="video-js vjs-default-skin" controls autoplay muted playsinline width="960" height="540"></video>
+    <video
+      id="v"
+      class="video-js vjs-default-skin"
+      controls
+      autoplay
+      muted
+      playsinline
+      width="960"
+      height="540"
+    ></video>
     <p>URL: <code id="url"></code></p>
     <div id="log"></div>
 
@@ -39,7 +58,12 @@
       let fp;
       const createPlayer = () => {
         if (fp) {
-          try { fp.pause(); fp.unload(); fp.detachMediaElement(); fp.destroy(); } catch (_) {}
+          try {
+            fp.pause();
+            fp.unload();
+            fp.detachMediaElement();
+            fp.destroy();
+          } catch (_) {}
         }
         log('createPlayer()');
         fp = flvjs.createPlayer(
@@ -53,7 +77,7 @@
             seekType: 'range',
             lazyLoad: false,
             enableStashBuffer: true,
-          }
+          },
         );
 
         fp.attachMediaElement(p.tech().el());

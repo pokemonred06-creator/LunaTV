@@ -30,6 +30,10 @@ interface PhysicsParticle {
   swayOffset: number;
   z: number;
   passThrough: boolean;
+  // 3D-tumble illusion: petals/leaves flip edge-on as they fall. Winter snow
+  // keeps tumbleSpeed = 0 (flakes stay flat-on).
+  tumblePhase: number;
+  tumbleSpeed: number;
 }
 
 // Pre-render snow textures to offscreen canvases to avoid expensive path fill and runtime gradients
@@ -505,6 +509,12 @@ const PhysicsSnow: React.FC<PhysicsSnowProps> = ({ mode, count = 100 }) => {
       const isAutumn = mode === 'autumn';
       // Autumn looks better with less-uniform motion: slightly slower fall, more flutter variety.
       const flutter = isAutumn ? 0.55 + Math.random() * 0.95 : 1;
+      // Leaves tumble harder than petals; snow doesn't tumble. Random sign so
+      // flakes flip both ways.
+      const tumbleSpeed = isWinter
+        ? 0
+        : (isAutumn ? 1.5 + Math.random() * 2.5 : 0.8 + Math.random() * 1.5) *
+          (Math.random() < 0.5 ? -1 : 1);
       const vy0 = isWinter
         ? 15 + Math.random() * 25
         : isAutumn
@@ -543,6 +553,8 @@ const PhysicsSnow: React.FC<PhysicsSnowProps> = ({ mode, count = 100 }) => {
         swayOffset: Math.random() * Math.PI * 2,
         z: Math.random(), // Depth for parallax
         passThrough: isAutumn ? Math.random() < 0.4 : Math.random() < 0.5,
+        tumblePhase: Math.random() * Math.PI * 2,
+        tumbleSpeed,
       };
     },
     [mode, textureUrls],
@@ -654,6 +666,7 @@ const PhysicsSnow: React.FC<PhysicsSnowProps> = ({ mode, count = 100 }) => {
             ? Math.sin(timeSec * timeWobble + p.swayOffset) * 14 * flutter * zF
             : 0;
         p.rotation += (p.rotationSpeed + wobbleVel) * dt;
+        p.tumblePhase += p.tumbleSpeed * dt;
 
         // Wrap
         if (p.x < -p.size) p.x = w + p.size;
@@ -698,8 +711,15 @@ const PhysicsSnow: React.FC<PhysicsSnowProps> = ({ mode, count = 100 }) => {
         const cos = Math.cos(rad) * zScale * dpr;
         const sin = Math.sin(rad) * zScale * dpr;
 
-        // Baked DPR into transform
-        ctx.setTransform(cos, sin, -sin, cos, p.x * dpr, p.y * dpr);
+        // 3D-tumble: narrow the sprite along its own width axis as it flips
+        // edge-on. Snow (tumbleSpeed 0) stays flat-on (flip = 1).
+        const flip =
+          p.tumbleSpeed !== 0
+            ? 0.25 + 0.75 * Math.abs(Math.cos(p.tumblePhase))
+            : 1;
+
+        // Baked DPR + tumble into transform (local-x basis scaled by flip)
+        ctx.setTransform(cos * flip, sin * flip, -sin, cos, p.x * dpr, p.y * dpr);
         ctx.globalAlpha = a;
 
         if (p.texture) {
@@ -736,7 +756,8 @@ const PhysicsSnow: React.FC<PhysicsSnowProps> = ({ mode, count = 100 }) => {
         position: 'fixed',
         inset: 0,
         pointerEvents: 'none',
-        zIndex: 20,
+        opacity: 0,
+        animation: 'se-fadein 1s ease forwards',
       }}
     />
   );

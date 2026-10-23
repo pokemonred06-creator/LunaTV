@@ -2,6 +2,7 @@ import { revalidatePath, revalidateTag } from 'next/cache';
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getAuthInfoFromCookie } from '@/lib/auth/server';
+import { isTrustedSameOriginRequest } from '@/lib/request-security';
 
 export const runtime = 'nodejs';
 
@@ -26,9 +27,7 @@ function isAllowedTag(tag: string) {
 export async function POST(req: NextRequest) {
   try {
     // 1. CSRF / Origin Check (Best Effort)
-    const origin = req.headers.get('origin');
-    const host = req.headers.get('host');
-    if (origin && host && !origin.includes(host)) {
+    if (!isTrustedSameOriginRequest(req)) {
       return NextResponse.json({ error: 'Forbidden Origin' }, { status: 403 });
     }
 

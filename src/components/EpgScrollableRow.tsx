@@ -2,6 +2,7 @@ import { Clock, Target, Tv } from 'lucide-react';
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type WheelEvent as ReactWheelEvent,
@@ -29,32 +30,34 @@ export default function EpgScrollableRow({
   const containerRef = useRef<HTMLDivElement>(null);
   const [currentPlayingIndex, setCurrentPlayingIndex] = useState<number>(-1);
 
-  // 判断节目是否正在播放
-  const isCurrentlyPlaying = useCallback(
-    (program: EpgProgram) => {
+  // 预解析节目时间，避免在渲染和查找中重复解析
+  const parsedPrograms = useMemo(() => {
+    return programs.map((program) => {
       try {
-        const start = parseCustomTimeFormat(program.start);
-        const end = parseCustomTimeFormat(program.end);
-        return currentTime >= start && currentTime < end;
+        return {
+          ...program,
+          parsedStart: parseCustomTimeFormat(program.start),
+          parsedEnd: parseCustomTimeFormat(program.end),
+        };
       } catch {
-        return false;
+        return {
+          ...program,
+          parsedStart: null,
+          parsedEnd: null,
+        };
       }
-    },
-    [currentTime],
-  );
+    });
+  }, [programs]);
 
   const findCurrentProgramIndex = useCallback(
     (referenceTime: Date) =>
-      programs.findIndex((program) => {
-        try {
-          const start = parseCustomTimeFormat(program.start);
-          const end = parseCustomTimeFormat(program.end);
-          return referenceTime >= start && referenceTime < end;
-        } catch {
-          return false;
-        }
+      parsedPrograms.findIndex((program) => {
+        const start = program.parsedStart;
+        const end = program.parsedEnd;
+        if (!start || !end) return false;
+        return referenceTime >= start && referenceTime < end;
       }),
-    [programs],
+    [parsedPrograms],
   );
 
   // 自动滚动到正在播放的节目
@@ -235,55 +238,73 @@ export default function EpgScrollableRow({
           className='flex overflow-x-auto scrollbar-hide py-2 pb-4 px-2 sm:px-4 min-h-[100px] sm:min-h-[120px]'
           onWheel={handleWheel}
         >
-          {programs.map((program, index) => {
+          {parsedPrograms.map((program, index) => {
             // 使用 currentPlayingIndex 来判断播放状态，确保样式能正确更新
-            const isPlaying = index === currentPlayingIndex;
-            const isFinishedProgram = index < currentPlayingIndex;
-            const isUpcomingProgram = index > currentPlayingIndex;
+            let isPlaying = false;
+            let isFinishedProgram = false;
+            let isUpcomingProgram = false;
+
+            if (currentPlayingIndex !== -1) {
+              isPlaying = index === currentPlayingIndex;
+              isFinishedProgram = index < currentPlayingIndex;
+              isUpcomingProgram = index > currentPlayingIndex;
+            } else {
+              const start = program.parsedStart;
+              const end = program.parsedEnd;
+              if (start && end) {
+                if (currentTime >= start && currentTime < end) {
+                  isPlaying = true;
+                } else if (currentTime >= end) {
+                  isFinishedProgram = true;
+                } else if (currentTime < start) {
+                  isUpcomingProgram = true;
+                }
+              }
+            }
 
             return (
               <div
                 key={index}
-                className={`shrink-0 w-36 sm:w-48 p-2 sm:p-3 rounded-lg border transition-all duration-200 flex flex-col min-h-[100px] sm:min-h-[120px] ${
+                className={`shrink-0 w-36 sm:w-48 p-2.5 sm:p-3.5 rounded-xl border transition-all duration-350 flex flex-col min-h-[105px] sm:min-h-[125px] ${
                   isPlaying
-                    ? 'bg-green-500/10 dark:bg-green-500/20 border-green-500/30'
+                    ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.08)] scale-[1.01]'
                     : isFinishedProgram
-                      ? 'bg-gray-300/50 dark:bg-gray-800 border-gray-300 dark:border-gray-700'
+                      ? 'bg-slate-900/20 border-slate-800/30 opacity-40 text-slate-500'
                       : isUpcomingProgram
-                        ? 'bg-blue-500/10 dark:bg-blue-500/20 border-blue-500/30'
-                        : 'bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                        ? 'bg-slate-900/40 border-slate-800/60 text-slate-300 hover:border-slate-700/80 hover:bg-slate-900/60'
+                        : 'bg-slate-900/40 border-slate-800/60 text-slate-300 hover:border-slate-700'
                 }`}
               >
                 {/* 时间显示在顶部 */}
                 <div className='flex items-center justify-between mb-2 sm:mb-3 shrink-0'>
                   <span
-                    className={`text-xs font-medium ${
+                    className={`text-xs font-semibold ${
                       isPlaying
-                        ? 'text-green-600 dark:text-green-400'
+                        ? 'text-emerald-400'
                         : isFinishedProgram
-                          ? 'text-gray-500 dark:text-gray-400'
+                          ? 'text-slate-500'
                           : isUpcomingProgram
-                            ? 'text-blue-600 dark:text-blue-400'
-                            : 'text-gray-600 dark:text-gray-300'
+                            ? 'text-blue-400'
+                            : 'text-slate-300'
                     }`}
                   >
                     {formatTime(program.start)}
                   </span>
-                  <span className='text-xs text-gray-400 dark:text-gray-500'>
+                  <span className='text-xs text-slate-500 font-medium'>
                     {formatTime(program.end)}
                   </span>
                 </div>
 
                 {/* 标题在中间，占据剩余空间 */}
                 <div
-                  className={`text-xs sm:text-sm font-medium flex-1 ${
+                  className={`text-xs sm:text-sm font-semibold flex-1 ${
                     isPlaying
-                      ? 'text-green-900 dark:text-green-100'
+                      ? 'text-emerald-100'
                       : isFinishedProgram
-                        ? 'text-gray-600 dark:text-gray-400'
+                        ? 'text-slate-600'
                         : isUpcomingProgram
-                          ? 'text-blue-900 dark:text-blue-100'
-                          : 'text-gray-900 dark:text-gray-100'
+                          ? 'text-slate-200'
+                          : 'text-slate-100'
                   }`}
                   style={{
                     display: '-webkit-box',
@@ -302,8 +323,8 @@ export default function EpgScrollableRow({
                 {/* 正在播放状态在底部 */}
                 {isPlaying && (
                   <div className='mt-auto pt-1 sm:pt-2 flex items-center gap-1 sm:gap-1.5 shrink-0'>
-                    <div className='w-1.5 h-1.5 sm:w-2 sm:h-2 bg-green-500 rounded-full animate-pulse'></div>
-                    <span className='text-xs text-green-600 dark:text-green-400 font-medium'>
+                    <div className='w-1.5 h-1.5 sm:w-2 sm:h-2 bg-emerald-500 rounded-full animate-pulse'></div>
+                    <span className='text-xs text-emerald-400 font-bold tracking-wide'>
                       正在播放
                     </span>
                   </div>

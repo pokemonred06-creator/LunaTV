@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getAuthInfoFromCookie } from '@/lib/auth/server';
-import { getConfig } from '@/lib/config';
+import { getAvailableLiveSources } from '@/lib/config';
 
 export const runtime = 'nodejs';
 
@@ -13,16 +13,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const config = await getConfig();
-
-    if (!config) {
-      return NextResponse.json({ error: '配置未找到' }, { status: 404 });
-    }
-
-    // 过滤出所有非 disabled 的直播源
-    const liveSources = (config.LiveConfig || []).filter(
-      (source) => !source.disabled,
-    );
+    const liveSources = await getAvailableLiveSources(auth.username);
 
     return NextResponse.json({
       success: true,

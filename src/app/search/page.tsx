@@ -37,9 +37,10 @@ function SearchPageClient() {
   const searchParams = useSearchParams();
 
   // Search State
-  const currentQueryRef = useRef<string>(''); // Source of Truth for "Current Active Query"
+  const currentQueryRef = useRef<string>(''); // Source of Truth for Network Guard
   const lastHistoryRef = useRef<string>(''); // Prevents duplicate history writes
   const [searchQuery, setSearchQuery] = useState('');
+  const [activeQuery, setActiveQuery] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [showResults, setShowResults] = useState(false);
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
@@ -56,9 +57,7 @@ function SearchPageClient() {
   const [useFluidSearch, setUseFluidSearch] = useState(true);
 
   // Refs for aggregation updates
-  const groupRefs = useRef<
-    Map<string, React.RefObject<VideoCardHandle | null>>
-  >(new Map());
+  const groupRefs = useRef<Map<string, VideoCardHandle>>(new Map());
   const groupStatsRef = useRef<
     Map<
       string,
@@ -112,21 +111,13 @@ function SearchPageClient() {
 
   // --- HELPERS ---
 
+  // Generate strict, unique keys for aggregation
   const safeKeyGen = (item: SearchResult) => {
-    const title = (item.title ?? '').replace(/\s+/g, '');
-    const year = item.year || 'unknown';
+    const title = (item.title || '').trim().toLowerCase();
+    const year = (item.year || 'unknown').trim();
     const epLen = Array.isArray(item.episodes) ? item.episodes.length : 0;
     const type = epLen === 1 ? 'movie' : 'tv';
     return `${title}-${year}-${type}`;
-  };
-
-  const getGroupRef = (key: string) => {
-    let ref = groupRefs.current.get(key);
-    if (!ref) {
-      ref = React.createRef<VideoCardHandle | null>();
-      groupRefs.current.set(key, ref);
-    }
-    return ref;
   };
 
   const computeGroupStats = (group: SearchResult[]) => {
@@ -175,7 +166,7 @@ function SearchPageClient() {
   };
 
   const sortBatchForNoOrder = (items: SearchResult[]) => {
-    const q = currentQueryRef.current.trim();
+    const q = activeQuery;
     return items.slice().sort((a, b) => {
       const aExact = (a.title || '').trim() === q;
       const bExact = (b.title || '').trim() === q;
@@ -237,16 +228,16 @@ function SearchPageClient() {
         groupStatsRef.current.set(mapKey, stats);
         return;
       }
-      const ref = groupRefs.current.get(mapKey);
-      if (ref && ref.current) {
+      const handle = groupRefs.current.get(mapKey);
+      if (handle) {
         if (prev.episodes !== stats.episodes)
-          ref.current.setEpisodes(stats.episodes);
+          handle.setEpisodes(stats.episodes);
         const prevNames = (prev.source_names || []).join('|');
         const nextNames = (stats.source_names || []).join('|');
         if (prevNames !== nextNames)
-          ref.current.setSourceNames(stats.source_names);
+          handle.setSourceNames(stats.source_names);
         if (prev.douban_id !== stats.douban_id)
-          ref.current.setDoubanId(stats.douban_id);
+          handle.setDoubanId(stats.douban_id);
         groupStatsRef.current.set(mapKey, stats);
       }
     });
@@ -310,7 +301,7 @@ function SearchPageClient() {
 
     if (yearOrder === 'none') return filtered;
 
-    const q = currentQueryRef.current.trim();
+    const q = activeQuery;
     return filtered.sort((a, b) => {
       const yearComp = compareYear(a.year, b.year, yearOrder);
       if (yearComp !== 0) return yearComp;
@@ -322,7 +313,7 @@ function SearchPageClient() {
         ? a.title.localeCompare(b.title)
         : b.title.localeCompare(a.title);
     });
-  }, [searchResults, filterAll]);
+  }, [searchResults, filterAll, activeQuery]);
 
   const filteredAggResults = useMemo(() => {
     const { source, title, year, yearOrder } = filterAgg;
@@ -339,7 +330,7 @@ function SearchPageClient() {
 
     if (yearOrder === 'none') return filtered;
 
-    const q = currentQueryRef.current.trim();
+    const q = activeQuery;
     return filtered.sort((a, b) => {
       const aYear = a[1][0].year;
       const bYear = b[1][0].year;
@@ -355,7 +346,7 @@ function SearchPageClient() {
         ? aTitle.localeCompare(bTitle)
         : bTitle.localeCompare(aTitle);
     });
-  }, [aggregatedResults, filterAgg]);
+  }, [aggregatedResults, filterAgg, activeQuery]);
 
   // --- EFFECTS ---
 
@@ -363,6 +354,7 @@ function SearchPageClient() {
     const query = searchParams.get('q') || '';
     const trimmed = query.trim();
     currentQueryRef.current = trimmed;
+    setActiveQuery(trimmed);
 
     // Reset State
     if (trimmed) {
@@ -669,8 +661,6 @@ function SearchPageClient() {
   };
 
   // --- RENDER ---
-  const activeQuery = currentQueryRef.current.trim();
-
   return (
     <PageLayout activePath='/search'>
       <div className='px-4 sm:px-10 py-4 sm:py-8 overflow-visible mb-10'>
@@ -812,18 +802,16 @@ function SearchPageClient() {
                           computeGroupStats(group);
                         const type = episodes === 1 ? 'movie' : 'tv';
 
-                        if (!groupStatsRef.current.has(mapKey)) {
-                          groupStatsRef.current.set(mapKey, {
-                            episodes,
-                            source_names,
-                            douban_id,
-                          });
-                        }
-
                         return (
                           <div key={`agg-${mapKey}`} className='w-full'>
                             <VideoCard
-                              ref={getGroupRef(mapKey)}
+                              ref={(handle) => {
+                                if (handle) {
+                                  groupRefs.current.set(mapKey, handle);
+                                } else {
+                                  groupRefs.current.delete(mapKey);
+                                }
+                              }}
                               from='search'
                               isAggregate={true}
                               title={title}
@@ -923,7 +911,7 @@ function SearchPageClient() {
 
       <button
         onClick={scrollToTop}
-        className={`fixed bottom-20 md:bottom-6 right-6 z-50 w-12 h-12 bg-green-500/90 hover:bg-green-500 text-white rounded-full shadow-lg backdrop-blur-sm transition-all duration-300 ease-in-out flex items-center justify-center group ${showBackToTop ? 'opacity-100 translate-y-0 pointer-events-auto' : 'opacity-0 translate-y-4 pointer-events-none'}`}
+        className={`fixed bottom-20 md:bottom-6 right-6 z-50 w-12 h-12 bg-brand-500/90 hover:bg-brand-500 text-white rounded-full shadow-lg backdrop-blur-sm transition-all duration-300 ease-in-out flex items-center justify-center group ${showBackToTop ? 'opacity-100 translate-y-0 pointer-events-auto' : 'opacity-0 translate-y-4 pointer-events-none'}`}
       >
         <ChevronUp className='w-6 h-6 transition-transform group-hover:scale-110' />
       </button>

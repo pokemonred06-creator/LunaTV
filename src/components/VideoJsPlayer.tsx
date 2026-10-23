@@ -16,6 +16,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import videojs from 'video.js';
 import Player from 'video.js/dist/types/player';
 
+import { needsLiveCodecCompatibility } from '@/lib/live-codec';
+import { remoteLog } from '@/lib/logger';
+
 import { useLanguage } from '@/components/LanguageProvider';
 
 // --- Types ---
@@ -48,6 +51,27 @@ interface VideoJsPlayerProps {
 interface VideoJsPlayerInstance extends Player {
   // Relaxed type to avoid conflicts with base Player interface
   tech(safety?: boolean): any;
+}
+
+interface PlaybackTelemetryPayload {
+  event:
+    | 'session_start'
+    | 'startup_complete'
+    | 'rebuffer_start'
+    | 'rebuffer_recover'
+    | 'fatal_error'
+    | 'session_end';
+  sessionId: string;
+  seriesId: string;
+  isLive: boolean;
+  url: string;
+  startupMs?: number;
+  stalls?: number;
+  recoveries?: number;
+  fatalErrors?: number;
+  bufferAheadSec?: number;
+  errorCode?: number;
+  errorMessage?: string;
 }
 
 // --- Icons ---
@@ -374,6 +398,14 @@ const formatBandwidth = (value: number) => {
   return `${(value / 1024 / 1024).toFixed(2)} Mbps`;
 };
 
+const readBrowserDownlinkBps = () => {
+  if (typeof navigator === 'undefined') return 0;
+  const conn = (navigator as any).connection;
+  const downlinkMbps = Number(conn?.downlink || 0);
+  if (!Number.isFinite(downlinkMbps) || downlinkMbps <= 0) return 0;
+  return downlinkMbps * 1024 * 1024;
+};
+
 const formatSeconds = (value: number) => {
   if (!Number.isFinite(value)) return 'N/A';
   return `${Math.max(0, value).toFixed(2)}s`;
@@ -481,21 +513,39 @@ const getBufferedMetrics = (video: HTMLVideoElement) => {
 };
 
 const getMimeType = (
-  player: VideoJsPlayerInstance,
+  player: VideoJsPlayerInstance | null,
   tech: any,
-  video: HTMLVideoElement,
+  video: HTMLVideoElement | null,
+  fallbackUrl?: string,
 ) => {
-  const source = player.currentSource?.() as { type?: string } | undefined;
+  const source = player?.currentSource?.() as
+    | { type?: string; src?: string }
+    | undefined;
+  const src =
+    source?.src || video?.currentSrc || video?.src || fallbackUrl || '';
+  const guessedType =
+    src.includes('.m3u8') || src.includes('/api/proxy/m3u8')
+      ? 'application/vnd.apple.mpegurl'
+      : src.includes('.flv') || src.includes('/api/proxy/flv')
+        ? 'video/x-flv'
+        : src.includes('.mp4')
+          ? 'video/mp4'
+          : '';
   return (
-    source?.type || tech?.currentType_ || video.getAttribute('type') || 'N/A'
+    source?.type ||
+    tech?.currentType_ ||
+    video?.getAttribute('type') ||
+    guessedType ||
+    'N/A'
   );
 };
 
-const getTechName = (player: VideoJsPlayerInstance, tech: any) => {
+const getTechName = (player: VideoJsPlayerInstance | null, tech: any) => {
   const rawName =
     tech?.name_ ||
     tech?.constructor?.name ||
-    (player as any).techName_ ||
+    (player as any)?.techName_ ||
+    ((window as any).__msePlayer ? 'MSEDirect' : null) ||
     'N/A';
   return String(rawName).replace(/Tech$/, '');
 };
@@ -524,7 +574,32 @@ const useStats = (
   playerRef: MutableRefObject<VideoJsPlayerInstance | null>,
   isLiveMode: boolean,
   enabled: boolean,
+  sourceUrl: string,
 ) => {
+  const resolveVideoElement = useCallback((player: VideoJsPlayerInstance) => {
+    const techEl = player.tech?.(true)?.el?.();
+    if (techEl instanceof HTMLVideoElement) return techEl;
+    if (techEl && typeof (techEl as Element).querySelector === 'function') {
+      const nestedVideo = (techEl as Element).querySelector('video');
+      if (nestedVideo instanceof HTMLVideoElement) return nestedVideo;
+    }
+    const playerVideo = player.el?.()?.querySelector?.('video');
+    if (playerVideo instanceof HTMLVideoElement) return playerVideo;
+    return null;
+  }, []);
+
+  const resolveFallbackVideoElement = useCallback(() => {
+    if (typeof document === 'undefined') return null;
+    const fromPlayerContainer = document.querySelector(
+      '.player-container video',
+    );
+    if (fromPlayerContainer instanceof HTMLVideoElement)
+      return fromPlayerContainer;
+    const anyVideo = document.querySelector('video');
+    if (anyVideo instanceof HTMLVideoElement) return anyVideo;
+    return null;
+  }, []);
+
   const normalizeStreamUrl = useCallback((rawUrl: string) => {
     let value = (rawUrl || '').trim();
     if (!value) return '';
@@ -553,9 +628,9 @@ const useStats = (
 
     const sampleStats = () => {
       const p = playerRef.current;
-      if (!p) return;
-      const tech = p.tech?.(true) as any;
-      const v = tech?.el?.() as HTMLVideoElement | null;
+      const tech = p?.tech?.(true) as any;
+      const v =
+        (p ? resolveVideoElement(p) : null) || resolveFallbackVideoElement();
       if (!v) return;
 
       let bw = 0;
@@ -565,10 +640,42 @@ const useStats = (
         const media = tech.vhs.playlists?.media?.();
         if (media?.attributes?.BANDWIDTH)
           playingBitrate = media.attributes.BANDWIDTH;
-      } else if ((p as any).hls?.bandwidth) {
-        bw = (p as any).hls.bandwidth;
-        // HLS.js might have levels
+        else if (media?.attributes?.['AVERAGE-BANDWIDTH'])
+          playingBitrate = media.attributes['AVERAGE-BANDWIDTH'];
+      } else if ((p as any)?.hls) {
+        const hls = (p as any).hls;
+        if (Number.isFinite(hls?.bandwidth)) bw = hls.bandwidth;
+        const currentLevel = Number.isFinite(hls?.currentLevel)
+          ? hls.currentLevel
+          : Number.isFinite(hls?.nextLevel)
+            ? hls.nextLevel
+            : -1;
+        const level =
+          currentLevel >= 0 && Array.isArray(hls?.levels)
+            ? hls.levels[currentLevel]
+            : null;
+        if (Number.isFinite(level?.bitrate)) playingBitrate = level.bitrate;
       }
+
+      // Direct FLV/MPEGTS runtime: derive bandwidth/bitrate from player stats when available.
+      const msePlayer = (window as any).__msePlayer;
+      const statsInfo = msePlayer?.statisticsInfo || msePlayer?.statistics_info;
+      if (bw <= 0 && Number.isFinite(statsInfo?.speed)) {
+        // flv.js speed is bytes/sec; convert to bits/sec.
+        bw = Number(statsInfo.speed) * 8;
+      }
+      if (
+        playingBitrate <= 0 &&
+        Number.isFinite(statsInfo?.currentSegmentBitrate)
+      ) {
+        playingBitrate = Number(statsInfo.currentSegmentBitrate);
+      }
+      if (playingBitrate <= 0 && Number.isFinite(statsInfo?.bitrate)) {
+        playingBitrate = Number(statsInfo.bitrate);
+      }
+      if (bw <= 0) bw = readBrowserDownlinkBps();
+      // Fallback: if stream runtime doesn't expose media bitrate, reuse measured throughput.
+      if (playingBitrate <= 0 && bw > 0) playingBitrate = bw;
 
       const currentTime = Number.isFinite(v.currentTime) ? v.currentTime : 0;
       const seekable = v.seekable;
@@ -578,10 +685,11 @@ const useStats = (
         : NaN;
       const { bufferAhead, bufferedRange } = getBufferedMetrics(v);
       const currentUrl =
-        p.currentSrc?.() ||
+        p?.currentSrc?.() ||
         v.currentSrc ||
         v.src ||
-        (p as any).cache_?.src ||
+        (p as any)?.cache_?.src ||
+        sourceUrl ||
         '';
       const nextStats: PlayerStatsSnapshot = {
         resolution: formatDimension(v.videoWidth, v.videoHeight),
@@ -591,7 +699,7 @@ const useStats = (
         bufferHealth: bufferAhead,
         bufferedRange,
         droppedFrames: String(getDroppedFrames(v)),
-        playbackRate: `${(p.playbackRate?.() ?? v.playbackRate ?? 1).toFixed(2)}x`,
+        playbackRate: `${(p?.playbackRate?.() ?? v.playbackRate ?? 1).toFixed(2)}x`,
         streamMode: isLiveMode ? 'LIVE' : 'VOD',
         liveLatency:
           isLiveMode && Number.isFinite(seekableEnd)
@@ -599,7 +707,7 @@ const useStats = (
             : 'N/A',
         readyState: getReadyStateLabel(v.readyState),
         networkState: getNetworkStateLabel(v.networkState),
-        mimeType: getMimeType(p, tech, v),
+        mimeType: getMimeType(p, tech, v, sourceUrl),
         techName: getTechName(p, tech),
         currentUrl: normalizeStreamUrl(currentUrl),
       };
@@ -613,7 +721,15 @@ const useStats = (
     sampleStats();
     const interval = window.setInterval(sampleStats, 1000);
     return () => window.clearInterval(interval);
-  }, [enabled, isLiveMode, normalizeStreamUrl, playerRef]);
+  }, [
+    enabled,
+    isLiveMode,
+    normalizeStreamUrl,
+    playerRef,
+    resolveFallbackVideoElement,
+    resolveVideoElement,
+    sourceUrl,
+  ]);
 
   return stats;
 };
@@ -773,6 +889,152 @@ const usePlayerGestures = (
   }, [containerEl, playerRef, unifiedSeekRef, isRotatedRef]);
 };
 
+const createPlaybackSessionId = () =>
+  `pb_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+
+const usePlaybackTelemetry = (
+  seriesId: string | undefined,
+  url: string,
+  isLive: boolean,
+) => {
+  const sessionIdRef = useRef('');
+  const startAtMsRef = useRef(0);
+  const startupLoggedRef = useRef(false);
+  const inRebufferRef = useRef(false);
+  const countersRef = useRef({ stalls: 0, recoveries: 0, fatalErrors: 0 });
+
+  const send = useCallback(
+    (payload: PlaybackTelemetryPayload, level: 'info' | 'warn' | 'error') => {
+      remoteLog(level, '[playback-telemetry]', {
+        kind: 'playback',
+        ...payload,
+      });
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const sessionId = createPlaybackSessionId();
+    sessionIdRef.current = sessionId;
+    startAtMsRef.current = Date.now();
+    startupLoggedRef.current = false;
+    inRebufferRef.current = false;
+    countersRef.current = { stalls: 0, recoveries: 0, fatalErrors: 0 };
+
+    send(
+      {
+        event: 'session_start',
+        sessionId,
+        seriesId: seriesId || 'global',
+        isLive,
+        url,
+      },
+      'info',
+    );
+  }, [isLive, send, seriesId, url]);
+
+  useEffect(
+    () => () => {
+      const c = countersRef.current;
+      send(
+        {
+          event: 'session_end',
+          sessionId: sessionIdRef.current,
+          seriesId: seriesId || 'global',
+          isLive,
+          url,
+          stalls: c.stalls,
+          recoveries: c.recoveries,
+          fatalErrors: c.fatalErrors,
+        },
+        'info',
+      );
+    },
+    [isLive, send, seriesId, url],
+  );
+
+  const onPlaying = useCallback(
+    (bufferAheadSec?: number) => {
+      if (!startupLoggedRef.current) {
+        startupLoggedRef.current = true;
+        send(
+          {
+            event: 'startup_complete',
+            sessionId: sessionIdRef.current,
+            seriesId: seriesId || 'global',
+            isLive,
+            url,
+            startupMs: Date.now() - startAtMsRef.current,
+            bufferAheadSec,
+          },
+          'info',
+        );
+      }
+      if (inRebufferRef.current) {
+        inRebufferRef.current = false;
+        countersRef.current.recoveries += 1;
+        send(
+          {
+            event: 'rebuffer_recover',
+            sessionId: sessionIdRef.current,
+            seriesId: seriesId || 'global',
+            isLive,
+            url,
+            stalls: countersRef.current.stalls,
+            recoveries: countersRef.current.recoveries,
+            bufferAheadSec,
+          },
+          'info',
+        );
+      }
+    },
+    [isLive, send, seriesId, url],
+  );
+
+  const onWaiting = useCallback(
+    (bufferAheadSec?: number) => {
+      if (inRebufferRef.current) return;
+      inRebufferRef.current = true;
+      countersRef.current.stalls += 1;
+      send(
+        {
+          event: 'rebuffer_start',
+          sessionId: sessionIdRef.current,
+          seriesId: seriesId || 'global',
+          isLive,
+          url,
+          stalls: countersRef.current.stalls,
+          bufferAheadSec,
+        },
+        'warn',
+      );
+    },
+    [isLive, send, seriesId, url],
+  );
+
+  const onError = useCallback(
+    (errorCode?: number, errorMessage?: string) => {
+      countersRef.current.fatalErrors += 1;
+      send(
+        {
+          event: 'fatal_error',
+          sessionId: sessionIdRef.current,
+          seriesId: seriesId || 'global',
+          isLive,
+          url,
+          fatalErrors: countersRef.current.fatalErrors,
+          errorCode,
+          errorMessage: errorMessage?.slice(0, 400),
+        },
+        'error',
+      );
+    },
+    [isLive, send, seriesId, url],
+  );
+
+  return { onPlaying, onWaiting, onError };
+};
+
 const useCasShader = (
   playerReady: boolean,
   casEnabled: boolean,
@@ -782,7 +1044,7 @@ const useCasShader = (
   techEpoch: number,
   disableCas: () => void,
 ) => {
-  const ownerRef = useRef<string>(`${Date.now()}_${Math.random()}`);
+  const ownerRef = useRef<string>('');
   const techRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const failuresRef = useRef(0);
@@ -798,6 +1060,9 @@ const useCasShader = (
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
+    if (!ownerRef.current) {
+      ownerRef.current = `cas_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    }
     const cleanup = () => {
       if (rafRef.current) {
         cancelAnimationFrame(rafRef.current);
@@ -944,8 +1209,8 @@ const useCasShader = (
 
       tech.setAttribute('data-cas-active', 'true');
       tech.dataset.casOwner = ownerRef.current;
+      let lastRenderedTime = -1;
       let first = true;
-
       let inLoop = false;
       const loop = () => {
         inLoop = false;
@@ -985,17 +1250,23 @@ const useCasShader = (
         }
 
         try {
-          gl.texImage2D(
-            gl.TEXTURE_2D,
-            0,
-            gl.RGBA,
-            gl.RGBA,
-            gl.UNSIGNED_BYTE,
-            tech,
-          );
-          if (first) {
-            tech.style.opacity = '0';
-            first = false;
+          const currentTime = tech.currentTime;
+          const frameChanged = !tech.paused || currentTime !== lastRenderedTime;
+
+          if (frameChanged) {
+            gl.texImage2D(
+              gl.TEXTURE_2D,
+              0,
+              gl.RGBA,
+              gl.RGBA,
+              gl.UNSIGNED_BYTE,
+              tech,
+            );
+            lastRenderedTime = currentTime;
+            if (first) {
+              tech.style.opacity = '0';
+              first = false;
+            }
           }
           if (uR) gl.uniform2f(uR, canvas.width, canvas.height);
           if (uS) gl.uniform1f(uS, 0.6);
@@ -1120,6 +1391,7 @@ export default function VideoJsPlayer({
     handler: (() => void) | null;
   }>({ video: null, handler: null });
   const sourceSwitchEpochRef = useRef(0);
+  const codecFallbackEpochRef = useRef(-1);
   const playbackIsLiveRef = useRef(playbackIsLive);
 
   const configRef = useRef({
@@ -1146,6 +1418,7 @@ export default function VideoJsPlayer({
   // Double Click / Tap Logic
   const lastTapRef = useRef({ time: 0, x: 0, y: 0 });
   const singleTapTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const uiInteractTimeoutRef = useRef<any>(null);
 
   useEffect(() => {
     if (debug) {
@@ -1173,7 +1446,8 @@ export default function VideoJsPlayer({
 
   // Stats
   const [showStats, setShowStats] = useState(false);
-  const stats = useStats(playerRef, playbackIsLive, showStats);
+  const stats = useStats(playerRef, playbackIsLive, showStats, url);
+  const playbackTelemetry = usePlaybackTelemetry(seriesId, url, playbackIsLive);
   const [isMobileViewport, setIsMobileViewport] = useState(false);
 
   useEffect(() => {
@@ -1488,9 +1762,11 @@ export default function VideoJsPlayer({
     disableCas,
   );
 
+  const initHlsRef = useRef<((videoEl: HTMLVideoElement, sourceUrl: string) => void) | null>(null);
+
   const finalUrl = useMemo(() => {
     if (!reloadTrigger || reloadTrigger <= 0) return url;
-    return `${url}${url.includes('?') ? '&' : '?'}t=${reloadTrigger}-${Date.now()}`;
+    return `${url}${url.includes('?') ? '&' : '?'}t=${reloadTrigger}`;
   }, [url, reloadTrigger]);
 
   const initHls = useCallback(
@@ -1575,7 +1851,7 @@ export default function VideoJsPlayer({
                 );
                 hls.destroy();
                 // Trigger re-init via effect dependency
-                initHls(videoEl, proxyUrl);
+                initHlsRef.current?.(videoEl, proxyUrl);
                 break;
             }
           }
@@ -1591,6 +1867,10 @@ export default function VideoJsPlayer({
       reportPlaybackError,
     ],
   );
+
+  useEffect(() => {
+    initHlsRef.current = initHls;
+  }, [initHls]);
 
   useEffect(() => {
     if (!playerReady || !playerRef.current) return;
@@ -1628,46 +1908,11 @@ export default function VideoJsPlayer({
       (playerRef.current as any).__mseCleanup = null;
     }
 
-    let proxiedUpstream: string;
-    try {
-      const parsed = new URL(finalUrl, window.location.origin);
-      proxiedUpstream = (parsed.searchParams.get('url') || '').toLowerCase();
-    } catch {
-      proxiedUpstream = '';
-    }
-
-    const forcedFlvFromProxy =
-      finalUrl.includes('/api/proxy/m3u8') &&
-      (proxiedUpstream.includes('huya') ||
-        proxiedUpstream.includes('douyu') ||
-        proxiedUpstream.includes('jdshipin.com') ||
-        proxiedUpstream.includes('douzhicloud.site') ||
-        proxiedUpstream.includes('zxyxndc.top') ||
-        /\.flv(\?|$)/i.test(proxiedUpstream) ||
-        /\.php(\?|$)/i.test(proxiedUpstream));
-
-    const isHls =
-      !forcedFlvFromProxy &&
-      (type === 'application/x-mpegURL' || finalUrl.includes('.m3u8'));
-    const isTs =
-      type === 'video/mp2t' ||
-      type === 'ts' ||
-      finalUrl.includes('/api/proxy/ts') ||
-      /\.ts(\?|$)/i.test(finalUrl);
-    const isFlv =
-      forcedFlvFromProxy ||
-      type === 'video/x-flv' ||
-      type === 'flv' ||
-      finalUrl.includes('.flv') ||
-      finalUrl.includes('/api/proxy/flv');
-    console.log('[VideoJsPlayer] Detect:', {
-      isHls,
-      isTs,
-      isFlv,
-      forcedFlvFromProxy,
-      type,
-      finalUrl: finalUrl.substring(0, 100),
-    });
+    const mime = (type || '').toLowerCase();
+    const isHls = mime.includes('mpegurl') || finalUrl.includes('/api/proxy/m3u8') || /\.m3u8(?:\?|$)/i.test(finalUrl);
+    const nativeMedia = mime.startsWith('audio/') || /video\/(mp4|webm|ogg)/.test(mime);
+    const isTs = !isHls && !nativeMedia && (mime === 'video/mp2t' || mime === 'ts' || finalUrl.includes('/api/proxy/ts'));
+    const isFlv = !isHls && !nativeMedia && (mime === 'video/x-flv' || mime === 'flv' || finalUrl.includes('/api/proxy/flv') || /\.flv(?:\?|$)/i.test(finalUrl));
     // Otherwise, rely on Video.js (VHS or Native) to handle it via player.src()
     if (isHls && customHlsLoaderFactory) {
       // FIX: Force stop previous playback synchronously
@@ -1758,11 +2003,9 @@ export default function VideoJsPlayer({
             (window as any).__msePlayer = null;
           }
 
-          const mseLib = isTs ? window.mpegts : window.flvjs;
+          const mseLib = window.mpegts || (isFlv ? window.flvjs : undefined);
           if (!mseLib || !mseLib.isSupported?.()) {
-            console.error(
-              `[${streamLabel}] MSE library not available or not supported`,
-            );
+            reportPlaybackError({ code: 4, message: 'This browser requires HLS compatibility playback' });
             return;
           }
 
@@ -1838,6 +2081,7 @@ export default function VideoJsPlayer({
             if (!mountedRef.current || stopReconnect) return;
             if (reconnectCount > MAX_RECONNECTS) {
               console.error(`[${streamLabel}] Max reconnects reached`);
+              reportPlaybackError({code: 2, message: 'This source stopped responding. Retry or choose another channel.'});
               stopReconnect = true;
               return;
             }
@@ -1901,7 +2145,6 @@ export default function VideoJsPlayer({
               fp.attachMediaElement(v!);
               fp.load();
               loadingCompleted = false;
-              consecutiveRetryable403 = 0;
 
               endedHandler = () => {
                 if (
@@ -2094,11 +2337,14 @@ export default function VideoJsPlayer({
                     errDetail,
                     errInfo,
                   );
+                  if (errType !== mseLib.ErrorTypes.NETWORK_ERROR) {
+                    reportPlaybackError({ code: 3, type: errType, details: errDetail });
+                  }
                   const statusCode =
                     typeof errInfo?.code === 'number' ? errInfo.code : null;
                   const retryable403 =
                     statusCode === 403 &&
-                    /cdn\.jdshipin\.com|douzhicloud\.site|\/api\/proxy\/flv/i.test(
+                    /jdshipin\.com|douzhicloud\.site|zxyxndc\.top/i.test(
                       src,
                     );
                   if (retryable403) {
@@ -2120,6 +2366,7 @@ export default function VideoJsPlayer({
                       (statusCode === 403 && !retryable403) ||
                       statusCode === 404);
                   if (terminalHttpError) {
+                    reportPlaybackError({code: 2, message: `Source unavailable (HTTP ${statusCode}). Try another source for this channel.`});
                     stopReconnect = true;
                     console.warn(
                       `[${streamLabel}] Terminal upstream status ${statusCode}, stop reconnecting`,
@@ -2226,6 +2473,7 @@ export default function VideoJsPlayer({
     clearNativeAutoplayListeners,
     seriesId,
     customHlsLoaderFactory,
+    reportPlaybackError,
   ]);
 
   useEffect(() => {
@@ -2325,10 +2573,21 @@ export default function VideoJsPlayer({
           message: err?.message || 'Player error',
           raw: err,
         });
+        playbackTelemetry.onError(
+          Number(err?.code || 0) || 0,
+          err?.message || 'Player error',
+        );
       });
 
       player!.on('playing', () => {
         if (mountedRef.current) {
+          const v = getTechVideoEl();
+          const bufferAhead = v
+            ? Number.parseFloat(getBufferedMetrics(v).bufferAhead)
+            : undefined;
+          playbackTelemetry.onPlaying(
+            Number.isFinite(bufferAhead) ? bufferAhead : undefined,
+          );
           setIsPlaying(true);
           if (pendingAutoplayRef.current) pendingAutoplayRef.current = false;
           clearSwitching();
@@ -2349,6 +2608,15 @@ export default function VideoJsPlayer({
           if (!isSwitchingRef.current) pendingAutoplayRef.current = false;
           callbacksRef.current.onPause?.();
         }
+      });
+      player!.on('waiting', () => {
+        const v = getTechVideoEl();
+        const bufferAhead = v
+          ? Number.parseFloat(getBufferedMetrics(v).bufferAhead)
+          : undefined;
+        playbackTelemetry.onWaiting(
+          Number.isFinite(bufferAhead) ? bufferAhead : undefined,
+        );
       });
       // FIX: Update duration immediately on loadedmetadata/durationchange
       player!.on('loadedmetadata', () => {
@@ -2383,6 +2651,26 @@ export default function VideoJsPlayer({
         const native = player!.tech?.(true)?.el?.() as
           | HTMLVideoElement
           | undefined;
+        if (
+          playbackIsLiveRef.current &&
+          native &&
+          !native.paused &&
+          native.readyState >= 2 &&
+          t > 0 &&
+          codecFallbackEpochRef.current !== sourceSwitchEpochRef.current &&
+          typeof MediaSource !== 'undefined' &&
+          needsLiveCodecCompatibility(
+            (player!.tech(true) as any).vhs?.playlists?.media?.()?.attributes,
+            native.videoWidth,
+            (mime) => MediaSource.isTypeSupported(mime),
+          )
+        ) {
+          codecFallbackEpochRef.current = sourceSwitchEpochRef.current;
+          reportPlaybackError({
+            code: 4,
+            message: 'This browser requires compatibility playback for the video codec',
+          });
+        }
         if (!Number.isFinite(d) || d <= 0) {
           if (native && Number.isFinite(native.duration) && native.duration > 0)
             d = native.duration;
@@ -2560,7 +2848,6 @@ export default function VideoJsPlayer({
         setControlsVisible(false);
     }, 3000);
   };
-  const uiInteractTimeoutRef = useRef<any>(null);
 
   const displayTime = seekingTime ?? currentTime;
   const progressPercent = playbackIsLive
@@ -3025,6 +3312,7 @@ const CSS = `
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes slideUp { from { transform: translateY(10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 .videojs-rotated-fullscreen { position: fixed !important; width: 100vh !important; width: 100dvh !important; height: 100vw !important; top: 50% !important; left: 50% !important; transform: translate(-50%, -50%) rotate(90deg) !important; z-index: 99999 !important; background: #000 !important; }
+div:has(.videojs-rotated-fullscreen) { filter: none !important; backdrop-filter: none !important; transform: none !important; transition: none !important; overflow: visible !important; contain: none !important; }
 .double-tap-feedback { position: absolute; top: 0; bottom: 0; width: 35%; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 20; color: rgba(255, 255, 255, 0.9); pointer-events: none; background: rgba(255, 255, 255, 0.1); animation: fadeOut 0.6s ease-out forwards; backdrop-filter: blur(2px); }
 .double-tap-feedback.left { left: 0; border-top-right-radius: 50% 10%; border-bottom-right-radius: 50% 10%; background: radial-gradient(circle at left, rgba(255,255,255,0.2) 0%, transparent 70%); }
 .double-tap-feedback.right { right: 0; border-top-left-radius: 50% 10%; border-bottom-left-radius: 50% 10%; background: radial-gradient(circle at right, rgba(255,255,255,0.2) 0%, transparent 70%); }

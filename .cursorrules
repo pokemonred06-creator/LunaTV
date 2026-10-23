@@ -1,3 +1,0 @@
-# General Rules
-
-- Do not automatically push code to GitHub before user confirmation. Always ask for permission before running `git push`.

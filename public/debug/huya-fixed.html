@@ -6,13 +6,32 @@
     <title>Huya FLV Fixed</title>
     <link href="https://vjs.zencdn.net/8.23.4/video-js.css" rel="stylesheet" />
     <style>
-      body { font-family: Arial, sans-serif; padding: 16px; }
-      #log { white-space: pre-wrap; background: #111; color: #ddd; padding: 8px; height: 220px; overflow: auto; }
+      body {
+        font-family: Arial, sans-serif;
+        padding: 16px;
+      }
+      #log {
+        white-space: pre-wrap;
+        background: #111;
+        color: #ddd;
+        padding: 8px;
+        height: 220px;
+        overflow: auto;
+      }
     </style>
   </head>
   <body>
     <h1>Fixed: FLV live guarded reconnect</h1>
-    <video id="v" class="video-js vjs-default-skin" controls autoplay muted playsinline width="960" height="540"></video>
+    <video
+      id="v"
+      class="video-js vjs-default-skin"
+      controls
+      autoplay
+      muted
+      playsinline
+      width="960"
+      height="540"
+    ></video>
     <p>URL: <code id="url"></code></p>
     <div id="log"></div>
 
@@ -43,7 +62,12 @@
 
       const destroyPlayer = () => {
         if (!fp) return;
-        try { fp.pause(); fp.unload(); fp.detachMediaElement(); fp.destroy(); } catch (_) {}
+        try {
+          fp.pause();
+          fp.unload();
+          fp.detachMediaElement();
+          fp.destroy();
+        } catch (_) {}
         fp = null;
       };
 
@@ -74,7 +98,7 @@
             autoCleanupSourceBuffer: true,
             autoCleanupMaxBackwardDuration: 30,
             autoCleanupMinBackwardDuration: 15,
-          }
+          },
         );
 
         const media = p.tech().el();
@@ -93,7 +117,10 @@
             if (media.readyState >= 2) {
               starved = 0;
               if (Math.abs(media.currentTime - lastTime) < 0.01) stagnant++;
-              else { stagnant = 0; lastTime = media.currentTime; }
+              else {
+                stagnant = 0;
+                lastTime = media.currentTime;
+              }
               if (stagnant >= 8) {
                 log('stall detected -> reconnect');
                 destroyPlayer();

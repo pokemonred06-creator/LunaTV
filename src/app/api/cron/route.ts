@@ -5,6 +5,7 @@ import { getConfig, refineConfig } from '@/lib/config';
 import { db } from '@/lib/db';
 import { fetchVideoDetail } from '@/lib/fetchVideoDetail';
 import { refreshLiveChannels } from '@/lib/live';
+import { assertSafeRemoteUrl } from '@/lib/request-security';
 import { SearchResult } from '@/lib/types';
 
 export const runtime = 'nodejs';
@@ -96,7 +97,12 @@ async function refreshConfig() {
     config.ConfigSubscription.AutoUpdate
   ) {
     try {
-      const response = await fetch(config.ConfigSubscription.URL);
+      const safeUrl = await assertSafeRemoteUrl(config.ConfigSubscription.URL);
+      const response = await fetch(safeUrl, {
+        redirect: 'error',
+        signal: AbortSignal.timeout(10_000),
+        cache: 'no-store',
+      });
 
       if (!response.ok) {
         throw new Error(`请求失败: ${response.status} ${response.statusText}`);

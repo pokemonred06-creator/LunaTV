@@ -93,6 +93,7 @@ const MultiLevelSelector: React.FC<MultiLevelSelectorProps> = ({
       case 'tv':
         return [
           ...baseOptions,
+          { label: '短剧', value: 'short' },
           { label: '喜剧', value: 'comedy' },
           { label: '爱情', value: 'romance' },
           { label: '悬疑', value: 'suspense' },

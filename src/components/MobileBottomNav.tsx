@@ -2,7 +2,7 @@
 
 'use client';
 
-import { Cat, Clover, Film, Home, Radio, Star, Tv } from 'lucide-react';
+import { Cat, Clapperboard, Home, Mic, Radio, Star, Tv } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
@@ -30,7 +30,7 @@ const MobileBottomNav = ({
   const [navItems, setNavItems] = useState([
     { icon: Home, label: '首页', href: '/' },
     {
-      icon: Film,
+      icon: Clapperboard,
       label: '电影',
       href: '/douban?type=movie',
     },
@@ -45,7 +45,7 @@ const MobileBottomNav = ({
       href: '/douban?type=anime',
     },
     {
-      icon: Clover,
+      icon: Mic,
       label: '综艺',
       href: '/douban?type=show',
     },
@@ -86,7 +86,7 @@ const MobileBottomNav = ({
 
   return (
     <nav
-      className={`${forced ? 'block' : 'md:hidden'} fixed left-0 right-0 z-600 bg-white/95 backdrop-blur-3xl border-t border-gray-200/50 overflow-hidden dark:bg-gray-900/90 dark:border-gray-700/50 isolation-isolate`}
+      className={`${forced ? 'block' : 'md:hidden'} fixed left-0 right-0 z-600 bg-white/60 backdrop-blur-2xl border-t border-slate-200/40 overflow-hidden dark:bg-slate-950/65 dark:border-slate-800/40 isolation-isolate shadow-[0_-4px_24px_rgba(0,0,0,0.03)]`}
       style={{
         /* 紧贴视口底部，同时在内部留出安全区高度 */
         bottom: 0,
@@ -104,26 +104,36 @@ const MobileBottomNav = ({
           return (
             <li
               key={item.href}
-              className='shrink-0'
-              style={{ width: '20vw', minWidth: '20vw' }}
+              className='flex-1 min-w-[60px] max-w-[90px]'
             >
               <Link
                 href={item.href}
-                className='flex flex-col items-center justify-center w-full h-14 gap-1 text-xs'
+                className='relative flex flex-col items-center justify-center w-full h-14 gap-1 text-[10px] sm:text-xs font-semibold'
               >
-                <item.icon
-                  className={`h-6 w-6 ${
+                {active && (
+                  <div className='absolute top-1 w-5 h-1 bg-gradient-to-r from-brand-500 to-emerald-500 rounded-full shadow-md shadow-brand-500/20' />
+                )}
+                <div
+                  className={`w-9 h-7 rounded-xl flex items-center justify-center transition-all duration-200 ${
                     active
-                      ? 'text-green-600 dark:text-green-400'
-                      : 'text-gray-500 dark:text-gray-400'
+                      ? 'bg-gradient-to-br from-brand-500/12 to-emerald-500/12'
+                      : ''
                   }`}
-                />
+                >
+                  <item.icon
+                    className={`h-5 w-5 transition-all duration-300 ${
+                      active
+                        ? 'text-brand-500 dark:text-brand-400 scale-110'
+                        : 'text-slate-400 hover:text-brand-500 dark:text-slate-500 dark:hover:text-brand-400'
+                    }`}
+                  />
+                </div>
                 <span
-                  className={
+                  className={`transition-colors duration-300 ${
                     active
-                      ? 'text-green-600 dark:text-green-400'
-                      : 'text-gray-600 dark:text-gray-300'
-                  }
+                      ? 'text-brand-500 dark:text-brand-400 font-bold'
+                      : 'text-slate-500 dark:text-slate-400'
+                  }`}
                 >
                   {convert(item.label)}
                 </span>

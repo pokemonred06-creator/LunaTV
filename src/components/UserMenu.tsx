@@ -522,7 +522,8 @@ export const UserMenu: React.FC = () => {
 
   const handleLogout = async () => {
     await fetch('/api/logout', { method: 'POST' });
-    window.location.href = '/';
+    router.push('/');
+    router.refresh();
   };
 
   const getRoleText = (role?: string) => {

@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { getConfig } from '@/lib/config';
+import { getAuthInfoFromCookie } from '@/lib/auth/server';
+import { getAvailableLiveSources } from '@/lib/config';
 import { getCachedLiveChannels } from '@/lib/live';
+import { signMediaUrl } from '@/lib/media-auth';
 
 export const runtime = 'nodejs';
 
@@ -50,6 +52,7 @@ function buildProxiedUrl(
   origin: string,
   upstream: string,
   sourceKey: string,
+  channelId: string,
 ): string {
   const trimmed = (upstream || '').trim();
   if (!trimmed) return trimmed;
@@ -63,13 +66,14 @@ function buildProxiedUrl(
     }
   }
 
-  // Only proxy http(s) targets. Non-http schemes are left as-is.
-  if (!/^https?:\/\//i.test(trimmed)) return trimmed;
+  // Route supported transports through the same authenticated, guarded handler.
+  if (!/^(?:https?|rtmp|rtsp|udp|rtp):\/\//i.test(trimmed)) return '';
 
   const type = guessProxyType(trimmed);
   const u = new URL(`/api/proxy/${type}`, origin);
   u.searchParams.set('url', trimmed);
   u.searchParams.set('moontv-source', sourceKey);
+  u.searchParams.set('moontv-channel', channelId);
   return u.toString();
 }
 
@@ -96,11 +100,14 @@ function buildProxiedLogo(
 }
 
 export async function GET(request: NextRequest) {
+  const auth = await getAuthInfoFromCookie(request);
+  if (!auth?.username || typeof auth.timestamp !== 'number')
+    return new NextResponse('Unauthorized', { status: 401 });
+  const expires = auth.timestamp + 7 * 24 * 60 * 60 * 1000;
   const { searchParams } = new URL(request.url);
   const sourceKey = (searchParams.get('source') || '').trim();
 
-  const config = await getConfig();
-  const enabledSources = (config.LiveConfig || []).filter((s) => !s.disabled);
+  const enabledSources = await getAvailableLiveSources(auth.username);
   const targets = sourceKey
     ? enabledSources.filter((s) => s.key === sourceKey)
     : enabledSources;
@@ -145,13 +152,23 @@ export async function GET(request: NextRequest) {
       if (ch.tvgId) attrs.push(`tvg-id="${escapeM3uAttr(ch.tvgId)}"`);
       attrs.push(`tvg-name="${escapeM3uAttr(title)}"`);
       if (ch.logo) {
-        const logo = buildProxiedLogo(origin, ch.logo, s.key);
+        const logo = signMediaUrl(
+          buildProxiedLogo(origin, ch.logo, s.key),
+          auth.username,
+          expires,
+        );
         if (logo) attrs.push(`tvg-logo="${escapeM3uAttr(logo)}"`);
       }
       attrs.push(`group-title="${escapeM3uAttr(groupTitle)}"`);
 
       lines.push(`#EXTINF:-1 ${attrs.join(' ')},${sanitizeExtinfTitle(title)}`);
-      lines.push(buildProxiedUrl(origin, ch.url, s.key));
+      lines.push(
+        signMediaUrl(
+          buildProxiedUrl(origin, ch.url, s.key, ch.id),
+          auth.username,
+          expires,
+        ),
+      );
     }
   }
 

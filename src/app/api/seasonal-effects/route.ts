@@ -1,4 +1,3 @@
- 
 import { NextResponse } from 'next/server';
 
 import { getConfig } from '@/lib/config';
@@ -11,16 +10,16 @@ export const dynamic = 'force-dynamic'; // Disable Next.js caching
 export async function GET() {
   try {
     const config = await getConfig();
-    
+
     // Return seasonal effects config, with defaults if not set
     const seasonalEffects = config.SiteConfig.SeasonalEffects || {
       enabled: false,
       season: 'auto',
       intensity: 'normal',
     };
-    
+
     console.log('[Seasonal Effects] Returning config:', seasonalEffects);
-    
+
     return NextResponse.json(seasonalEffects, {
       headers: {
         'Cache-Control': 'no-store, no-cache, must-revalidate', // Don't cache

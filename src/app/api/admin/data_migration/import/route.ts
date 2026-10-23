@@ -1,16 +1,15 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
 import { NextRequest, NextResponse } from 'next/server';
 import { promisify } from 'util';
 import { gunzip } from 'zlib';
 
 import { getAuthInfoFromCookie } from '@/lib/auth/server';
 import { isOwnerUsername } from '@/lib/auth/shared';
-import { configSelfCheck, setCachedConfig } from '@/lib/config';
-import { ServerCrypto } from '@/lib/crypto';
-import { db } from '@/lib/db';
-import { isPasswordHash } from '@/lib/password';
-import { setStoredUserPasswordHash } from '@/lib/storage-credentials';
+import {
+  MAX_BACKUP_JSON_BYTES,
+  restoreBackup,
+  validateBackup,
+} from '@/lib/backup';
+import { MAX_BACKUP_TOKEN_LENGTH, ServerCrypto } from '@/lib/crypto';
 
 export const runtime = 'nodejs';
 
@@ -46,11 +45,15 @@ export async function POST(req: NextRequest) {
     const file = formData.get('file') as File;
     const password = formData.get('password') as string;
 
-    if (!file) {
+    if (
+      !file ||
+      typeof file === 'string' ||
+      file.size > MAX_BACKUP_TOKEN_LENGTH
+    ) {
       return NextResponse.json({ error: '请选择备份文件' }, { status: 400 });
     }
 
-    if (!password) {
+    if (!password || typeof password !== 'string') {
       return NextResponse.json({ error: '请提供解密密码' }, { status: 400 });
     }
 
@@ -63,6 +66,7 @@ export async function POST(req: NextRequest) {
       const result = await ServerCrypto.decrypt<string>(
         encryptedData,
         password,
+        'backup',
       );
       if (!result) throw new Error('Decryption returned null');
       decryptedData = result;
@@ -73,87 +77,18 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 解压缩数据
-    const compressedBuffer = Buffer.from(decryptedData, 'base64');
-    const decompressedBuffer = await gunzipAsync(compressedBuffer);
-    const decompressedData = decompressedBuffer.toString();
-
-    // 解析JSON数据
-    let importData: any;
+    let importData;
     try {
-      importData = JSON.parse(decompressedData);
-    } catch (error) {
-      return NextResponse.json({ error: '备份文件格式错误' }, { status: 400 });
-    }
-
-    // 验证数据格式
-    if (
-      !importData.data ||
-      !importData.data.adminConfig ||
-      !importData.data.userData
-    ) {
+      const compressedBuffer = Buffer.from(decryptedData, 'base64');
+      const decompressed = await gunzipAsync(compressedBuffer, {
+        maxOutputLength: MAX_BACKUP_JSON_BYTES,
+      });
+      importData = validateBackup(JSON.parse(decompressed.toString()));
+    } catch {
       return NextResponse.json({ error: '备份文件格式无效' }, { status: 400 });
     }
-
-    // 开始导入数据 - 先清空现有数据
-    await db.clearAllData();
-
-    // 导入管理员配置
-    importData.data.adminConfig = configSelfCheck(importData.data.adminConfig);
-    await db.saveAdminConfig(importData.data.adminConfig);
-    await setCachedConfig(importData.data.adminConfig);
-
-    // 导入用户数据
+    await restoreBackup(importData, password);
     const userData = importData.data.userData;
-    for (const username in userData) {
-      const user = userData[username];
-
-      // Restore password hashes from new backups, or re-hash plaintext from legacy backups.
-      if (
-        typeof user.passwordHash === 'string' &&
-        isPasswordHash(user.passwordHash)
-      ) {
-        await setStoredUserPasswordHash(
-          (db as any).storage,
-          username,
-          user.passwordHash,
-        );
-      } else if (user.password) {
-        await db.registerUser(username, user.password);
-      }
-
-      // 导入播放记录
-      if (user.playRecords) {
-        for (const [key, record] of Object.entries(user.playRecords)) {
-          await (db as any).storage.setPlayRecord(username, key, record);
-        }
-      }
-
-      // 导入收藏夹
-      if (user.favorites) {
-        for (const [key, favorite] of Object.entries(user.favorites)) {
-          await (db as any).storage.setFavorite(username, key, favorite);
-        }
-      }
-
-      // 导入搜索历史
-      if (user.searchHistory && Array.isArray(user.searchHistory)) {
-        for (const keyword of user.searchHistory.reverse()) {
-          // 反转以保持顺序
-          await db.addSearchHistory(username, keyword);
-        }
-      }
-
-      // 导入跳过片头片尾配置
-      if (user.skipConfigs) {
-        for (const [key, skipConfig] of Object.entries(user.skipConfigs)) {
-          const [source, id] = key.split('+');
-          if (source && id) {
-            await db.setSkipConfig(username, source, id, skipConfig as any);
-          }
-        }
-      }
-    }
 
     return NextResponse.json({
       message: '数据导入成功',

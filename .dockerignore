@@ -1,9 +1,12 @@
 .env
 .env*.local
 node_modules
-# .next  <-- Commented out to allow copying artifacts
+.next
 .git
 .vscode
+cookies.txt
+data
+local-synology-test
 dist
 build
 npm-debug.log

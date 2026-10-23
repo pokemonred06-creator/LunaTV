@@ -35,7 +35,6 @@ import { useLongPress } from '@/hooks/useLongPress';
 import { ImagePlaceholder } from '@/components/ImagePlaceholder';
 import { useLanguage } from '@/components/LanguageProvider';
 import MobileActionSheet from '@/components/MobileActionSheet';
-import { useSeasonalEffects } from '@/components/SeasonalEffectsProvider';
 
 // --- Types ---
 
@@ -188,7 +187,6 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
   ) {
     const router = useRouter();
     const { convert } = useLanguage();
-    useSeasonalEffects();
 
     // State
     const [imageLoaded, setImageLoaded] = useState(false);
@@ -485,7 +483,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
     return (
       <>
         <div
-          className='group relative w-full rounded-lg bg-transparent cursor-pointer select-none touch-manipulation'
+          className='group relative w-full rounded-2xl bg-transparent cursor-pointer select-none touch-manipulation'
           onClick={handleClick}
           {...longPressProps}
           style={containerStyle}
@@ -494,14 +492,18 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
         >
           {/* Poster */}
           <div
-            className={`relative aspect-2/3 overflow-hidden rounded-lg ${origin === 'live' ? 'ring-1 ring-gray-300/80 dark:ring-gray-600/80' : ''}`}
+            className={`relative aspect-2/3 overflow-hidden rounded-2xl shadow-sm group-hover:shadow-lg transition-all duration-300 ${origin === 'live' ? 'ring-1 ring-gray-300/80 dark:ring-gray-600/80' : ''}`}
           >
             {!imageLoaded && <ImagePlaceholder aspectRatio='aspect-2/3' />}
             <Image
               src={processImageUrl(poster)}
               alt={title}
               fill
-              className={origin === 'live' ? 'object-contain' : 'object-cover'}
+              className={
+                origin === 'live'
+                  ? 'object-contain'
+                  : 'object-cover transition-transform duration-500 group-hover:scale-105'
+              }
               referrerPolicy='no-referrer'
               loading='lazy'
               onLoad={(e) => {
@@ -518,57 +520,66 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
             />
 
             {/* Overlay */}
-            <div className='absolute inset-0 bg-linear-to-t from-black/80 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300' />
+            <div className='absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300' />
 
             {/* Hover Play Button */}
             {config.showPlayButton && (
               <div className='absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-300 delay-75 scale-90 group-hover:scale-100'>
-                <PlayCircleIcon
-                  size={50}
-                  strokeWidth={0.8}
-                  className='text-white hover:fill-green-500 hover:scale-110 transition-transform'
-                />
+                <div className='w-12 h-12 bg-brand-500/90 rounded-full flex items-center justify-center shadow-lg shadow-brand-500/35 hover:scale-110 hover:bg-brand-500 transition-all duration-200'>
+                  <svg
+                    className='w-6 h-6 text-white translate-x-[1px]'
+                    fill='currentColor'
+                    viewBox='0 0 24 24'
+                  >
+                    <path d='M8 5v14l11-7z' />
+                  </svg>
+                </div>
               </div>
             )}
 
             {/* Badges - Top Left */}
             {config.showYear && year && year !== 'unknown' && (
-              <div className='absolute top-2 left-2 bg-black/60 text-white text-xs px-1.5 py-0.5 rounded backdrop-blur-md'>
+              <div className='absolute top-2 left-2 bg-slate-900/75 text-white text-[10px] font-medium px-2 py-0.5 rounded-md backdrop-blur-md border border-white/10 z-10 shadow-sm'>
                 {year}
               </div>
             )}
 
             {/* Badges - Top Right */}
-            <div className='absolute top-2 right-2 flex flex-col items-end gap-1'>
+            <div className='absolute top-2 right-2 flex flex-col items-end gap-1.5 z-10'>
               {config.showRating && rate && (
-                <div className='bg-pink-500 text-white text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center shadow-sm'>
+                <div className='bg-gradient-to-tr from-pink-500 to-rose-600 text-white text-[10px] font-black w-6.5 h-6.5 rounded-full flex items-center justify-center shadow-lg shadow-pink-500/25 border border-white/10'>
                   {rate}
                 </div>
               )}
               {actualEpisodes && actualEpisodes > 1 && (
-                <div className='bg-green-600 text-white text-xs font-semibold px-1.5 py-0.5 rounded shadow-sm'>
+                <div className='bg-emerald-600/90 backdrop-blur-md text-white text-[10px] font-bold px-2 py-0.5 rounded-md shadow-md border border-white/10'>
                   {currentEpisode
                     ? `${currentEpisode}/${actualEpisodes}`
-                    : actualEpisodes}
+                    : `${actualEpisodes}集`}
                 </div>
               )}
             </div>
 
             {/* Actions - Bottom Right */}
-            <div className='absolute bottom-2 right-2 flex gap-2 opacity-0 translate-y-2 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-300'>
+            <div className='absolute bottom-2.5 right-2.5 flex gap-2 opacity-0 translate-y-2 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-300 z-10'>
               {config.showCheckCircle && (
-                <Trash2
+                <button
                   onClick={handleDeleteRecord}
-                  size={18}
-                  className='text-white hover:text-red-500'
-                />
+                  className='p-1.5 rounded-full bg-slate-950/80 hover:bg-red-600 text-white hover:text-white transition-all shadow-md border border-white/10'
+                >
+                  <Trash2 size={14} />
+                </button>
               )}
               {config.showHeart && from !== 'search' && (
-                <Heart
+                <button
                   onClick={handleToggleFavorite}
-                  size={18}
-                  className={`hover:scale-110 transition-transform ${favorited ? 'fill-red-600 text-red-600' : 'text-white hover:text-red-400'}`}
-                />
+                  className='p-1.5 rounded-full bg-slate-950/80 hover:bg-slate-900 text-white transition-all shadow-md border border-white/10'
+                >
+                  <Heart
+                    size={14}
+                    className={`transition-transform duration-200 active:scale-125 ${favorited ? 'fill-red-500 text-red-500' : 'text-white'}`}
+                  />
+                </button>
               )}
             </div>
 
@@ -576,8 +587,8 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
             {isAggregate &&
               dynamicSourceNames &&
               dynamicSourceNames.length > 0 && (
-                <div className='absolute bottom-2 left-2 opacity-0 group-hover:opacity-100 transition-opacity'>
-                  <div className='bg-gray-800/80 backdrop-blur-md text-white text-xs font-bold px-1.5 py-0.5 rounded-md flex items-center justify-center'>
+                <div className='absolute bottom-2.5 left-2.5 opacity-0 group-hover:opacity-100 transition-opacity z-10'>
+                  <div className='bg-slate-900/85 backdrop-blur-md text-white text-[10px] font-bold px-2 py-0.5 rounded-md border border-white/10 flex items-center justify-center shadow-sm'>
                     {new Set(dynamicSourceNames).size} 源
                   </div>
                 </div>
@@ -586,29 +597,29 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
 
           {/* Progress Bar */}
           {config.showProgress && progress > 0 && (
-            <div className='mt-1 h-1 w-full bg-gray-200 rounded-full overflow-hidden'>
+            <div className='mt-2 h-1 w-full bg-slate-200/50 dark:bg-slate-800/50 rounded-full overflow-hidden'>
               <div
-                className='h-full bg-green-500'
+                className='h-full bg-gradient-to-r from-brand-400 to-emerald-500'
                 style={{ width: `${progress}%` }}
               />
             </div>
           )}
 
           {/* Metadata */}
-          <div className='mt-2 text-center'>
+          <div className='mt-2.5 text-center px-1'>
             <div className='relative group/title'>
-              <span className='block text-sm font-semibold truncate text-gray-900 dark:text-gray-100 group-hover:text-green-600 dark:group-hover:text-green-400 transition-colors'>
+              <span className='block text-xs sm:text-sm font-semibold truncate text-slate-850 dark:text-slate-200 group-hover:text-green-600 dark:group-hover:text-green-400 transition-colors'>
                 {convert(title)}
               </span>
-              <div className='absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 invisible group-hover/title:opacity-100 group-hover/title:visible transition-all delay-500 whitespace-nowrap z-50 pointer-events-none'>
+              <div className='absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-slate-900 text-white text-xs rounded-lg opacity-0 invisible group-hover/title:opacity-100 group-hover/title:visible transition-all delay-500 whitespace-nowrap z-50 pointer-events-none border border-slate-800 shadow-xl'>
                 {convert(title)}
               </div>
             </div>
 
             {config.showSourceName && source_name && (
-              <div className='mt-1 text-xs text-gray-500 dark:text-gray-400 truncate'>
+              <div className='mt-1 text-[11px] text-slate-500 dark:text-slate-400 truncate flex items-center justify-center gap-1'>
                 {origin === 'live' && (
-                  <Radio size={10} className='inline mr-1' />
+                  <Radio size={10} className='text-red-500 animate-pulse' />
                 )}
                 {convert(source_name)}
               </div>

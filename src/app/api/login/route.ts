@@ -74,7 +74,7 @@ export async function POST(req: NextRequest) {
           path: '/',
           expires: new Date(0),
           sameSite: 'lax',
-          httpOnly: false,
+          httpOnly: true,
           secure: process.env.NODE_ENV === 'production',
         });
         return response;
@@ -147,7 +147,7 @@ export async function POST(req: NextRequest) {
         path: '/',
         expires,
         sameSite: 'lax',
-        httpOnly: false, // PWA compabitility
+        httpOnly: true,
         secure: isSecure,
       });
 
@@ -223,7 +223,7 @@ export async function POST(req: NextRequest) {
         path: '/',
         expires,
         sameSite: 'lax',
-        httpOnly: false,
+        httpOnly: true,
         secure: isSecure,
       });
 
@@ -293,7 +293,7 @@ export async function POST(req: NextRequest) {
         path: '/',
         expires,
         sameSite: 'lax',
-        httpOnly: false,
+        httpOnly: true,
         secure:
           process.env.NODE_ENV === 'production' &&
           process.env.DISABLE_SECURE_COOKIES !== 'true',

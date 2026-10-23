@@ -67,46 +67,124 @@ interface Point2D {
 }
 
 // ========================================
-// Configuration & Magic Palette
+// Configuration & Naturalistic Species
 // ========================================
 
-const MAGIC = {
-  palettes: [
-    ['#0A1628', '#1E90FF', '#00FFFF'],
-    ['#0D1B2A', '#3A86FF', '#7DF9FF'],
-    ['#1A1A3E', '#4169E1', '#00BFFF'],
-    ['#1A0A2E', '#9B59B6', '#E056FD'],
-    ['#2D1B4E', '#8E44AD', '#DDA0DD'],
-    ['#1F0F3D', '#6C3483', '#BB8FCE'],
-    ['#2A0A1A', '#E91E63', '#FF69B4'],
-    ['#3D0F2A', '#FF1493', '#FFB6C1'],
-    ['#0A2818', '#00C853', '#69F0AE'],
-    ['#0F3D1A', '#2ECC71', '#7DCEA0'],
-    ['#2A1A0A', '#FFA500', '#FFD700'],
-    ['#3D2A0F', '#F39C12', '#F7DC6F'],
-    ['#0A2828', '#00CED1', '#40E0D0'],
-    ['#2A0A0A', '#E74C3C', '#FF6B6B'],
-  ],
-  glowOuter: 20,
-  glowInner: 12,
-  trailLen: 16,
-  trailAlpha: 0.25,
-};
+interface Marking {
+  x: number; // wing-local coords (same frame as WING_VERTICES)
+  y: number;
+  r: number; // relative dot radius
+  color: string;
+}
+
+interface Species {
+  name: string;
+  wingInner: string; // near the body
+  wingOuter: string; // wing tip / edge
+  border: string; // dark outline + venation
+  borderWidth: number; // * size
+  body: string; // thorax / abdomen / antennae
+  alpha: number; // wing translucency
+  veins: boolean;
+  markings: Marking[];
+}
+
+// Real-species coloring. Approximate but recognizable — natural pigments,
+// no neon. Each butterfly is randomly assigned one of these at spawn.
+const SPECIES: Species[] = [
+  {
+    name: 'monarch',
+    wingInner: '#D35400',
+    wingOuter: '#E67E22',
+    border: '#1A1A1A',
+    borderWidth: 0.18,
+    body: '#1A1A1A',
+    alpha: 0.95,
+    veins: true,
+    markings: [
+      { x: 11, y: -8, r: 0.9, color: '#FFFFFF' },
+      { x: 12.5, y: -5, r: 0.8, color: '#FFFFFF' },
+      { x: 12, y: 6, r: 0.9, color: '#FFFFFF' },
+      { x: 8, y: 12, r: 0.9, color: '#FFFFFF' },
+    ],
+  },
+  {
+    name: 'blue-morpho',
+    wingInner: '#1E88E5',
+    wingOuter: '#90CAF9',
+    border: '#3E2723',
+    borderWidth: 0.22,
+    body: '#2E2620',
+    alpha: 0.96,
+    veins: false,
+    markings: [
+      { x: 12, y: -6, r: 0.6, color: '#ECEFF1' },
+      { x: 11, y: 8, r: 0.6, color: '#ECEFF1' },
+    ],
+  },
+  {
+    name: 'tiger-swallowtail',
+    wingInner: '#F9C513',
+    wingOuter: '#FFEB3B',
+    border: '#1A1A1A',
+    borderWidth: 0.2,
+    body: '#1A1A1A',
+    alpha: 0.95,
+    veins: true,
+    markings: [
+      { x: 5, y: -6, r: 0.7, color: '#161616' },
+      { x: 7, y: -2, r: 0.7, color: '#161616' },
+      { x: 6, y: 4, r: 0.7, color: '#161616' },
+      { x: 9, y: 12, r: 0.8, color: '#1565C0' },
+      { x: 6, y: 13, r: 0.7, color: '#E64A19' },
+    ],
+  },
+  {
+    name: 'cabbage-white',
+    wingInner: '#FFFFFF',
+    wingOuter: '#F0F0F0',
+    border: '#D7D2C8',
+    borderWidth: 0.14,
+    body: '#5D5048',
+    alpha: 0.9,
+    veins: false,
+    markings: [
+      { x: 11, y: -7, r: 1.1, color: '#9E9E9E' },
+      { x: 9, y: 2, r: 0.7, color: '#3A3A3A' },
+    ],
+  },
+  {
+    name: 'red-admiral',
+    wingInner: '#2B1A12',
+    wingOuter: '#1A120C',
+    border: '#0E0A07',
+    borderWidth: 0.16,
+    body: '#15100B',
+    alpha: 0.95,
+    veins: false,
+    markings: [
+      { x: 8, y: -4, r: 1.0, color: '#E53935' },
+      { x: 6, y: 2, r: 0.9, color: '#E53935' },
+      { x: 9, y: 7, r: 0.9, color: '#E53935' },
+      { x: 12, y: -7, r: 0.6, color: '#FFFFFF' },
+      { x: 11, y: -9, r: 0.5, color: '#FFFFFF' },
+    ],
+  },
+];
 
 const CONFIG = {
-  BASE_SPEED: 80,
-  MAX_SPEED_MULT: 1.6,
+  BASE_SPEED: 60, // gentler than the old magical darting (was 80)
+  MAX_SPEED_MULT: 1.4,
   TURN_SPEED: 5.0,
   DRAG: 0.985,
   FLAP_MIN: 8,
   FLAP_MAX: 15,
   FLAP_AMP: Math.PI / 2.2,
-  LIFT_IMPULSE: 90,
+  LIFT_IMPULSE: 85,
   GRAVITY: 60,
   GLIDE_RATE: 0.4,
-  SPARKLE_RATE: 12.0,
-  SIZE_MIN: 2,
-  SIZE_MAX: 3,
+  SIZE_MIN: 2.5,
+  SIZE_MAX: 3.5,
 };
 
 const WING_VERTICES: Point3D[] = [
@@ -140,11 +218,11 @@ interface Butterfly {
   isGliding: boolean;
   glideTimer: number;
   preferredHeading: number;
-  palette: string[];
-  trail: Point2D[];
-  trailHead: number;
+  species: Species;
   rWing2D: Point2D[];
   lWing2D: Point2D[];
+  rMarks2D: Point2D[];
+  lMarks2D: Point2D[];
   head2D: Point2D;
   thorax2D: Point2D;
   abdomen2D: Point2D;
@@ -173,6 +251,7 @@ const MagicalButterfly: React.FC<{
       Array.from({ length: count }).map((_, i) => {
         const startX = Math.random() * window.innerWidth;
         const startY = Math.random() * window.innerHeight;
+        const species = SPECIES[Math.floor(Math.random() * SPECIES.length)];
         return {
           id: i,
           x: startX,
@@ -195,15 +274,11 @@ const MagicalButterfly: React.FC<{
           isGliding: false,
           glideTimer: 0,
           preferredHeading: Math.random() * Math.PI * 2,
-          palette:
-            MAGIC.palettes[Math.floor(Math.random() * MAGIC.palettes.length)],
-          trail: Array.from({ length: MAGIC.trailLen }).map(() => ({
-            x: startX,
-            y: startY,
-          })),
-          trailHead: 0,
+          species,
           rWing2D: WING_VERTICES.map(() => ({ x: 0, y: 0 })),
           lWing2D: WING_VERTICES.map(() => ({ x: 0, y: 0 })),
+          rMarks2D: species.markings.map(() => ({ x: 0, y: 0 })),
+          lMarks2D: species.markings.map(() => ({ x: 0, y: 0 })),
           head2D: { x: 0, y: 0 },
           thorax2D: { x: 0, y: 0 },
           abdomen2D: { x: 0, y: 0 },
@@ -270,63 +345,25 @@ const MagicalButterfly: React.FC<{
       return z;
     };
 
-    const drawDiamondStar = (
-      cx: number,
-      cy: number,
-      r: number,
-      color: string,
-    ) => {
-      ctx.beginPath();
-      ctx.moveTo(cx, cy - r);
-      ctx.quadraticCurveTo(cx + r * 0.1, cy - r * 0.1, cx + r, cy);
-      ctx.quadraticCurveTo(cx + r * 0.1, cy + r * 0.1, cx, cy + r);
-      ctx.quadraticCurveTo(cx - r * 0.1, cy + r * 0.1, cx - r, cy);
-      ctx.quadraticCurveTo(cx - r * 0.1, cy - r * 0.1, cx, cy - r);
-      ctx.closePath();
-      ctx.fillStyle = color;
-      ctx.fill();
-    };
-
-    const drawTrail = (b: Butterfly) => {
+    // Soft grounding shadow under the butterfly (depth cue, replaces the glow).
+    const drawShadow = (b: Butterfly) => {
+      const sx = b.x + b.size * 1.5;
+      const sy = b.y + b.size * 4;
+      const rx = b.size * 6;
+      const ry = b.size * 2.2;
+      const g = ctx.createRadialGradient(sx, sy, 0, sx, sy, rx);
+      g.addColorStop(0, 'rgba(0,0,0,0.10)');
+      g.addColorStop(1, 'rgba(0,0,0,0)');
       ctx.save();
-      ctx.globalCompositeOperation = 'lighter';
-      for (let i = 0; i < b.trail.length - 1; i++) {
-        const idx0 = (b.trailHead - 1 - i + b.trail.length) % b.trail.length;
-        const idx1 = (idx0 - 1 + b.trail.length) % b.trail.length;
-        const p0 = b.trail[idx0],
-          p1 = b.trail[idx1];
-        if (Math.abs(p0.x - p1.x) > 100 || Math.abs(p0.y - p1.y) > 100)
-          continue;
-        const age = i / b.trail.length;
-        ctx.beginPath();
-        ctx.moveTo(p0.x, p0.y);
-        ctx.lineTo(p1.x, p1.y);
-        ctx.strokeStyle = b.palette[1];
-        ctx.shadowColor = b.palette[2];
-        ctx.shadowBlur = 8 * (1 - age);
-        ctx.lineWidth = b.size * 0.35 * (1 - age);
-        ctx.globalAlpha = MAGIC.trailAlpha * (1 - age);
-        ctx.stroke();
-      }
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.ellipse(sx, sy, rx, ry, 0, 0, Math.PI * 2);
+      ctx.fill();
       ctx.restore();
     };
 
-    const drawWingMagical = (
-      points: Point2D[],
-      palette: string[],
-      size: number,
-    ) => {
-      const mx = (points[2].x + points[6].x) * 0.5,
-        my = (points[2].y + points[6].y) * 0.5;
-      const g = ctx.createRadialGradient(mx, my, 1, mx, my, size * 5.0);
-      g.addColorStop(0, palette[0]);
-      g.addColorStop(0.5, palette[1]);
-      g.addColorStop(1, palette[2]);
-      ctx.save();
-      ctx.globalCompositeOperation = 'lighter';
-      ctx.shadowBlur = MAGIC.glowOuter;
-      ctx.shadowColor = palette[1];
-      ctx.fillStyle = g;
+    // Trace the wing silhouette (shared by fill + stroke).
+    const traceWing = (points: Point2D[]) => {
       ctx.beginPath();
       ctx.moveTo(points[0].x, points[0].y);
       ctx.bezierCurveTo(
@@ -370,21 +407,73 @@ const MagicalButterfly: React.FC<{
         points[0].y,
       );
       ctx.closePath();
+    };
+
+    const drawWingNatural = (
+      points: Point2D[],
+      marks: Point2D[],
+      species: Species,
+      size: number,
+    ) => {
+      ctx.save();
+      ctx.globalAlpha = species.alpha;
+      ctx.lineJoin = 'round';
+
+      // Body->edge gradient using natural pigments (no additive glow).
+      const g = ctx.createLinearGradient(
+        points[0].x,
+        points[0].y,
+        points[3].x,
+        points[3].y,
+      );
+      g.addColorStop(0, species.wingInner);
+      g.addColorStop(1, species.wingOuter);
+
+      traceWing(points);
+      ctx.fillStyle = g;
       ctx.fill();
-      ctx.shadowBlur = MAGIC.glowInner;
-      ctx.shadowColor = palette[0];
-      ctx.lineWidth = size * 0.1;
-      ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+
+      // Clip markings/veins to the wing so they never bleed past the edge.
+      ctx.save();
+      traceWing(points);
+      ctx.clip();
+
+      if (species.veins) {
+        ctx.globalAlpha = species.alpha * 0.45;
+        ctx.strokeStyle = species.border;
+        ctx.lineWidth = Math.max(0.4, size * 0.05);
+        const root = points[0];
+        for (const i of [2, 3, 4, 6]) {
+          ctx.beginPath();
+          ctx.moveTo(root.x, root.y);
+          ctx.lineTo(points[i].x, points[i].y);
+          ctx.stroke();
+        }
+      }
+
+      ctx.globalAlpha = species.alpha;
+      for (let i = 0; i < marks.length; i++) {
+        const m = marks[i];
+        const spec = species.markings[i];
+        ctx.beginPath();
+        ctx.fillStyle = spec.color;
+        ctx.arc(m.x, m.y, Math.max(0.8, spec.r * size * 0.55), 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+
+      // Dark outline last so the wing reads crisp against the page.
+      ctx.globalAlpha = species.alpha;
+      ctx.strokeStyle = species.border;
+      ctx.lineWidth = Math.max(0.6, size * species.borderWidth);
+      traceWing(points);
       ctx.stroke();
       ctx.restore();
     };
 
     const drawBody = (b: Butterfly) => {
       ctx.save();
-      ctx.globalCompositeOperation = 'lighter';
-      ctx.shadowBlur = 10;
-      ctx.shadowColor = b.palette[2];
-      ctx.fillStyle = b.palette[0];
+      ctx.fillStyle = b.species.body;
       const hx = b.head2D.x,
         hy = b.head2D.y,
         thx = b.thorax2D.x,
@@ -413,18 +502,25 @@ const MagicalButterfly: React.FC<{
         Math.PI * 2,
       );
       ctx.fill();
-      ctx.fillStyle = '#FFF';
+      // Head
       ctx.beginPath();
       ctx.arc(hx, hy, b.size * 0.2, 0, Math.PI * 2);
       ctx.fill();
-      ctx.strokeStyle = '#FFF';
-      ctx.lineWidth = b.size * 0.05;
+      // Antennae (thin, dark, with a slight club tip)
+      ctx.strokeStyle = b.species.body;
+      ctx.lineWidth = Math.max(0.4, b.size * 0.06);
+      ctx.lineCap = 'round';
       ctx.beginPath();
       ctx.moveTo(hx, hy);
       ctx.lineTo(b.antL2D.x, b.antL2D.y);
       ctx.moveTo(hx, hy);
       ctx.lineTo(b.antR2D.x, b.antR2D.y);
       ctx.stroke();
+      ctx.fillStyle = b.species.body;
+      ctx.beginPath();
+      ctx.arc(b.antL2D.x, b.antL2D.y, b.size * 0.08, 0, Math.PI * 2);
+      ctx.arc(b.antR2D.x, b.antR2D.y, b.size * 0.08, 0, Math.PI * 2);
+      ctx.fill();
       ctx.restore();
     };
 
@@ -582,15 +678,56 @@ const MagicalButterfly: React.FC<{
         sY,
         b.antR2D,
       );
-      drawTrail(b);
+      // Project species markings into each wing's frame so they flap with it.
+      for (let i = 0; i < b.species.markings.length; i++) {
+        const m = b.species.markings[i];
+        transformAndProject(
+          b.x,
+          b.y,
+          b.size,
+          m.x,
+          m.y,
+          0,
+          false,
+          cW,
+          sW,
+          cR,
+          sR,
+          cP,
+          sP,
+          cY,
+          sY,
+          b.rMarks2D[i],
+        );
+        transformAndProject(
+          b.x,
+          b.y,
+          b.size,
+          m.x,
+          m.y,
+          0,
+          true,
+          cW,
+          sW,
+          cR,
+          sR,
+          cP,
+          sP,
+          cY,
+          sY,
+          b.lMarks2D[i],
+        );
+      }
+
+      drawShadow(b);
       if (rZSum > lZSum) {
-        drawWingMagical(b.rWing2D, b.palette, b.size);
+        drawWingNatural(b.rWing2D, b.rMarks2D, b.species, b.size);
         drawBody(b);
-        drawWingMagical(b.lWing2D, b.palette, b.size);
+        drawWingNatural(b.lWing2D, b.lMarks2D, b.species, b.size);
       } else {
-        drawWingMagical(b.lWing2D, b.palette, b.size);
+        drawWingNatural(b.lWing2D, b.lMarks2D, b.species, b.size);
         drawBody(b);
-        drawWingMagical(b.rWing2D, b.palette, b.size);
+        drawWingNatural(b.rWing2D, b.rMarks2D, b.species, b.size);
       }
     };
 
@@ -630,17 +767,10 @@ const MagicalButterfly: React.FC<{
       lastDpr = dpr;
 
       const noise = noiseRef.current!;
-      const glideProb = 1 - Math.exp(-CONFIG.GLIDE_RATE * dt),
-        sparkleProb = 1 - Math.exp(-CONFIG.SPARKLE_RATE * dt);
+      const glideProb = 1 - Math.exp(-CONFIG.GLIDE_RATE * dt);
 
       // --- PHYSICS UPDATE (runs at 30fps along with draw) ---
       butterfliesRef.current.forEach((b) => {
-        const lastP =
-          b.trail[(b.trailHead - 1 + b.trail.length) % b.trail.length];
-        if ((b.x - lastP.x) ** 2 + (b.y - lastP.y) ** 2 > 4) {
-          b.trail[b.trailHead] = { x: b.x, y: b.y };
-          b.trailHead = (b.trailHead + 1) % b.trail.length;
-        }
         const t = now * 0.001;
         const n1 = noise.noise2D(b.noiseOffsetX + t * 0.3, b.id * 10.5);
         const dYaw = b.preferredHeading + n1 * 1.5 + Math.PI / 2;
@@ -685,19 +815,6 @@ const MagicalButterfly: React.FC<{
       // --- DRAW ---
       ctx.clearRect(0, 0, w, h);
       butterfliesRef.current.forEach((b) => {
-        if (Math.random() < sparkleProb) {
-          ctx.save();
-          ctx.globalCompositeOperation = 'lighter';
-          ctx.shadowColor = b.palette[2];
-          ctx.shadowBlur = 10;
-          drawDiamondStar(
-            b.x + (Math.random() - 0.5) * b.size * 4,
-            b.y + (Math.random() - 0.5) * b.size * 4,
-            2 + Math.random() * 3,
-            '#FFF',
-          );
-          ctx.restore();
-        }
         renderButterfly(b);
       });
       rafRef.current = requestAnimationFrame(loop);

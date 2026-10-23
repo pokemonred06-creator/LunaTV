@@ -90,7 +90,10 @@ async function main() {
             channel: chName,
             reason: result.reason,
           });
-          prev.reasons.set(result.reason, (prev.reasons.get(result.reason) || 0) + 1);
+          prev.reasons.set(
+            result.reason,
+            (prev.reasons.get(result.reason) || 0) + 1,
+          );
         }
         perChannel.set(key, prev);
       }
@@ -101,16 +104,23 @@ async function main() {
       tested: sampled.length * rounds,
       pass,
       fail,
-      passRate: sampled.length * rounds
-        ? `${((pass / (sampled.length * rounds)) * 100).toFixed(1)}%`
-        : 'n/a',
+      passRate:
+        sampled.length * rounds
+          ? `${((pass / (sampled.length * rounds)) * 100).toFixed(1)}%`
+          : 'n/a',
     });
   }
 
   printSummary(sourceSummaries, failures, perChannel, stableTop, rounds);
 }
 
-async function checkChannel(baseUrl, sourceKey, channel, cookieHeader, timeout) {
+async function checkChannel(
+  baseUrl,
+  sourceKey,
+  channel,
+  cookieHeader,
+  timeout,
+) {
   const rawUrl = channel?.url;
   if (!rawUrl) return { ok: false, reason: 'Missing channel URL' };
 
@@ -124,7 +134,10 @@ async function checkChannel(baseUrl, sourceKey, channel, cookieHeader, timeout) 
       true,
     );
     if (!precheck?.success || !precheck?.type) {
-      return { ok: false, reason: `precheck failed: ${precheck?.error || 'unknown'}` };
+      return {
+        ok: false,
+        reason: `precheck failed: ${precheck?.error || 'unknown'}`,
+      };
     }
 
     const proxyType = precheck.type;
@@ -139,7 +152,10 @@ async function checkChannel(baseUrl, sourceKey, channel, cookieHeader, timeout) 
 
     if (!res.ok) {
       const text = await safeReadText(res);
-      return { ok: false, reason: `proxy ${res.status}${text ? `: ${truncate(text, 80)}` : ''}` };
+      return {
+        ok: false,
+        reason: `proxy ${res.status}${text ? `: ${truncate(text, 80)}` : ''}`,
+      };
     }
 
     if (proxyType === 'm3u8') {
@@ -169,7 +185,9 @@ async function loginAndGetCookies(baseUrl, user, pass, timeout) {
   });
   if (!loginRes.ok) {
     const body = await safeReadText(loginRes);
-    throw new Error(`Login failed ${loginRes.status}${body ? `: ${truncate(body, 120)}` : ''}`);
+    throw new Error(
+      `Login failed ${loginRes.status}${body ? `: ${truncate(body, 120)}` : ''}`,
+    );
   }
   const setCookies = loginRes.headers.getSetCookie?.() || [];
   const cookies = setCookies.map((c) => c.split(';')[0]).filter(Boolean);
@@ -179,7 +197,13 @@ async function loginAndGetCookies(baseUrl, user, pass, timeout) {
   return cookies.join('; ');
 }
 
-async function fetchJson(url, cookieHeader, timeout, label, allowErrorJson = false) {
+async function fetchJson(
+  url,
+  cookieHeader,
+  timeout,
+  label,
+  allowErrorJson = false,
+) {
   const res = await fetch(url, {
     headers: {
       Cookie: cookieHeader,
@@ -194,7 +218,9 @@ async function fetchJson(url, cookieHeader, timeout, label, allowErrorJson = fal
     data = null;
   }
   if (!res.ok && !allowErrorJson) {
-    throw new Error(`${label} failed ${res.status}${text ? `: ${truncate(text, 120)}` : ''}`);
+    throw new Error(
+      `${label} failed ${res.status}${text ? `: ${truncate(text, 120)}` : ''}`,
+    );
   }
   return data;
 }
@@ -234,17 +260,29 @@ async function safeReadText(res) {
   }
 }
 
-function printSummary(sourceSummaries, failures, perChannel, topN, roundsCount) {
+function printSummary(
+  sourceSummaries,
+  failures,
+  perChannel,
+  topN,
+  roundsCount,
+) {
   const totalTested = sourceSummaries.reduce((n, s) => n + s.tested, 0);
   const totalPass = sourceSummaries.reduce((n, s) => n + s.pass, 0);
   const totalFail = sourceSummaries.reduce((n, s) => n + s.fail, 0);
-  const overall = totalTested ? `${((totalPass / totalTested) * 100).toFixed(1)}%` : 'n/a';
+  const overall = totalTested
+    ? `${((totalPass / totalTested) * 100).toFixed(1)}%`
+    : 'n/a';
 
-  console.log(`\nOverall: ${totalPass}/${totalTested} pass (${overall}), ${totalFail} fail\n`);
+  console.log(
+    `\nOverall: ${totalPass}/${totalTested} pass (${overall}), ${totalFail} fail\n`,
+  );
   console.log('| Source | Tested | Pass | Fail | Pass Rate |');
   console.log('|---|---:|---:|---:|---:|');
   for (const s of sourceSummaries) {
-    console.log(`| ${s.source} | ${s.tested} | ${s.pass} | ${s.fail} | ${s.passRate} |`);
+    console.log(
+      `| ${s.source} | ${s.tested} | ${s.pass} | ${s.fail} | ${s.passRate} |`,
+    );
   }
 
   if (failures.length) {
@@ -252,14 +290,18 @@ function printSummary(sourceSummaries, failures, perChannel, topN, roundsCount) 
     console.log('| Source | Channel | Reason |');
     console.log('|---|---|---|');
     for (const f of failures) {
-      console.log(`| ${escapePipe(f.source)} | ${escapePipe(f.channel)} | ${escapePipe(f.reason)} |`);
+      console.log(
+        `| ${escapePipe(f.source)} | ${escapePipe(f.channel)} | ${escapePipe(f.reason)} |`,
+      );
     }
   }
 
   const ranked = Array.from(perChannel.values())
     .map((x) => {
       const total = x.pass + x.fail;
-      const topReason = Array.from(x.reasons.entries()).sort((a, b) => b[1] - a[1])[0];
+      const topReason = Array.from(x.reasons.entries()).sort(
+        (a, b) => b[1] - a[1],
+      )[0];
       return {
         source: x.source,
         channel: x.channel,
@@ -280,7 +322,9 @@ function printSummary(sourceSummaries, failures, perChannel, topN, roundsCount) 
   console.log('| Rank | Source | Channel | Pass | Fail | Pass Rate |');
   console.log('|---:|---|---|---:|---:|---:|');
   ranked.slice(0, topN).forEach((r, idx) => {
-    console.log(`| ${idx + 1} | ${escapePipe(r.source)} | ${escapePipe(r.channel)} | ${r.pass} | ${r.fail} | ${r.rate}% |`);
+    console.log(
+      `| ${idx + 1} | ${escapePipe(r.source)} | ${escapePipe(r.channel)} | ${r.pass} | ${r.fail} | ${r.rate}% |`,
+    );
   });
 
   const unstable = ranked
@@ -292,7 +336,9 @@ function printSummary(sourceSummaries, failures, perChannel, topN, roundsCount) 
     console.log('| Rank | Source | Channel | Pass | Fail | Main Error |');
     console.log('|---:|---|---|---:|---:|---|');
     unstable.forEach((r, idx) => {
-      console.log(`| ${idx + 1} | ${escapePipe(r.source)} | ${escapePipe(r.channel)} | ${r.pass} | ${r.fail} | ${escapePipe(r.topReason)} |`);
+      console.log(
+        `| ${idx + 1} | ${escapePipe(r.source)} | ${escapePipe(r.channel)} | ${r.pass} | ${r.fail} | ${escapePipe(r.topReason)} |`,
+      );
     });
   }
 }

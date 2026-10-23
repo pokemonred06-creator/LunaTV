@@ -16,7 +16,9 @@ export class Canvas2DRenderer implements Renderer {
   } | null = null;
 
   // Constants (matching v9 config)
-  private readonly MAX_LENS_TRAILS = 80;
+  // Mobile (Canvas2D) uses a smaller budget for lens refraction — it's a per-trail
+  // canvas clipping pass which is the most expensive operation.
+  private readonly MAX_LENS_TRAILS = 40;
 
   constructor(private canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext('2d', { alpha: true, desynchronized: true });
@@ -69,7 +71,7 @@ export class Canvas2DRenderer implements Renderer {
     const { ctx, lensCtx } = this;
     if (!ctx || !lensCtx) return;
 
-    const { width, height, dpr, drops, trails, backgroundImage } = state;
+    const { width, height, dpr, drops, trails, dropsData, trailsData, backgroundImage } = state;
     const cw = this.canvas.width;
     const ch = this.canvas.height;
 
@@ -128,132 +130,143 @@ export class Canvas2DRenderer implements Renderer {
     ctx.save();
     ctx.globalCompositeOperation = 'destination-out';
     ctx.lineCap = 'round';
-    for (const tr of trails) {
-      ctx.globalAlpha = tr.life;
-      ctx.lineWidth = tr.w * 1.8;
-      ctx.beginPath();
-      ctx.moveTo(tr.x1, tr.y1);
-      ctx.lineTo(tr.x2, tr.y2);
-      ctx.stroke();
+    if (state.trailsData) {
+      const numTrails = state.trailsData.length / 6;
+      for (let i = 0; i < numTrails; i++) {
+        const off = i * 6;
+        const life = state.trailsData[off + 5];
+        const w = state.trailsData[off + 4];
+        const x1 = state.trailsData[off + 0];
+        const y1 = state.trailsData[off + 1];
+        const x2 = state.trailsData[off + 2];
+        const y2 = state.trailsData[off + 3];
+
+        ctx.globalAlpha = life;
+        ctx.lineWidth = w * 1.8;
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+      }
+    } else {
+      for (const tr of trails) {
+        ctx.globalAlpha = tr.life;
+        ctx.lineWidth = tr.w * 1.8;
+        ctx.beginPath();
+        ctx.moveTo(tr.x1, tr.y1);
+        ctx.lineTo(tr.x2, tr.y2);
+        ctx.stroke();
+      }
     }
     ctx.restore();
 
     // --- 4. Lens Refraction ---
-    if (this.texBuffer && trails.length > 0) {
-      const tex = this.texBuffer.canvas;
-      const startIndex = Math.max(0, trails.length - this.MAX_LENS_TRAILS);
+    // Dropped for trails: refraction on 1-2px lines is completely imperceptible
+    // but costs massive CPU fill rate from full-screen drawImage.
 
-      for (let i = startIndex; i < trails.length; i++) {
-        const tr = trails[i];
-        const a = tr.life;
-        if (a <= 0.08) continue;
+    // --- 5. Volumetric Trails ---
+    ctx.lineCap = 'round';
+    if (state.trailsData) {
+      const numTrails = state.trailsData.length / 6;
+      for (let i = 0; i < numTrails; i++) {
+        const off = i * 6;
+        const x1 = state.trailsData[off + 0];
+        const y1 = state.trailsData[off + 1];
+        const x2 = state.trailsData[off + 2];
+        const y2 = state.trailsData[off + 3];
+        const w = state.trailsData[off + 4];
+        const life = state.trailsData[off + 5];
 
-        const pad = (tr.w * 3 + 8) * dpr;
+        const dx = x2 - x1;
+        const dy = y2 - y1;
+        const len = Math.hypot(dx, dy) || 1;
+        const nx = -dy / len;
+        const ny = dx / len;
 
-        // Calculate scissor rect
-        let x0 = Math.floor(Math.min(tr.x1, tr.x2) * dpr - pad);
-        let y0 = Math.floor(Math.min(tr.y1, tr.y2) * dpr - pad);
-        let x1 = Math.ceil(Math.max(tr.x1, tr.x2) * dpr + pad);
-        let y1 = Math.ceil(Math.max(tr.y1, tr.y2) * dpr + pad);
+        // Dark edges
+        ctx.globalAlpha = life * 0.085;
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = w * 0.6;
+        const edge = w * 0.42;
+        ctx.beginPath();
+        ctx.moveTo(x1 + nx * edge, y1 + ny * edge);
+        ctx.lineTo(x2 + nx * edge, y2 + ny * edge);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(x1 - nx * edge, y1 - ny * edge);
+        ctx.lineTo(x2 - nx * edge, y2 - ny * edge);
+        ctx.stroke();
 
-        // PATCH: Clamp to bounds to prevent Safari spikes
-        x0 = Math.max(0, Math.min(x0, cw));
-        y0 = Math.max(0, Math.min(y0, ch));
-        x1 = Math.max(0, Math.min(x1, cw));
-        y1 = Math.max(0, Math.min(y1, ch));
-
-        const scW = x1 - x0;
-        const scH = y1 - y0;
-
-        if (scW <= 0 || scH <= 0) continue;
-
-        // A. Clear Scissor
-        lensCtx.setTransform(1, 0, 0, 1, 0, 0);
-        lensCtx.clearRect(x0, y0, scW, scH);
-
-        // B. Draw Refracted Texture
-        const shift = tr.w * 0.22 * a;
+        // White core
+        ctx.globalAlpha = life * 0.05;
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = w * 0.22;
+        const inner = w * 0.2;
+        ctx.beginPath();
+        ctx.moveTo(x1 + nx * inner, y1 + ny * inner);
+        ctx.lineTo(x2 + nx * inner, y2 + ny * inner);
+        ctx.stroke();
+      }
+    } else {
+      for (const tr of trails) {
         const dx = tr.x2 - tr.x1;
         const dy = tr.y2 - tr.y1;
         const len = Math.hypot(dx, dy) || 1;
         const nx = -dy / len;
         const ny = dx / len;
 
-        lensCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        lensCtx.save();
-        lensCtx.beginPath();
-        lensCtx.rect(x0 / dpr, y0 / dpr, scW / dpr, scH / dpr);
-        lensCtx.clip();
+        // Dark edges
+        ctx.globalAlpha = tr.life * 0.085;
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = tr.w * 0.6;
+        const edge = tr.w * 0.42;
+        ctx.beginPath();
+        ctx.moveTo(tr.x1 + nx * edge, tr.y1 + ny * edge);
+        ctx.lineTo(tr.x2 + nx * edge, tr.y2 + ny * edge);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(tr.x1 - nx * edge, tr.y1 - ny * edge);
+        ctx.lineTo(tr.x2 - nx * edge, tr.y2 - ny * edge);
+        ctx.stroke();
 
-        lensCtx.globalAlpha = 0.1 * a;
-        lensCtx.translate(nx * shift, ny * shift);
-        lensCtx.drawImage(tex, 0, 0, width, height);
-        lensCtx.restore();
-
-        // C. Mask to Trail Shape
-        lensCtx.globalCompositeOperation = 'destination-in';
-
-        // PATCH: Reset alpha for full masking strength
-        lensCtx.globalAlpha = 1;
-
-        lensCtx.lineWidth = tr.w * 1.35;
-        lensCtx.lineCap = 'round';
-        lensCtx.beginPath();
-        lensCtx.moveTo(tr.x1, tr.y1);
-        lensCtx.lineTo(tr.x2, tr.y2);
-        lensCtx.stroke();
-
-        // Reset
-        lensCtx.globalCompositeOperation = 'source-over';
-        lensCtx.globalAlpha = 1;
-
-        // D. Composite
-        ctx.save();
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.globalCompositeOperation = 'source-over';
-        ctx.globalAlpha = 1;
-        ctx.drawImage(this.lensCanvas, x0, y0, scW, scH, x0, y0, scW, scH);
-        ctx.restore();
+        // White core
+        ctx.globalAlpha = tr.life * 0.05;
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = tr.w * 0.22;
+        const inner = tr.w * 0.2;
+        ctx.beginPath();
+        ctx.moveTo(tr.x1 + nx * inner, tr.y1 + ny * inner);
+        ctx.lineTo(tr.x2 + nx * inner, tr.y2 + ny * inner);
+        ctx.stroke();
       }
     }
 
-    // --- 5. Volumetric Trails ---
-    ctx.lineCap = 'round';
-    for (const tr of trails) {
-      const dx = tr.x2 - tr.x1;
-      const dy = tr.y2 - tr.y1;
-      const len = Math.hypot(dx, dy) || 1;
-      const nx = -dy / len;
-      const ny = dx / len;
-
-      // Dark edges
-      ctx.globalAlpha = tr.life * 0.085;
-      ctx.strokeStyle = '#000000';
-      ctx.lineWidth = tr.w * 0.6;
-      const edge = tr.w * 0.42;
-      ctx.beginPath();
-      ctx.moveTo(tr.x1 + nx * edge, tr.y1 + ny * edge);
-      ctx.lineTo(tr.x2 + nx * edge, tr.y2 + ny * edge);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(tr.x1 - nx * edge, tr.y1 - ny * edge);
-      ctx.lineTo(tr.x2 - nx * edge, tr.y2 - ny * edge);
-      ctx.stroke();
-
-      // White core
-      ctx.globalAlpha = tr.life * 0.05;
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = tr.w * 0.22;
-      const inner = tr.w * 0.2;
-      ctx.beginPath();
-      ctx.moveTo(tr.x1 + nx * inner, tr.y1 + ny * inner);
-      ctx.lineTo(tr.x2 + nx * inner, tr.y2 + ny * inner);
-      ctx.stroke();
-    }
-
-    // --- 6. Draw Drops ---
-    for (const d of drops) {
-      const { x, y, r, stretch, seed, wobble, falling, vy } = d;
+       // --- 6. Draw Drops ---
+    const numDrops = state.dropsData ? state.dropsData.length / 9 : drops.length;
+    for (let i = 0; i < numDrops; i++) {
+      let x = 0, y = 0, r = 0, stretch = 0, vy = 0, seed = 0, wobble = 0, falling = false;
+      if (state.dropsData) {
+        const off = i * 9;
+        x = state.dropsData[off + 0];
+        y = state.dropsData[off + 1];
+        r = state.dropsData[off + 2];
+        stretch = state.dropsData[off + 3];
+        // vx = off + 4
+        vy = state.dropsData[off + 5];
+        seed = state.dropsData[off + 6];
+        wobble = state.dropsData[off + 7];
+        falling = state.dropsData[off + 8] > 0.5;
+      } else {
+        const d = drops[i];
+        x = d.x;
+        y = d.y;
+        r = d.r;
+        stretch = d.stretch;
+        vy = d.vy;
+        seed = d.seed;
+        wobble = d.wobble;
+        falling = d.falling;
+      }
 
       const vNorm = falling ? Math.min(1, Math.max(0, vy / 260)) : 0;
       const rx0 = r * (1 - stretch * 0.1);
@@ -262,9 +275,11 @@ export class Canvas2DRenderer implements Renderer {
       const tt = falling ? state.time * 2.0 : 0;
 
       ctx.beginPath();
-      const steps = 18;
+      // Use fewer polygon steps for small drops (they're tiny — aliasing unnoticeable)
+      const steps = r < 3 ? 10 : 18;
+      const TWO_PI = Math.PI * 2;
       for (let k = 0; k <= steps; k++) {
-        const a = (k / steps) * Math.PI * 2;
+        const a = (k / steps) * TWO_PI;
         const n =
           Math.sin(a * 3 + seed * 9 + tt) * 0.5 +
           Math.cos(a * 2 + seed * 4 + tt * 0.8) * 0.5;
@@ -288,28 +303,9 @@ export class Canvas2DRenderer implements Renderer {
       }
       ctx.closePath();
 
-      // Refraction inside drop
-      if (this.texBuffer && !falling) {
-        ctx.save();
-        ctx.clip();
-        const magnify = 1.085;
-        const refractY =
-          (falling ? vy * 0.0022 : 0) + (0.5 - wobble) * r * 0.16;
-        const refractX = (0.5 - seed) * r * 0.22;
-
-        ctx.translate(x, cy);
-        ctx.scale(magnify, magnify);
-        ctx.translate(-x + refractX, -cy + refractY);
-        ctx.drawImage(this.texBuffer.canvas, 0, 0, width, height);
-
-        ctx.globalCompositeOperation = 'multiply';
-        ctx.fillStyle = `rgba(0,0,0,0.1)`;
-        ctx.fillRect(x - r * 3, cy - r * 3, r * 6, r * 6);
-        ctx.restore();
-      } else {
-        ctx.fillStyle = 'rgba(255,255,255,0.15)';
-        ctx.fill();
-      }
+      // Refraction inside drop - disabled in Canvas2D to maintain high frame rate on low-power devices
+      ctx.fillStyle = 'rgba(255,255,255,0.18)';
+      ctx.fill();
 
       // Rim
       ctx.strokeStyle = 'rgba(10,10,10,0.3)';

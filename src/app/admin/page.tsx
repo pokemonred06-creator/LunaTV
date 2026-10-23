@@ -54,6 +54,30 @@ interface ApiErrorShape {
   error?: string;
 }
 
+interface PlaybackTelemetrySnapshot {
+  windowMinutes: number;
+  generatedAt: string;
+  sessions: number;
+  startupCompleted: number;
+  startupP50Ms: number;
+  startupP95Ms: number;
+  totalStalls: number;
+  totalRecoveries: number;
+  totalFatalErrors: number;
+  stallRatePerSession: number;
+  fatalRatePerSession: number;
+  recoveryRate: number;
+  liveSessions: number;
+  vodSessions: number;
+  healthScore: number;
+  topSeries: Array<{
+    seriesId: string;
+    sessions: number;
+    stalls: number;
+    fatalErrors: number;
+  }>;
+}
+
 // --- Helpers ---
 
 // Type guard
@@ -218,7 +242,7 @@ export default function AdminPage() {
 
   const handleLogout = async () => {
     // Fire and forget the logout request, then redirect immediately
-    await handleRequest('logout', '/api/auth/logout', 'POST');
+    await handleRequest('logout', '/api/logout', 'POST');
     router.push('/login');
   };
 
@@ -302,29 +326,29 @@ export default function AdminPage() {
   ];
 
   return (
-    <div className='container mx-auto p-4 max-w-6xl min-h-screen pb-20'>
+    <div className='container mx-auto p-3 sm:p-4 max-w-6xl min-h-screen pb-20'>
       {/* Header */}
-      <div className='flex flex-col md:flex-row justify-between items-center mb-8 gap-4'>
+      <div className='flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-3'>
         <div>
-          <h1 className='text-3xl font-bold text-gray-900 dark:text-white tracking-tight'>
+          <h1 className='text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white tracking-tight'>
             {convert('系统设置')}
           </h1>
-          <p className='text-sm text-gray-500 dark:text-gray-400 mt-1'>
+          <p className='text-xs sm:text-sm text-gray-500 dark:text-gray-400 mt-1'>
             {convert('管理您的站点配置、用户和内容源')}
           </p>
         </div>
-        <div className='flex items-center gap-3'>
+        <div className='flex items-center gap-2 self-end sm:self-auto'>
           <Link
             href='/'
-            className='flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800 transition-colors'
+            className='flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800 transition-colors'
           >
             <Home className='w-4 h-4' />
-            {convert('返回首页')}
+            <span className='hidden sm:inline'>{convert('返回首页')}</span>
           </Link>
           <button
             onClick={handleLogout}
             disabled={processingMap['logout']}
-            className='flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20 transition-colors disabled:opacity-50'
+            className='flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20 transition-colors disabled:opacity-50'
           >
             {processingMap['logout'] ? (
               <Loader2 className='w-4 h-4 animate-spin' />
@@ -336,8 +360,8 @@ export default function AdminPage() {
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className='flex mb-8 border-b dark:border-gray-700 overflow-x-auto scrollbar-hide'>
+      {/* Tabs — horizontally scrollable on mobile */}
+      <div className='flex mb-6 border-b dark:border-gray-700 overflow-x-auto scrollbar-hide -mx-3 sm:mx-0 px-3 sm:px-0'>
         {tabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
@@ -346,7 +370,7 @@ export default function AdminPage() {
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
               className={`
-                group flex items-center gap-2 px-6 py-3 border-b-2 transition-all whitespace-nowrap text-sm font-medium
+                group flex items-center gap-1.5 px-4 sm:px-6 py-3 border-b-2 transition-all whitespace-nowrap text-xs sm:text-sm font-medium
                 ${
                   isActive
                     ? 'border-blue-500 text-blue-600 dark:text-blue-400 dark:border-blue-400'
@@ -355,7 +379,7 @@ export default function AdminPage() {
               `}
             >
               <Icon
-                className={`w-4 h-4 ${isActive ? 'text-blue-500' : 'text-gray-400 group-hover:text-gray-600'}`}
+                className={`w-4 h-4 shrink-0 ${isActive ? 'text-blue-500' : 'text-gray-400 group-hover:text-gray-600'}`}
               />
               {convert(tab.name)}
             </button>
@@ -364,7 +388,7 @@ export default function AdminPage() {
       </div>
 
       {/* Content Area */}
-      <div className='bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 md:p-8 transition-all'>
+      <div className='bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-4 sm:p-6 md:p-8 transition-all'>
         {activeTab === 'base' && (
           <BaseConfigForm
             config={config}
@@ -445,6 +469,36 @@ const BaseConfigForm = ({
   processing,
   convert,
 }: BaseConfigProps) => {
+  const [telemetry, setTelemetry] = useState<PlaybackTelemetrySnapshot | null>(
+    null,
+  );
+  const [telemetryLoading, setTelemetryLoading] = useState(false);
+  const [telemetryWindow, setTelemetryWindow] = useState(60);
+
+  const fetchPlaybackTelemetry = useCallback(async () => {
+    setTelemetryLoading(true);
+    try {
+      const res = await fetch(
+        `/api/admin/playback_telemetry?windowMinutes=${telemetryWindow}`,
+        {
+          cache: 'no-store',
+        },
+      );
+      if (!res.ok) throw new Error('failed to fetch playback telemetry');
+      const data = (await res.json()) as PlaybackTelemetrySnapshot;
+      setTelemetry(data);
+    } catch (error) {
+      console.error('[Admin] fetch playback telemetry failed:', error);
+      toast.error(convert('获取播放质量指标失败'));
+    } finally {
+      setTelemetryLoading(false);
+    }
+  }, [convert, telemetryWindow]);
+
+  useEffect(() => {
+    fetchPlaybackTelemetry();
+  }, [fetchPlaybackTelemetry]);
+
   const handleChange = <K extends keyof SiteConfig>(
     key: K,
     value: SiteConfig[K],
@@ -641,6 +695,121 @@ const BaseConfigForm = ({
         </div>
       </div>
 
+      <SectionHeader title={convert('播放质量指标（最近1小时）')} />
+      <div className='space-y-4'>
+        <div className='flex items-center justify-end gap-3'>
+          <select
+            value={telemetryWindow}
+            onChange={(e) => setTelemetryWindow(Number(e.target.value) || 60)}
+            className='rounded-lg border border-gray-300 px-3 py-1.5 text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white'
+          >
+            <option value={15}>{convert('最近15分钟')}</option>
+            <option value={60}>{convert('最近1小时')}</option>
+            <option value={240}>{convert('最近4小时')}</option>
+            <option value={1440}>{convert('最近24小时')}</option>
+          </select>
+          <button
+            type='button'
+            onClick={fetchPlaybackTelemetry}
+            disabled={telemetryLoading}
+            className='inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700 disabled:opacity-50'
+          >
+            {telemetryLoading ? (
+              <Loader2 className='w-4 h-4 animate-spin' />
+            ) : (
+              <RefreshCw className='w-4 h-4' />
+            )}
+            {convert('刷新指标')}
+          </button>
+        </div>
+
+        {telemetry ? (
+          <>
+            <div className='grid grid-cols-1 md:grid-cols-3 gap-4'>
+              <MetricCard
+                label={convert('健康分')}
+                value={`${telemetry.healthScore}`}
+                hint={convert('越高越稳定（100最佳）')}
+              />
+              <MetricCard
+                label={convert('会话数')}
+                value={`${telemetry.sessions}`}
+                hint={`${convert('直播')}: ${telemetry.liveSessions} / ${convert('点播')}: ${telemetry.vodSessions}`}
+              />
+              <MetricCard
+                label={convert('启动耗时 p50 / p95')}
+                value={`${telemetry.startupP50Ms}ms / ${telemetry.startupP95Ms}ms`}
+                hint={`${convert('样本')}: ${telemetry.startupCompleted}`}
+              />
+              <MetricCard
+                label={convert('卡顿总数')}
+                value={`${telemetry.totalStalls}`}
+                hint={`${convert('每会话')}: ${telemetry.stallRatePerSession}`}
+              />
+              <MetricCard
+                label={convert('恢复总数')}
+                value={`${telemetry.totalRecoveries}`}
+                hint={`${convert('恢复率')}: ${(telemetry.recoveryRate * 100).toFixed(1)}%`}
+              />
+              <MetricCard
+                label={convert('致命错误总数')}
+                value={`${telemetry.totalFatalErrors}`}
+                hint={`${convert('每会话')}: ${telemetry.fatalRatePerSession}`}
+              />
+              <MetricCard
+                label={convert('更新时间')}
+                value={new Date(telemetry.generatedAt).toLocaleString()}
+                hint={`${convert('窗口')}: ${telemetry.windowMinutes}${convert('分钟')}`}
+              />
+            </div>
+            <div className='rounded-lg border border-gray-200 dark:border-gray-700 p-4 bg-gray-50 dark:bg-gray-900/30'>
+              <div className='text-sm font-semibold text-gray-900 dark:text-white mb-3'>
+                {convert('问题最多的剧集（Top 5）')}
+              </div>
+              {telemetry.topSeries.length > 0 ? (
+                <div className='overflow-x-auto -mx-4 px-4'>
+                  <table className='min-w-[360px] w-full text-left text-sm'>
+                    <thead>
+                      <tr className='text-gray-500 dark:text-gray-400'>
+                        <th className='py-1 pr-4'>{convert('Series')}</th>
+                        <th className='py-1 pr-4'>{convert('会话')}</th>
+                        <th className='py-1 pr-4'>{convert('卡顿')}</th>
+                        <th className='py-1'>{convert('致命错误')}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {telemetry.topSeries.map((item) => (
+                        <tr
+                          key={item.seriesId}
+                          className='border-t border-gray-200 dark:border-gray-700'
+                        >
+                          <td className='py-1 pr-4 max-w-[260px] truncate'>
+                            {item.seriesId}
+                          </td>
+                          <td className='py-1 pr-4'>{item.sessions}</td>
+                          <td className='py-1 pr-4'>{item.stalls}</td>
+                          <td className='py-1'>{item.fatalErrors}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className='text-sm text-gray-500 dark:text-gray-400'>
+                  {convert('当前窗口暂无异常数据')}
+                </div>
+              )}
+            </div>
+          </>
+        ) : (
+          <div className='text-sm text-gray-500 dark:text-gray-400'>
+            {telemetryLoading
+              ? convert('正在加载指标...')
+              : convert('暂无指标数据')}
+          </div>
+        )}
+      </div>
+
       <div className='flex justify-end pt-6'>
         <SaveButton
           onClick={onSave}
@@ -651,6 +820,28 @@ const BaseConfigForm = ({
     </div>
   );
 };
+
+const MetricCard = ({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+}) => (
+  <div className='rounded-lg border border-gray-200 dark:border-gray-700 p-4 bg-gray-50 dark:bg-gray-900/30'>
+    <div className='text-xs text-gray-500 dark:text-gray-400'>{label}</div>
+    <div className='text-lg font-semibold text-gray-900 dark:text-white mt-1 break-words'>
+      {value}
+    </div>
+    {hint ? (
+      <div className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
+        {hint}
+      </div>
+    ) : null}
+  </div>
+);
 
 // --- Sub-component: User Add Form (Isolated state) ---
 
@@ -675,7 +866,7 @@ const UserAddForm = memo(function UserAddForm({
         <Plus className='w-4 h-4' /> {convert('添加用户')}
       </h3>
       <div className='flex flex-col gap-2'>
-        <div className='flex flex-col md:flex-row gap-4'>
+        <div className='flex flex-col sm:flex-row gap-3'>
           <input
             placeholder={convert('用户名')}
             className='flex-1 border p-2 rounded-lg dark:bg-gray-800 dark:border-gray-600 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none'
@@ -695,7 +886,7 @@ const UserAddForm = memo(function UserAddForm({
             }}
           />
           <button
-            className='bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 transition-colors font-medium shadow-sm hover:shadow disabled:opacity-50 disabled:cursor-not-allowed'
+            className='w-full sm:w-auto bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 transition-colors font-medium shadow-sm hover:shadow disabled:opacity-50 disabled:cursor-not-allowed'
             disabled={!newUser.username || !isValidPassword || processing}
             onClick={() => {
               if (newUser.username && isValidPassword) {
@@ -762,14 +953,14 @@ function UserManagement({
         }}
       />
 
-      <div className='overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700'>
+      <div className='overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700'>
         <table className='min-w-full text-left'>
           <thead className='bg-gray-50 dark:bg-gray-800/50'>
             <tr className='text-xs font-semibold tracking-wide text-gray-500 uppercase dark:text-gray-400'>
               <th className='p-3'>{convert('用户名')}</th>
               <th className='p-3'>{convert('角色')}</th>
               <th className='p-3'>{convert('状态')}</th>
-              <th className='p-3'>{convert('过滤')}</th>
+              <th className='p-3 hidden sm:table-cell'>{convert('过滤')}</th>
               <th className='p-3 text-right'>{convert('操作')}</th>
             </tr>
           </thead>
@@ -779,28 +970,29 @@ function UserManagement({
                 key={u.username}
                 className='hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors'
               >
-                <td className='p-3 font-medium text-gray-900 dark:text-gray-100'>
+                <td className='p-3 font-medium text-gray-900 dark:text-gray-100 max-w-[120px] truncate'>
                   {u.username}
                 </td>
                 <td className='p-3'>
                   <span
-                    className={`px-2 py-1 rounded-full text-xs ${u.role === 'owner' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-700'}`}
+                    className={`px-2 py-1 rounded-full text-xs whitespace-nowrap ${u.role === 'owner' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-700'}`}
                   >
                     {u.role}
                   </span>
                 </td>
                 <td className='p-3'>
                   {u.banned ? (
-                    <span className='flex items-center gap-1 text-red-600 text-sm'>
-                      <Ban className='w-3 h-3' /> {convert('已封禁')}
+                    <span className='flex items-center gap-1 text-red-600 text-sm whitespace-nowrap'>
+                      <Ban className='w-3 h-3 shrink-0' /> {convert('已封禁')}
                     </span>
                   ) : (
-                    <span className='flex items-center gap-1 text-green-600 text-sm'>
-                      <CheckCircle className='w-3 h-3' /> {convert('正常')}
+                    <span className='flex items-center gap-1 text-green-600 text-sm whitespace-nowrap'>
+                      <CheckCircle className='w-3 h-3 shrink-0' />{' '}
+                      {convert('正常')}
                     </span>
                   )}
                 </td>
-                <td className='p-3'>
+                <td className='p-3 hidden sm:table-cell'>
                   {u.disableYellowFilter ? (
                     <span className='flex items-center gap-1 text-orange-600 text-sm'>
                       {convert('无过滤')}
@@ -811,97 +1003,99 @@ function UserManagement({
                     </span>
                   )}
                 </td>
-                <td className='p-3 flex justify-end gap-2'>
-                  {u.role !== 'owner' && (
-                    <>
-                      <ActionButton
-                        icon={u.disableYellowFilter ? ShieldAlert : Shield}
-                        color={u.disableYellowFilter ? 'red' : 'green'}
-                        // Fixed: Loading key now matches the generated key format
-                        loading={
-                          !!processingMap[
-                            `user-updateUserAdultFilter-${u.username}`
-                          ]
-                        }
-                        onClick={() =>
-                          onAction(
-                            'user',
-                            '/api/admin/user',
-                            'updateUserAdultFilter',
-                            {
-                              targetUsername: u.username,
-                              disableYellowFilter: !u.disableYellowFilter,
-                            },
-                            u.username,
-                          )
-                        }
-                        title={
-                          u.disableYellowFilter
-                            ? convert('启用过滤')
-                            : convert('禁用过滤')
-                        }
-                      />
-                      <ActionButton
-                        icon={u.banned ? CheckCircle : Ban}
-                        color={u.banned ? 'green' : 'orange'}
-                        loading={
-                          !!processingMap[
-                            `user-${u.banned ? 'unban' : 'ban'}-${u.username}`
-                          ]
-                        }
-                        onClick={() =>
-                          onAction(
-                            'user',
-                            '/api/admin/user',
-                            u.banned ? 'unban' : 'ban',
-                            { targetUsername: u.username },
-                            u.username,
-                          )
-                        }
-                        title={u.banned ? convert('解封') : convert('封禁')}
-                      />
-                      <ActionButton
-                        icon={u.role === 'admin' ? ShieldAlert : Shield}
-                        color='blue'
-                        loading={
-                          !!processingMap[
-                            `user-${u.role === 'admin' ? 'cancelAdmin' : 'setAdmin'}-${u.username}`
-                          ]
-                        }
-                        onClick={() =>
-                          onAction(
-                            'user',
-                            '/api/admin/user',
-                            u.role === 'admin' ? 'cancelAdmin' : 'setAdmin',
-                            { targetUsername: u.username },
-                            u.username,
-                          )
-                        }
-                        title={
-                          u.role === 'admin'
-                            ? convert('取消管理')
-                            : convert('设为管理')
-                        }
-                      />
-                      <ActionButton
-                        icon={Trash2}
-                        color='red'
-                        loading={
-                          !!processingMap[`user-deleteUser-${u.username}`]
-                        }
-                        onClick={() =>
-                          onAction(
-                            'user',
-                            '/api/admin/user',
-                            'deleteUser',
-                            { targetUsername: u.username },
-                            u.username,
-                          )
-                        }
-                        title={convert('删除')}
-                      />
-                    </>
-                  )}
+                <td className='p-3'>
+                  <div className='flex justify-end gap-1.5'>
+                    {u.role !== 'owner' && (
+                      <>
+                        <ActionButton
+                          icon={u.disableYellowFilter ? ShieldAlert : Shield}
+                          color={u.disableYellowFilter ? 'red' : 'green'}
+                          // Fixed: Loading key now matches the generated key format
+                          loading={
+                            !!processingMap[
+                              `user-updateUserAdultFilter-${u.username}`
+                            ]
+                          }
+                          onClick={() =>
+                            onAction(
+                              'user',
+                              '/api/admin/user',
+                              'updateUserAdultFilter',
+                              {
+                                targetUsername: u.username,
+                                disableYellowFilter: !u.disableYellowFilter,
+                              },
+                              u.username,
+                            )
+                          }
+                          title={
+                            u.disableYellowFilter
+                              ? convert('启用过滤')
+                              : convert('禁用过滤')
+                          }
+                        />
+                        <ActionButton
+                          icon={u.banned ? CheckCircle : Ban}
+                          color={u.banned ? 'green' : 'orange'}
+                          loading={
+                            !!processingMap[
+                              `user-${u.banned ? 'unban' : 'ban'}-${u.username}`
+                            ]
+                          }
+                          onClick={() =>
+                            onAction(
+                              'user',
+                              '/api/admin/user',
+                              u.banned ? 'unban' : 'ban',
+                              { targetUsername: u.username },
+                              u.username,
+                            )
+                          }
+                          title={u.banned ? convert('解封') : convert('封禁')}
+                        />
+                        <ActionButton
+                          icon={u.role === 'admin' ? ShieldAlert : Shield}
+                          color='blue'
+                          loading={
+                            !!processingMap[
+                              `user-${u.role === 'admin' ? 'cancelAdmin' : 'setAdmin'}-${u.username}`
+                            ]
+                          }
+                          onClick={() =>
+                            onAction(
+                              'user',
+                              '/api/admin/user',
+                              u.role === 'admin' ? 'cancelAdmin' : 'setAdmin',
+                              { targetUsername: u.username },
+                              u.username,
+                            )
+                          }
+                          title={
+                            u.role === 'admin'
+                              ? convert('取消管理')
+                              : convert('设为管理')
+                          }
+                        />
+                        <ActionButton
+                          icon={Trash2}
+                          color='red'
+                          loading={
+                            !!processingMap[`user-deleteUser-${u.username}`]
+                          }
+                          onClick={() =>
+                            onAction(
+                              'user',
+                              '/api/admin/user',
+                              'deleteUser',
+                              { targetUsername: u.username },
+                              u.username,
+                            )
+                          }
+                          title={convert('删除')}
+                        />
+                      </>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}
@@ -943,23 +1137,23 @@ const SourceAddForm = memo(function SourceAddForm({
       <h3 className='font-semibold mb-4 text-gray-800 dark:text-white flex items-center gap-2'>
         <Plus className='w-4 h-4' /> {title || convert('添加采集源')}
       </h3>
-      <div className='grid grid-cols-1 md:grid-cols-4 gap-4'>
+      <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4'>
         <input
           placeholder={convert('Key (唯一标识)')}
-          className='border p-2 rounded-lg dark:bg-gray-800 dark:border-gray-600 dark:text-white'
+          className='border p-2 rounded-lg dark:bg-gray-800 dark:border-gray-600 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none'
           value={newSource.key}
           onChange={(e) => setNewSource({ ...newSource, key: e.target.value })}
           disabled={!!initialValue}
         />
         <input
           placeholder={convert('名称')}
-          className='border p-2 rounded-lg dark:bg-gray-800 dark:border-gray-600 dark:text-white'
+          className='border p-2 rounded-lg dark:bg-gray-800 dark:border-gray-600 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none'
           value={newSource.name}
           onChange={(e) => setNewSource({ ...newSource, name: e.target.value })}
         />
         <input
           placeholder={convert('API 地址')}
-          className='col-span-1 md:col-span-2 border p-2 rounded-lg dark:bg-gray-800 dark:border-gray-600 dark:text-white'
+          className='col-span-1 sm:col-span-2 border p-2 rounded-lg dark:bg-gray-800 dark:border-gray-600 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none'
           value={newSource.api}
           onChange={(e) => setNewSource({ ...newSource, api: e.target.value })}
         />
@@ -1044,14 +1238,16 @@ function SourceManagement({
         />
       )}
 
-      <div className='overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700'>
+      <div className='overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700'>
         <table className='min-w-full text-left'>
           <thead className='bg-gray-50 dark:bg-gray-800/50'>
             <tr className='text-xs font-semibold tracking-wide text-gray-500 uppercase'>
-              <th className='p-3'>{convert('名称')}</th>
-              <th className='p-3'>{convert('API')}</th>
-              <th className='p-3'>{convert('状态')}</th>
-              <th className='p-3 text-right'>{convert('操作')}</th>
+              <th className='p-3 whitespace-nowrap'>{convert('名称')}</th>
+              <th className='p-3 hidden md:table-cell'>{convert('API')}</th>
+              <th className='p-3 whitespace-nowrap'>{convert('状态')}</th>
+              <th className='p-3 text-right whitespace-nowrap'>
+                {convert('操作')}
+              </th>
             </tr>
           </thead>
           <tbody className='divide-y divide-gray-100 dark:divide-gray-700'>
@@ -1060,63 +1256,67 @@ function SourceManagement({
                 key={s.key}
                 className='hover:bg-gray-50 dark:hover:bg-gray-700/50'
               >
-                <td className='p-3 font-medium'>{s.name}</td>
-                <td className='p-3 text-sm text-gray-500 break-all min-w-[200px]'>
+                <td className='p-3 font-medium max-w-[140px] truncate'>
+                  {s.name}
+                </td>
+                <td className='p-3 text-sm text-gray-500 break-all max-w-[240px] hidden md:table-cell'>
                   {s.api}
                 </td>
                 <td className='p-3'>
                   {s.disabled ? (
-                    <span className='text-red-600 text-xs bg-red-50 dark:bg-red-900/20 px-2 py-1 rounded'>
+                    <span className='text-red-600 text-xs bg-red-50 dark:bg-red-900/20 px-2 py-1 rounded whitespace-nowrap'>
                       {convert('禁用')}
                     </span>
                   ) : (
-                    <span className='text-green-600 text-xs bg-green-50 dark:bg-green-900/20 px-2 py-1 rounded'>
+                    <span className='text-green-600 text-xs bg-green-50 dark:bg-green-900/20 px-2 py-1 rounded whitespace-nowrap'>
                       {convert('启用')}
                     </span>
                   )}
                 </td>
-                <td className='p-3 flex justify-end gap-2'>
-                  <ActionButton
-                    icon={Pencil}
-                    color='blue'
-                    loading={!!processingMap[`source-edit-${s.key}`]}
-                    onClick={() => setEditingSource(s)}
-                    title={convert('修改')}
-                  />
-                  <ActionButton
-                    icon={s.disabled ? CheckCircle : Ban}
-                    color={s.disabled ? 'green' : 'orange'}
-                    loading={
-                      !!processingMap[
-                        `source-${s.disabled ? 'enable' : 'disable'}-${s.key}`
-                      ]
-                    }
-                    onClick={() =>
-                      onAction(
-                        'source',
-                        '/api/admin/source',
-                        s.disabled ? 'enable' : 'disable',
-                        { key: s.key },
-                        s.key,
-                      )
-                    }
-                    title={s.disabled ? convert('启用') : convert('禁用')}
-                  />
-                  <ActionButton
-                    icon={Trash2}
-                    color='red'
-                    loading={!!processingMap[`source-delete-${s.key}`]}
-                    onClick={() =>
-                      onAction(
-                        'source',
-                        '/api/admin/source',
-                        'delete',
-                        { key: s.key },
-                        s.key,
-                      )
-                    }
-                    title={convert('删除')}
-                  />
+                <td className='p-3'>
+                  <div className='flex justify-end gap-1.5'>
+                    <ActionButton
+                      icon={Pencil}
+                      color='blue'
+                      loading={!!processingMap[`source-edit-${s.key}`]}
+                      onClick={() => setEditingSource(s)}
+                      title={convert('修改')}
+                    />
+                    <ActionButton
+                      icon={s.disabled ? CheckCircle : Ban}
+                      color={s.disabled ? 'green' : 'orange'}
+                      loading={
+                        !!processingMap[
+                          `source-${s.disabled ? 'enable' : 'disable'}-${s.key}`
+                        ]
+                      }
+                      onClick={() =>
+                        onAction(
+                          'source',
+                          '/api/admin/source',
+                          s.disabled ? 'enable' : 'disable',
+                          { key: s.key },
+                          s.key,
+                        )
+                      }
+                      title={s.disabled ? convert('启用') : convert('禁用')}
+                    />
+                    <ActionButton
+                      icon={Trash2}
+                      color='red'
+                      loading={!!processingMap[`source-delete-${s.key}`]}
+                      onClick={() =>
+                        onAction(
+                          'source',
+                          '/api/admin/source',
+                          'delete',
+                          { key: s.key },
+                          s.key,
+                        )
+                      }
+                      title={convert('删除')}
+                    />
+                  </div>
                 </td>
               </tr>
             ))}
@@ -1235,14 +1435,16 @@ function LiveManagement({
         }}
       />
 
-      <div className='overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700'>
+      <div className='overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700'>
         <table className='min-w-full text-left'>
           <thead className='bg-gray-50 dark:bg-gray-800/50'>
             <tr className='text-xs font-semibold tracking-wide text-gray-500 uppercase'>
-              <th className='p-3'>{convert('名称')}</th>
-              <th className='p-3'>{convert('频道数')}</th>
-              <th className='p-3'>{convert('状态')}</th>
-              <th className='p-3 text-right'>{convert('操作')}</th>
+              <th className='p-3 whitespace-nowrap'>{convert('名称')}</th>
+              <th className='p-3 hidden sm:table-cell'>{convert('频道数')}</th>
+              <th className='p-3 whitespace-nowrap'>{convert('状态')}</th>
+              <th className='p-3 text-right whitespace-nowrap'>
+                {convert('操作')}
+              </th>
             </tr>
           </thead>
           <tbody className='divide-y divide-gray-100 dark:divide-gray-700'>
@@ -1251,56 +1453,62 @@ function LiveManagement({
                 key={l.key}
                 className='hover:bg-gray-50 dark:hover:bg-gray-700/50'
               >
-                <td className='p-3 font-medium'>{l.name}</td>
-                <td className='p-3 font-mono text-sm'>{l.channelNumber}</td>
+                <td className='p-3 font-medium max-w-[140px] truncate'>
+                  {l.name}
+                </td>
+                <td className='p-3 font-mono text-sm hidden sm:table-cell'>
+                  {l.channelNumber}
+                </td>
                 <td className='p-3'>
                   {l.disabled ? (
-                    <span className='text-red-600 text-xs bg-red-50 dark:bg-red-900/20 px-2 py-1 rounded'>
+                    <span className='text-red-600 text-xs bg-red-50 dark:bg-red-900/20 px-2 py-1 rounded whitespace-nowrap'>
                       {convert('禁用')}
                     </span>
                   ) : (
-                    <span className='text-green-600 text-xs bg-green-50 dark:bg-green-900/20 px-2 py-1 rounded'>
+                    <span className='text-green-600 text-xs bg-green-50 dark:bg-green-900/20 px-2 py-1 rounded whitespace-nowrap'>
                       {convert('启用')}
                     </span>
                   )}
                 </td>
-                <td className='p-3 flex justify-end gap-2'>
-                  <ActionButton
-                    icon={l.disabled ? CheckCircle : Ban}
-                    color={l.disabled ? 'green' : 'orange'}
-                    loading={
-                      !!processingMap[
-                        `live-${l.disabled ? 'enable' : 'disable'}-${l.key}`
-                      ]
-                    }
-                    onClick={() =>
-                      onAction(
-                        'live',
-                        '/api/admin/live',
-                        l.disabled ? 'enable' : 'disable',
-                        { key: l.key },
-                        l.key,
-                      )
-                    }
-                    title={l.disabled ? convert('启用') : convert('禁用')}
-                  />
-                  {l.from === 'custom' && (
+                <td className='p-3'>
+                  <div className='flex justify-end gap-1.5'>
                     <ActionButton
-                      icon={Trash2}
-                      color='red'
-                      loading={!!processingMap[`live-delete-${l.key}`]}
+                      icon={l.disabled ? CheckCircle : Ban}
+                      color={l.disabled ? 'green' : 'orange'}
+                      loading={
+                        !!processingMap[
+                          `live-${l.disabled ? 'enable' : 'disable'}-${l.key}`
+                        ]
+                      }
                       onClick={() =>
                         onAction(
                           'live',
                           '/api/admin/live',
-                          'delete',
+                          l.disabled ? 'enable' : 'disable',
                           { key: l.key },
                           l.key,
                         )
                       }
-                      title={convert('删除')}
+                      title={l.disabled ? convert('启用') : convert('禁用')}
                     />
-                  )}
+                    {l.from === 'custom' && (
+                      <ActionButton
+                        icon={Trash2}
+                        color='red'
+                        loading={!!processingMap[`live-delete-${l.key}`]}
+                        onClick={() =>
+                          onAction(
+                            'live',
+                            '/api/admin/live',
+                            'delete',
+                            { key: l.key },
+                            l.key,
+                          )
+                        }
+                        title={convert('删除')}
+                      />
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}
@@ -1405,11 +1613,11 @@ function CategoryManagement({
         }}
       />
 
-      <div className='overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700'>
+      <div className='overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700'>
         <table className='min-w-full text-left'>
           <thead className='bg-gray-50 dark:bg-gray-800/50'>
             <tr className='text-xs font-semibold tracking-wide text-gray-500 uppercase'>
-              <th className='p-3'>{convert('名称')}</th>
+              <th className='p-3 whitespace-nowrap'>{convert('名称')}</th>
               <th className='p-3'>{convert('类型')}</th>
               <th className='p-3'>{convert('查询词')}</th>
               <th className='p-3 text-right'>{convert('操作')}</th>

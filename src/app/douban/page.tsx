@@ -133,6 +133,17 @@ const fetchDoubanDataInternal = async (
     reqType = filters.secondary;
   }
 
+  // Handle short drama category under TV series
+  if (type === 'tv' && filters.secondary === 'tv_short') {
+    return getDoubanRecommends({
+      kind: 'tv',
+      category: '短剧',
+      pageLimit,
+      pageStart,
+      sort: 'U',
+    });
+  }
+
   return getDoubanCategories({
     kind: reqKind,
     category: reqCategory,

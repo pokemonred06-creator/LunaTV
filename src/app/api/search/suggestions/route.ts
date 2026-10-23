@@ -91,11 +91,37 @@ async function generateSuggestions(
 > {
   const queryLower = query.toLowerCase();
 
+  // 1. Try Bilibili suggestion API first (massively popular term dictionary supporting Chinese, Pinyin, and initials)
+  try {
+    const response = await fetch(
+      `https://s.search.bilibili.com/main/suggest?term=${encodeURIComponent(query)}`,
+      {
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        },
+        next: { revalidate: 60 },
+      },
+    );
+    if (response.ok) {
+      const data = await response.json();
+      if (data.code === 0 && data.result && Array.isArray(data.result.tag)) {
+        return data.result.tag.map((item: any, index: number) => ({
+          text: item.value,
+          type: index === 0 ? 'exact' : 'suggestion',
+          score: 10 - index,
+        }));
+      }
+    }
+  } catch (error) {
+    console.error('Bilibili suggest API error:', error);
+  }
+
+  // 2. Fallback to original downstream API logic
   const apiSites = await getAvailableApiSites(username);
   let realKeywords: string[] = [];
 
   if (apiSites.length > 0) {
-    // 取第一个可用的数据源进行搜索
     const firstSite = apiSites[0];
     const results = await searchFromApi(firstSite, query);
 
@@ -116,25 +142,22 @@ async function generateSuggestions(
     ).slice(0, 8);
   }
 
-  // 根据关键词与查询的匹配程度计算分数，并动态确定类型
   const realSuggestions = realKeywords.map((word) => {
     const wordLower = word.toLowerCase();
     const queryWords = queryLower.split(/[ -:：·、-]/);
 
-    // 计算匹配分数：完全匹配得分更高
     let score = 1.0;
     if (wordLower === queryLower) {
-      score = 2.0; // 完全匹配
+      score = 2.0;
     } else if (
       wordLower.startsWith(queryLower) ||
       wordLower.endsWith(queryLower)
     ) {
-      score = 1.8; // 前缀或后缀匹配
+      score = 1.8;
     } else if (queryWords.some((qw) => wordLower.includes(qw))) {
-      score = 1.5; // 包含查询词
+      score = 1.5;
     }
 
-    // 根据匹配程度确定类型
     let type: 'exact' | 'related' | 'suggestion';
     if (score >= 2.0) {
       type = 'exact';
@@ -151,12 +174,10 @@ async function generateSuggestions(
     };
   });
 
-  // 按分数降序排列，相同分数按类型优先级排列
   const sortedSuggestions = realSuggestions.sort((a, b) => {
     if (a.score !== b.score) {
-      return b.score - a.score; // 分数高的在前
+      return b.score - a.score;
     }
-    // 分数相同时，按类型优先级：exact > related > suggestion
     const typePriority = { exact: 3, related: 2, suggestion: 1 };
     return typePriority[b.type] - typePriority[a.type];
   });

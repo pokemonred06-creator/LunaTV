@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { ingestPlaybackTelemetry } from '@/lib/playback-telemetry';
+
 // 1. Force Node Runtime for predictable memory/timers
 export const runtime = 'nodejs';
 
@@ -97,15 +99,58 @@ export async function POST(req: NextRequest) {
     const validLevels = ['info', 'warn', 'error', 'debug'];
     const level = validLevels.includes(body.level) ? body.level : 'info';
 
+    const isPlaybackTelemetry =
+      body?.data &&
+      typeof body.data === 'object' &&
+      body.data.kind === 'playback';
+
+    const telemetryData = isPlaybackTelemetry
+      ? {
+          kind: 'playback',
+          event: String(body.data.event || 'unknown'),
+          sessionId: String(body.data.sessionId || ''),
+          seriesId: String(body.data.seriesId || 'global'),
+          isLive: Boolean(body.data.isLive),
+          startupMs: Number.isFinite(body.data.startupMs)
+            ? Number(body.data.startupMs)
+            : undefined,
+          stalls: Number.isFinite(body.data.stalls)
+            ? Number(body.data.stalls)
+            : undefined,
+          recoveries: Number.isFinite(body.data.recoveries)
+            ? Number(body.data.recoveries)
+            : undefined,
+          fatalErrors: Number.isFinite(body.data.fatalErrors)
+            ? Number(body.data.fatalErrors)
+            : undefined,
+          bufferAheadSec: Number.isFinite(body.data.bufferAheadSec)
+            ? Number(body.data.bufferAheadSec)
+            : undefined,
+          errorCode: Number.isFinite(body.data.errorCode)
+            ? Number(body.data.errorCode)
+            : undefined,
+          errorMessage:
+            typeof body.data.errorMessage === 'string'
+              ? body.data.errorMessage.slice(0, 400)
+              : undefined,
+          url:
+            typeof body.data.url === 'string'
+              ? body.data.url.slice(0, 500)
+              : '',
+        }
+      : body.data || null;
+
+    if (isPlaybackTelemetry) ingestPlaybackTelemetry(telemetryData);
+
     // Construct Log Entry
     const logEntry = {
       timestamp: body.timestamp || new Date().toISOString(),
       level,
-      source: 'client-remote',
+      source: isPlaybackTelemetry ? 'playback-telemetry' : 'client-remote',
       // Truncate URL & Message to prevent massive log lines
       url: String(body.url || '').slice(0, 500),
       message: String(body.message || 'No message').slice(0, 2000),
-      data: body.data || null,
+      data: telemetryData,
       meta: {
         ip, // Remove if GDPR concern
         ua: req.headers.get('user-agent'),

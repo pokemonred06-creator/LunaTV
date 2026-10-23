@@ -1,5 +1,6 @@
 import { getConfig } from '@/lib/config';
 import { db } from '@/lib/db';
+import { parseLivePlaylist } from '@/lib/live-playlist';
 
 const defaultUA = 'AptvPlayer/1.4.10';
 
@@ -12,6 +13,7 @@ export interface LiveChannels {
     logo: string;
     group: string;
     url: string;
+    headers?: Record<string, string>;
   }[];
   epgUrl: string;
   epgs: {
@@ -83,9 +85,15 @@ export async function refreshLiveChannels(liveInfo: {
     headers: {
       'User-Agent': ua,
     },
+    signal: AbortSignal.timeout(15000),
   });
+  if (!response.ok) throw new Error(`Playlist HTTP ${response.status}`);
   const data = await response.text();
-  const result = parseM3U(liveInfo.key, data);
+  const result = parseLivePlaylist(
+    liveInfo.key,
+    data,
+    response.url || liveInfo.url,
+  );
   const epgUrl = liveInfo.epg || result.tvgUrl;
   const epgs = await parseEpg(
     epgUrl,
@@ -129,6 +137,7 @@ async function parseEpg(
       headers: {
         'User-Agent': ua,
       },
+      signal: AbortSignal.timeout(15000),
     });
     if (!response.ok) {
       return {};
@@ -217,103 +226,6 @@ async function parseEpg(
   }
 
   return result;
-}
-
-/**
- * 解析M3U文件内容，提取频道信息
- * @param m3uContent M3U文件的内容字符串
- * @returns 频道信息数组
- */
-function parseM3U(
-  sourceKey: string,
-  m3uContent: string,
-): {
-  tvgUrl: string;
-  channels: {
-    id: string;
-    tvgId: string;
-    name: string;
-    logo: string;
-    group: string;
-    url: string;
-  }[];
-} {
-  const channels: {
-    id: string;
-    tvgId: string;
-    name: string;
-    logo: string;
-    group: string;
-    url: string;
-  }[] = [];
-
-  const lines = m3uContent
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
-
-  let tvgUrl = '';
-  let channelIndex = 0;
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-
-    // 检查是否是 #EXTM3U 行，提取 tvg-url
-    if (line.startsWith('#EXTM3U')) {
-      // 支持两种格式：x-tvg-url 和 url-tvg
-      const tvgUrlMatch = line.match(/(?:x-tvg-url|url-tvg)="([^"]*)"/);
-      tvgUrl = tvgUrlMatch ? tvgUrlMatch[1].split(',')[0].trim() : '';
-      continue;
-    }
-
-    // 检查是否是 #EXTINF 行
-    if (line.startsWith('#EXTINF:')) {
-      // 提取 tvg-id
-      const tvgIdMatch = line.match(/tvg-id="([^"]*)"/);
-      const tvgId = tvgIdMatch ? tvgIdMatch[1] : '';
-
-      // 提取 tvg-name
-      const tvgNameMatch = line.match(/tvg-name="([^"]*)"/);
-      const tvgName = tvgNameMatch ? tvgNameMatch[1] : '';
-
-      // 提取 tvg-logo
-      const tvgLogoMatch = line.match(/tvg-logo="([^"]*)"/);
-      const logo = tvgLogoMatch ? tvgLogoMatch[1] : '';
-
-      // 提取 group-title
-      const groupTitleMatch = line.match(/group-title="([^"]*)"/);
-      const group = groupTitleMatch ? groupTitleMatch[1] : '无分组';
-
-      // 提取标题（#EXTINF 行最后的逗号后面的内容）
-      const titleMatch = line.match(/,([^,]*)$/);
-      const title = titleMatch ? titleMatch[1].trim() : '';
-
-      // 优先使用 tvg-name，如果没有则使用标题
-      const name = title || tvgName || '';
-
-      // 检查下一行是否是URL
-      if (i + 1 < lines.length && !lines[i + 1].startsWith('#')) {
-        const url = lines[i + 1];
-
-        // 只有当有名称和URL时才添加到结果中
-        if (name && url) {
-          channels.push({
-            id: `${sourceKey}-${channelIndex}`,
-            tvgId,
-            name,
-            logo,
-            group,
-            url,
-          });
-          channelIndex++;
-        }
-
-        // 跳过下一行，因为已经处理了
-        i++;
-      }
-    }
-  }
-
-  return { tvgUrl, channels };
 }
 
 // utils/urlResolver.js

@@ -29,6 +29,7 @@ export const yellowWords = [
   '淫秽',
   '淫穢', // Obscene
   '禁片', // Banned/Forbidden Films
+  '色戒', // Lust, Caution (Famous NC-17/Erotic title)
 
   // --- Specific Content Tags ---
   '电影解说',

@@ -27,15 +27,16 @@ function getDoubanImageProxyConfig(): {
 
 /**
  * 处理图片 URL，如果设置了图片代理则使用代理
+ *
+ * Priority order:
+ * 1. bgm.tv → HTTPS upgrade (avoids mixed content without a proxy hop)
+ * 2. Known CORS-blocked domains → server proxy
+ * 3. HTTP image on an HTTPS page (non-doubanio) → server proxy
+ * 4. doubanio.com → route through the user-configured CDN proxy
+ * 5. Everything else that is already HTTPS → return as-is
  */
 export function processImageUrl(originalUrl: string): string {
   if (!originalUrl) return originalUrl;
-
-  // Enforce same-origin image loading for all remote URLs to avoid browser CORS
-  // failures on poster domains that disallow cross-origin embedding.
-  if (/^https?:\/\//i.test(originalUrl)) {
-    return `/api/image-proxy?url=${encodeURIComponent(originalUrl)}`;
-  }
 
   // Domains known to block CORS - always proxy these
   const corsBlockedDomains = ['dytt-img.com', 'tyyswimg.com', 'vip.lz-cdn'];
@@ -54,19 +55,18 @@ export function processImageUrl(originalUrl: string): string {
   }
 
   // 3. 如果当前是 HTTPS 环境，但图片是 HTTP，则自动使用代理以避免混合内容错误
-  // 也会处理原本是 http:// 的 tyyswimg.com 等资源
   const isHttps =
     typeof window !== 'undefined' && window.location.protocol === 'https:';
   const isHttpRequest = originalUrl.startsWith('http://');
 
   if (isHttps && isHttpRequest) {
-    // 除了已处理的（如 doubanio 会在下面 case 中处理），其他所有 HTTP 图片走 server 代理
+    // doubanio HTTP is handled below via the configured CDN proxy
     if (!originalUrl.includes('doubanio.com')) {
       return `/api/image-proxy?url=${encodeURIComponent(originalUrl)}`;
     }
   }
 
-  // 4. 处理豆瓣图片代理
+  // 4. 处理豆瓣图片代理 (doubanio.com)
   if (!originalUrl.includes('doubanio.com')) {
     return originalUrl;
   }
@@ -331,6 +331,17 @@ async function getVideoResolutionWithHls(m3u8Url: string): Promise<{
 
 const probeCache = new Map<string, { ok: boolean; timestamp: number }>();
 const PROBE_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+const PROBE_CACHE_MAX_SIZE = 200;
+
+function setProbeCache(key: string, value: { ok: boolean; timestamp: number }) {
+  if (probeCache.size >= PROBE_CACHE_MAX_SIZE) {
+    const firstKey = probeCache.keys().next().value;
+    if (firstKey !== undefined) {
+      probeCache.delete(firstKey);
+    }
+  }
+  probeCache.set(key, value);
+}
 
 /**
  * Stage 1 Hard Filter: Fast lightweight probe to ensure the stream URL is actually reachable and returns valid content.
@@ -364,7 +375,7 @@ export async function probeStreamStatus(
     });
 
     if (!res.ok) {
-      probeCache.set(cacheKey, { ok: false, timestamp: now });
+      setProbeCache(cacheKey, { ok: false, timestamp: now });
       return false;
     }
 
@@ -384,11 +395,11 @@ export async function probeStreamStatus(
       }
     }
 
-    probeCache.set(cacheKey, { ok: isOk, timestamp: now });
+    setProbeCache(cacheKey, { ok: isOk, timestamp: now });
     return isOk;
   } catch (error: any) {
     if (error.name !== 'AbortError') {
-      probeCache.set(cacheKey, { ok: false, timestamp: now });
+      setProbeCache(cacheKey, { ok: false, timestamp: now });
     }
     return false;
   }

@@ -60,6 +60,24 @@ const DETAIL_CACHE: Map<string, CachedPageEntry> = new Map();
 let cleanupTimer: ReturnType<typeof setTimeout> | null = null;
 let lastCleanupTime = 0;
 
+// Bound memory on every insertion, including persistent-cache backfills.
+// Map insertion order provides constant-time eviction of the oldest write.
+function storeInMemory(
+  cache: Map<string, CachedPageEntry>,
+  key: string,
+  entry: CachedPageEntry,
+  limit: number,
+): void {
+  ensureAutoCleanupStarted();
+  cache.delete(key);
+  cache.set(key, entry);
+  while (cache.size > limit) {
+    const oldest = cache.keys().next().value;
+    if (oldest === undefined) break;
+    cache.delete(oldest);
+  }
+}
+
 /**
  * 生成搜索缓存键：source + query + page
  */
@@ -97,7 +115,7 @@ export async function getCachedSearchPage(
       const dbEntry = dbValue as CachedPageEntry;
       if (dbEntry.expiresAt > Date.now()) {
         // Backfill L1
-        SEARCH_CACHE.set(key, dbEntry);
+        storeInMemory(SEARCH_CACHE, key, dbEntry, MAX_CACHE_SIZE);
         return dbEntry;
       }
     }
@@ -134,7 +152,7 @@ export async function setCachedSearchPage(
   };
 
   // 1. Set L1
-  SEARCH_CACHE.set(key, entry);
+  storeInMemory(SEARCH_CACHE, key, entry, MAX_CACHE_SIZE);
 
   // 2. Set L2 (Persistent DB)
   try {
@@ -245,7 +263,7 @@ export async function getCachedDetail(
     if (dbValue && typeof dbValue === 'object') {
       const dbEntry = dbValue as CachedPageEntry;
       if (dbEntry.expiresAt > Date.now()) {
-        DETAIL_CACHE.set(key, dbEntry);
+        storeInMemory(DETAIL_CACHE, key, dbEntry, MAX_DETAIL_CACHE_SIZE);
         return dbEntry;
       }
     }
@@ -274,7 +292,7 @@ export async function setCachedDetail(
   };
 
   // 1. L1
-  DETAIL_CACHE.set(key, entry);
+  storeInMemory(DETAIL_CACHE, key, entry, MAX_DETAIL_CACHE_SIZE);
 
   // 2. L2
   try {

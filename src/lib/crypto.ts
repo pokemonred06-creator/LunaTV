@@ -15,6 +15,7 @@ const TAG_LEN = 16;
 
 // Security Limits
 const MAX_TOKEN_LENGTH = 8192; // 8KB limit prevents DoS via massive payloads
+export const MAX_BACKUP_TOKEN_LENGTH = 64 * 1024 * 1024;
 const MAX_TTL_SECONDS = 10 * 365 * 24 * 3600; // 10 years cap
 
 // Iteration Control (Fail-Fast Logic)
@@ -90,6 +91,7 @@ export class ServerCrypto {
     data: unknown,
     password: string,
     ttlSeconds: number = 0,
+    policy: 'token' | 'backup' = 'token',
   ): Promise<string> {
     if (!password) throw new Error('ServerCrypto: Password is required');
     if (!Number.isFinite(ttlSeconds) || ttlSeconds < 0) {
@@ -100,6 +102,12 @@ export class ServerCrypto {
     }
 
     const plain = typeof data === 'string' ? data : JSON.stringify(data);
+
+    const limit =
+      policy === 'backup' ? MAX_BACKUP_TOKEN_LENGTH : MAX_TOKEN_LENGTH;
+    if (Math.ceil(((Buffer.byteLength(plain) + 53) * 4) / 3) > limit) {
+      throw new Error('Encrypted payload exceeds size limit');
+    }
 
     // 1. Metadata
     const salt = cryptoObj.getRandomValues(new Uint8Array(SALT_LEN));
@@ -131,12 +139,17 @@ export class ServerCrypto {
   static async decrypt<T = string>(
     token: string,
     password: string,
+    policy: 'token' | 'backup' = 'token',
   ): Promise<T | null> {
     try {
       if (!token || !password) return null;
 
       // DoS Mitigation: Reject massive tokens immediately
-      if (token.length > MAX_TOKEN_LENGTH) return null;
+      if (
+        token.length >
+        (policy === 'backup' ? MAX_BACKUP_TOKEN_LENGTH : MAX_TOKEN_LENGTH)
+      )
+        return null;
 
       const payload = Buffer.from(token, 'base64url');
 

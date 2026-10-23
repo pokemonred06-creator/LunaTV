@@ -26,6 +26,7 @@ import { DoubanItem } from '@/lib/types';
 
 import CapsuleSwitch from '@/components/CapsuleSwitch';
 import ContinueWatching from '@/components/ContinueWatching';
+import HeroFeaturedBanner from '@/components/HeroFeaturedBanner';
 import { useLanguage } from '@/components/LanguageProvider';
 import PageLayout from '@/components/PageLayout';
 import ScrollableRow from '@/components/ScrollableRow';
@@ -69,7 +70,7 @@ type FavoriteRecord = Record<
 const SectionSkeleton = () => (
   <>
     {Array.from({ length: 8 }).map((_, index) => (
-      <div key={index} className='min-w-[96px] w-24 sm:min-w-[180px] sm:w-44'>
+      <div key={index} className='min-w-24 w-24 sm:min-w-44 sm:w-44'>
         <div className='relative aspect-2/3 w-full overflow-hidden rounded-lg bg-gray-200 animate-pulse dark:bg-gray-800'>
           <div className='absolute inset-0 bg-gray-300 dark:bg-gray-700'></div>
         </div>
@@ -113,91 +114,50 @@ function HomeClient() {
     setCurrentWeekday(weekdays[today.getDay()]);
   }, []);
 
-  // 2. Announcement Logic (Removed redundant window check)
+  // 2. Announcement Logic
   useEffect(() => {
     if (announcement) {
       const hasSeenAnnouncement = localStorage.getItem('hasSeenAnnouncement');
-      if (hasSeenAnnouncement !== announcement) {
-        setShowAnnouncement(true);
-      } else {
-        setShowAnnouncement(Boolean(!hasSeenAnnouncement && announcement));
-      }
+      setShowAnnouncement(hasSeenAnnouncement !== announcement);
     }
   }, [announcement]);
 
-  // 3. Consolidated Data Fetching (With Unmount Guard)
+  // 3. Consolidated Data Fetching (Parallel with Promise.allSettled)
   useEffect(() => {
     let isMounted = true;
-    const isAbortLikeError = (error: unknown) => {
-      if (!error) return false;
-      if (error instanceof DOMException && error.name === 'AbortError')
-        return true;
-      if (error instanceof Error) {
-        if (error.name === 'AbortError') return true;
-        const cause = (error as Error & { cause?: unknown }).cause;
-        if (cause instanceof Error && cause.name === 'AbortError') return true;
-        if (typeof cause === 'string' && /abort/i.test(cause)) return true;
-        return /abort/i.test(error.message);
-      }
-      return false;
-    };
 
-    const fetchData = async <T,>(
-      key: keyof typeof loadingStates,
-      fetcher: () => Promise<T>,
-      onSuccess: (data: T) => void,
-    ) => {
-      try {
-        if (!isMounted) return;
-
-        const result = await fetcher();
-
-        if (!isMounted) return;
-        onSuccess(result);
-      } catch (error) {
-        if (isAbortLikeError(error)) return;
-        console.error(`Fetch failed for ${key}:`, error);
-      } finally {
-        if (isMounted) {
-          setLoadingStates((prev) => ({ ...prev, [key]: false }));
-        }
-      }
-    };
-
-    fetchData(
-      'movies',
-      () =>
+    const fetchAll = async () => {
+      const [moviesRes, tvRes, varietyRes, bangumiRes] = await Promise.allSettled([
         getDoubanCategories({ kind: 'movie', category: '热门', type: '全部' }),
-      (data: DoubanResponse) => {
-        if (data.code === 200)
-          setCategories((prev) => ({ ...prev, movies: data.list }));
-      },
-    );
+        getDoubanCategories({ kind: 'tv', category: 'tv', type: 'tv' }),
+        getDoubanCategories({ kind: 'tv', category: 'show', type: 'show' }),
+        GetBangumiCalendarData(),
+      ]);
 
-    fetchData(
-      'tv',
-      () => getDoubanCategories({ kind: 'tv', category: 'tv', type: 'tv' }),
-      (data: DoubanResponse) => {
-        if (data.code === 200)
-          setCategories((prev) => ({ ...prev, tv: data.list }));
-      },
-    );
+      if (!isMounted) return;
 
-    fetchData(
-      'variety',
-      () => getDoubanCategories({ kind: 'tv', category: 'show', type: 'show' }),
-      (data: DoubanResponse) => {
-        if (data.code === 200)
-          setCategories((prev) => ({ ...prev, variety: data.list }));
-      },
-    );
+      // Batch all state updates in a single pass to avoid cascading re-renders
+      setCategories((prev) => ({
+        ...prev,
+        movies:
+          moviesRes.status === 'fulfilled' && moviesRes.value.code === 200
+            ? moviesRes.value.list
+            : prev.movies,
+        tv:
+          tvRes.status === 'fulfilled' && tvRes.value.code === 200
+            ? tvRes.value.list
+            : prev.tv,
+        variety:
+          varietyRes.status === 'fulfilled' && varietyRes.value.code === 200
+            ? varietyRes.value.list
+            : prev.variety,
+        bangumi:
+          bangumiRes.status === 'fulfilled' ? bangumiRes.value : prev.bangumi,
+      }));
+      setLoadingStates({ movies: false, tv: false, variety: false, bangumi: false });
+    };
 
-    // Fetch Bangumi
-    fetchData(
-      'bangumi',
-      () => GetBangumiCalendarData(),
-      (data) => setCategories((prev) => ({ ...prev, bangumi: data })),
-    );
+    fetchAll();
 
     return () => {
       isMounted = false;
@@ -286,9 +246,22 @@ function HomeClient() {
     );
   }, [categories.bangumi, currentWeekday]);
 
+  // 6. Memoized featured list for Hero banner
+  const featuredItems = useMemo(() => {
+    const movies = categories.movies.map((item) => ({
+      ...item,
+      type: 'movie' as const,
+    }));
+    const tv = categories.tv.map((item) => ({ ...item, type: 'tv' as const }));
+    return [...movies, ...tv];
+  }, [categories.movies, categories.tv]);
+
+  const heroLoading =
+    (loadingStates.movies && loadingStates.tv) || featuredItems.length === 0;
+
   return (
     <PageLayout>
-      <div className='px-2 sm:px-10 py-4 sm:py-8 overflow-visible'>
+      <div className='px-3 sm:px-10 py-4 sm:py-8 overflow-visible'>
         {/* Tab Switch */}
         <div className='mb-8 flex justify-center'>
           <CapsuleSwitch
@@ -301,14 +274,31 @@ function HomeClient() {
           />
         </div>
 
-        <div className='max-w-[95%] mx-auto'>
-          {activeTab === 'favorites' ? (
-            // Favorites View
-            <section className='mb-8'>
-              <div className='mb-4 flex items-center justify-between'>
-                <h2 className='text-xl font-bold text-gray-800 dark:text-gray-200'>
-                  {convert('我的收藏')}
-                </h2>
+        <div className='max-w-7xl mx-auto space-y-8'>
+          <div className='rounded-2xl sm:rounded-4xl border border-slate-200/60 bg-white/85 shadow-2xl shadow-slate-900/10 backdrop-blur-2xl dark:border-white/10 dark:bg-slate-950/60 dark:shadow-black/20'>
+            <div className='px-4 py-5 sm:px-6 sm:py-6'>
+              <div className='max-w-4xl'>
+                <p className='text-xs font-semibold uppercase tracking-[0.3em] text-emerald-600 dark:text-emerald-300'>
+                  {convert('一站聚合')}
+                </p>
+                <h1 className='mt-3 text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white leading-tight'>
+                  {convert('热门影视直达，追剧更顺畅')}
+                </h1>
+                <p className='mt-3 text-sm sm:text-base text-slate-600 dark:text-slate-400 max-w-2xl'>
+                  {convert('精选电影、剧集、综艺、新番，自动推荐与你的观影节奏。')}
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className='overflow-hidden rounded-2xl sm:rounded-4xl border border-slate-200/50 bg-white/80 shadow-lg shadow-slate-900/10 dark:border-white/10 dark:bg-slate-950/55 dark:shadow-black/20'>
+            <div className='px-4 py-5 sm:px-6 sm:py-6 space-y-8'>
+              {activeTab === 'favorites' ? (
+                // Favorites View
+                <section className='mb-8'>
+                  <div className='mb-4 flex items-center justify-between'>
+                    <h2 className='text-xl font-bold text-gray-800 dark:text-gray-200'>
+                      {convert('我的收藏')}
+                    </h2>
                 {favoriteItems.length > 0 && (
                   <button
                     className='text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
@@ -321,7 +311,7 @@ function HomeClient() {
                   </button>
                 )}
               </div>
-              <div className='justify-start grid grid-cols-3 gap-x-2 gap-y-14 sm:gap-y-20 px-0 sm:px-2 sm:grid-cols-[repeat(auto-fill,minmax(11rem,1fr))] sm:gap-x-8'>
+              <div className='justify-start grid grid-cols-2 min-[390px]:grid-cols-3 gap-x-3 gap-y-14 sm:gap-y-20 px-0 sm:px-2 sm:grid-cols-[repeat(auto-fill,minmax(11rem,1fr))] sm:gap-x-8'>
                 {favoriteItems.map((item) => (
                   <div key={`${item.source}-${item.id}`} className='w-full'>
                     <VideoCard
@@ -342,6 +332,13 @@ function HomeClient() {
           ) : (
             // Home View
             <>
+              <div className='mb-8 sm:mb-12'>
+                <HeroFeaturedBanner
+                  items={featuredItems}
+                  loading={heroLoading}
+                />
+              </div>
+
               <ContinueWatching />
 
               {/* Movies */}
@@ -365,7 +362,7 @@ function HomeClient() {
                     categories.movies.map((movie, index) => (
                       <div
                         key={index}
-                        className='min-w-[96px] w-24 sm:min-w-[180px] sm:w-44'
+                        className='min-w-28 w-28 sm:min-w-45 sm:w-44'
                       >
                         <VideoCard
                           from='douban'
@@ -403,7 +400,7 @@ function HomeClient() {
                     categories.tv.map((show, index) => (
                       <div
                         key={index}
-                        className='min-w-[96px] w-24 sm:min-w-[180px] sm:w-44'
+                        className='min-w-28 w-28 sm:min-w-45 sm:w-44'
                       >
                         <VideoCard
                           from='douban'
@@ -440,7 +437,7 @@ function HomeClient() {
                     todayAnimes.map((anime, index) => (
                       <div
                         key={`${anime.id}-${index}`}
-                        className='min-w-[96px] w-24 sm:min-w-[180px] sm:w-44'
+                        className='min-w-28 w-28 sm:min-w-45 sm:w-44'
                       >
                         <VideoCard
                           from='douban'
@@ -483,7 +480,7 @@ function HomeClient() {
                     categories.variety.map((show, index) => (
                       <div
                         key={index}
-                        className='min-w-[96px] w-24 sm:min-w-[180px] sm:w-44'
+                        className='min-w-28 w-28 sm:min-w-45 sm:w-44'
                       >
                         <VideoCard
                           from='douban'
@@ -500,6 +497,8 @@ function HomeClient() {
               </section>
             </>
           )}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -519,7 +518,7 @@ function HomeClient() {
             style={{ touchAction: 'auto' }}
           >
             <div className='flex justify-between items-start mb-4'>
-              <h3 className='text-2xl font-bold tracking-tight text-gray-800 dark:text-white border-b border-green-500 pb-1'>
+              <h3 className='text-2xl font-bold tracking-tight text-gray-800 dark:text-white border-b border-brand-500 pb-1'>
                 {convert('提示')}
               </h3>
               <button
@@ -531,8 +530,8 @@ function HomeClient() {
               </button>
             </div>
             <div className='mb-6'>
-              <div className='relative overflow-hidden rounded-lg mb-4 bg-green-50 dark:bg-green-900/20'>
-                <div className='absolute inset-y-0 left-0 w-1.5 bg-green-500 dark:bg-green-400'></div>
+              <div className='relative overflow-hidden rounded-lg mb-4 bg-brand-50 dark:bg-brand-900/20'>
+                <div className='absolute inset-y-0 left-0 w-1.5 bg-brand-500 dark:bg-brand-400'></div>
                 <p className='ml-4 text-gray-600 dark:text-gray-300 leading-relaxed'>
                   {announcement}
                 </p>
@@ -540,7 +539,7 @@ function HomeClient() {
             </div>
             <button
               onClick={() => handleCloseAnnouncement(announcement)}
-              className='w-full rounded-lg bg-linear-to-r from-green-600 to-green-700 px-4 py-3 text-white font-medium shadow-md hover:shadow-lg transition-all duration-300'
+              className='w-full rounded-lg bg-linear-to-r from-brand-600 to-brand-700 px-4 py-3 text-white font-medium shadow-md hover:shadow-lg transition-all duration-300'
             >
               {convert('我知道了')}
             </button>

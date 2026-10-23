@@ -1,0 +1,16 @@
+node_modules
+.next
+.git
+.env*
+!.env.example
+.vscode
+.idea
+data
+local-synology-test
+cookies.txt
+*.tar
+*.log
+test-results
+playwright-report
+.pnpm-store
+apps

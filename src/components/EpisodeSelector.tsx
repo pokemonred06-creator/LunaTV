@@ -495,7 +495,10 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
           {!sourceSearchLoading &&
             !sourceSearchError &&
             availableSources.length > 0 && (
-              <div className='flex-1 overflow-y-auto space-y-2 pb-20 pr-1'>
+              <div
+                className='flex-1 overflow-y-auto space-y-2 pb-20 pr-1'
+                data-wheel-scope='source-menu'
+              >
                 {sortedSources.map((source, index) => {
                   const isCurrentSource =
                     source.source?.toString() === currentSource?.toString() &&

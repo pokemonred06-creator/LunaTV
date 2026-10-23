@@ -130,7 +130,7 @@ export default function ContinueWatching({ className }: ContinueWatchingProps) {
             Array.from({ length: 6 }).map((_, index) => (
               <div
                 key={`skeleton-${index}`}
-                className='min-w-[96px] w-24 sm:min-w-[180px] sm:w-44'
+                className='min-w-24 w-24 sm:min-w-45 sm:w-44'
               >
                 {/* Fixed aspect ratio syntax: aspect-[2/3] -> aspect-2/3 */}
                 <div className='relative aspect-2/3 w-full overflow-hidden rounded-lg bg-gray-200 dark:bg-gray-800'>
@@ -150,7 +150,7 @@ export default function ContinueWatching({ className }: ContinueWatchingProps) {
               return (
                 <div
                   key={record.key}
-                  className='min-w-[96px] w-24 sm:min-w-[180px] sm:w-44 snap-start'
+                  className='min-w-24 w-24 sm:min-w-45 sm:w-44 snap-start'
                 >
                   <VideoCard
                     id={id}

@@ -13,10 +13,15 @@ interface MobileHeaderProps {
   forced?: boolean;
 }
 
-const MobileHeader = ({ showBackButton = false, forced = false }: MobileHeaderProps) => {
+const MobileHeader = ({
+  showBackButton = false,
+  forced = false,
+}: MobileHeaderProps) => {
   const { siteName } = useSite();
   return (
-    <header className={`${forced ? 'block' : 'md:hidden'} fixed top-0 left-0 right-0 z-999 w-full bg-white/70 backdrop-blur-xl border-b border-gray-200/50 shadow-sm dark:bg-gray-900/70 dark:border-gray-700/50`}>
+    <header
+      className={`${forced ? 'block' : 'md:hidden'} fixed top-0 left-0 right-0 z-999 w-full bg-white/60 dark:bg-slate-950/65 backdrop-blur-2xl border-b border-slate-200/40 dark:border-slate-800/40 shadow-xs`}
+    >
       <div className='h-12 flex items-center justify-between px-4'>
         {/* 左侧：搜索按钮、返回按钮和设置按钮 */}
         <div className='flex items-center gap-2'>
@@ -54,9 +59,16 @@ const MobileHeader = ({ showBackButton = false, forced = false }: MobileHeaderPr
       <div className='absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2'>
         <Link
           href='/'
-          className='text-2xl font-bold text-green-600 tracking-tight hover:opacity-80 transition-opacity'
+          className='flex items-center gap-1.5 select-none hover:opacity-90 transition-opacity'
         >
-          {siteName}
+          <div className='w-6 h-6 rounded-md bg-gradient-to-br from-brand-500 to-emerald-500 flex items-center justify-center shadow-md shadow-brand-500/20'>
+            <span className='text-white text-[11px] font-black'>
+              {siteName?.charAt(0)?.toUpperCase() ?? 'L'}
+            </span>
+          </div>
+          <span className='text-base font-black bg-gradient-to-r from-brand-600 to-emerald-500 dark:from-brand-400 dark:to-emerald-300 bg-clip-text text-transparent tracking-tight'>
+            {siteName}
+          </span>
         </Link>
       </div>
     </header>

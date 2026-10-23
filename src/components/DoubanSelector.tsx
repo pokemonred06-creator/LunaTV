@@ -51,6 +51,7 @@ const OPTIONS_CONFIG = {
     secondary: [
       { label: '全部', value: 'tv' },
       { label: '国产', value: 'tv_domestic' },
+      { label: '短剧', value: 'tv_short' },
       { label: '欧美', value: 'tv_american' },
       { label: '日本', value: 'tv_japanese' },
       { label: '韩国', value: 'tv_korean' },
@@ -304,32 +305,6 @@ const DoubanSelector: React.FC<DoubanSelectorProps> = ({
     [],
   );
 
-  const handleVerticalWheelPassThrough = useCallback(
-    (e: React.WheelEvent<HTMLDivElement>) => {
-      // If user is actually scrolling horizontally, let the container handle it natively
-      if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
-      if (e.deltaY === 0) return;
-
-      // Vertical scroll over horizontal container:
-      // Prevent the container from eating the event or causing weird behavior on some older browsers
-      e.preventDefault();
-
-      if (
-        typeof window !== 'undefined' &&
-        typeof window.scrollBy === 'function'
-      ) {
-        try {
-          // Attempt modern smooth scroll, or auto
-          window.scrollBy({ top: e.deltaY, behavior: 'auto' });
-        } catch {
-          // Fallback for older browsers (e.g. older Tesla Chromium)
-          window.scrollBy(0, e.deltaY);
-        }
-      }
-    },
-    [],
-  );
-
   // 5. Scroll to Active Item (Secondary Only)
   useLayoutEffect(() => {
     if (!showSecondary || !secondaryContainerRef.current || !secondarySelection)
@@ -368,7 +343,6 @@ const DoubanSelector: React.FC<DoubanSelectorProps> = ({
         ref={containerRef}
         className='relative flex items-center overflow-x-auto bg-gray-200/60 dark:bg-gray-700/60 rounded-full p-1 backdrop-blur-sm [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]'
         onKeyDownCapture={handlePageScrollKeys}
-        onWheelCapture={handleVerticalWheelPassThrough}
       >
         <div
           className='absolute top-1 bottom-1 bg-white dark:bg-gray-600 rounded-full shadow-sm transition-all duration-300 ease-out pointer-events-none'

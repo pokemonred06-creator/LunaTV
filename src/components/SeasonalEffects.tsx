@@ -2,7 +2,6 @@
 
 import { usePathname } from 'next/navigation';
 import React, {
-  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -21,6 +20,7 @@ import PhysicsSnow from './PhysicsSnow';
 import { generateTextures } from './SeasonalEffectsHelpers';
 import {
   createSummerPhysicsState,
+  serializeSummerPhysics,
   stepSummerPhysics,
   SummerPhysicsConfig,
   SummerPhysicsMutableState,
@@ -39,8 +39,8 @@ export type Season = 'spring' | 'summer' | 'autumn' | 'winter' | 'auto' | 'off';
 type ActiveSeason = 'spring' | 'summer' | 'autumn' | 'winter';
 type SummerPhysicsWorkerMessage = {
   type: 'state';
-  drops: RenderState['drops'];
-  trails: RenderState['trails'];
+  dropsData: Float32Array;
+  trailsData: Float32Array;
   flash: number;
 };
 // Keep intensity names aligned with persisted admin config values
@@ -75,6 +75,17 @@ function useElementRect(element: HTMLElement | null) {
   }, [element]);
   return rect;
 }
+
+const isActiveSeason = (s: string): s is ActiveSeason =>
+  ['spring', 'summer', 'autumn', 'winter'].includes(s);
+
+const getCurrentSeason = (): ActiveSeason => {
+  const month = new Date().getMonth() + 1;
+  if (month >= 3 && month <= 5) return 'spring';
+  if (month >= 6 && month <= 8) return 'summer';
+  if (month >= 9 && month <= 11) return 'autumn';
+  return 'winter';
+};
 
 export const SeasonalEffects: React.FC<SeasonalEffectsProps> = ({
   season = 'auto',
@@ -158,21 +169,6 @@ export const SeasonalEffects: React.FC<SeasonalEffectsProps> = ({
     setForceCanvas(mobile);
   }, []);
 
-  // -- Season Logic --
-  const isActiveSeason = useCallback(
-    (s: string): s is ActiveSeason =>
-      ['spring', 'summer', 'autumn', 'winter'].includes(s),
-    [],
-  );
-
-  const getCurrentSeason = useCallback((): ActiveSeason => {
-    const month = new Date().getMonth() + 1;
-    if (month >= 3 && month <= 5) return 'spring';
-    if (month >= 6 && month <= 8) return 'summer';
-    if (month >= 9 && month <= 11) return 'autumn';
-    return 'winter';
-  }, []);
-
   const resolvedSeason: ActiveSeason | 'off' = useMemo(() => {
     if (!mounted || prefersReduced || isPlayerPage || !enabled) return 'off';
     if (season === 'auto') return getCurrentSeason();
@@ -185,8 +181,6 @@ export const SeasonalEffects: React.FC<SeasonalEffectsProps> = ({
     prefersReduced,
     isPlayerPage,
     enabled,
-    isActiveSeason,
-    getCurrentSeason,
   ]);
 
   const shouldRun = resolvedSeason === 'summer';
@@ -197,11 +191,11 @@ export const SeasonalEffects: React.FC<SeasonalEffectsProps> = ({
     const mobileMult = isMobile ? 0.35 : 1.0;
     const cfg: SummerPhysicsConfig = {
       MAX_DROPS: Math.round(
-        (intensity === 'heavy' ? 300 : intensity === 'normal' ? 150 : 80) *
+        (intensity === 'heavy' ? 200 : intensity === 'normal' ? 100 : 50) *
           mobileMult,
       ),
       SPAWN_PER_SEC: Math.round(
-        (intensity === 'heavy' ? 30 : intensity === 'normal' ? 15 : 8) *
+        (intensity === 'heavy' ? 20 : intensity === 'normal' ? 10 : 5) *
           mobileMult,
       ),
       RAMP_TIME: 3.0,
@@ -221,8 +215,12 @@ export const SeasonalEffects: React.FC<SeasonalEffectsProps> = ({
       WET_DAMP: 8.0,
       WET_VY_BOOST: 70,
       MERGE_DIST_FACTOR: 1.0,
-      TRAIL_SPAWN_DY: isMobile ? 6.0 : 4.0, // Fewer trail segments on mobile
+      TRAIL_SPAWN_DY: isMobile ? 18.0 : 12.0, // Significantly longer trail segments (fewer quads/overdraw)
       TRAIL_DECAY: isMobile ? 0.8 : 0.55, // Trails die faster on mobile
+      MAX_TRAILS: Math.round(
+        (intensity === 'heavy' ? 400 : intensity === 'normal' ? 200 : 100) *
+          mobileMult,
+      ),
     };
 
     return cfg;
@@ -292,6 +290,8 @@ export const SeasonalEffects: React.FC<SeasonalEffectsProps> = ({
     // Reset physics on restart
     stateRef.current.drops = [];
     stateRef.current.trails = [];
+    stateRef.current.dropsData = undefined;
+    stateRef.current.trailsData = undefined;
     stateRef.current.flash = 0;
     // Set start time ONCE when effect starts, safe for impurity
     // but better to just use relative time in loop
@@ -310,8 +310,8 @@ export const SeasonalEffects: React.FC<SeasonalEffectsProps> = ({
           event: MessageEvent<SummerPhysicsWorkerMessage>,
         ) => {
           if (!active || event.data.type !== 'state') return;
-          stateRef.current.drops = event.data.drops;
-          stateRef.current.trails = event.data.trails;
+          stateRef.current.dropsData = event.data.dropsData;
+          stateRef.current.trailsData = event.data.trailsData;
           stateRef.current.flash = event.data.flash;
           // Bump version counters so renderer knows to re-upload GPU buffers
           stateRef.current.dropsVersion++;
@@ -445,6 +445,12 @@ export const SeasonalEffects: React.FC<SeasonalEffectsProps> = ({
             );
             stateRef.current.drops = nextState.drops;
             stateRef.current.trails = nextState.trails;
+            const { dropsData, trailsData } = serializeSummerPhysics(
+              nextState.drops,
+              nextState.trails,
+            );
+            stateRef.current.dropsData = dropsData;
+            stateRef.current.trailsData = trailsData;
             stateRef.current.flash = nextState.flash;
             stateRef.current.dropsVersion++;
             stateRef.current.trailsVersion++;
@@ -498,6 +504,15 @@ export const SeasonalEffects: React.FC<SeasonalEffectsProps> = ({
 
   if (!enabled || !mounted || resolvedSeason === 'off') return null;
 
+  // Seasonal atmosphere tint colours — very subtle overlays that deepen immersion.
+  const ATMOSPHERE: Record<string, string> = {
+    spring: 'rgba(255, 182, 193, 0.035)', // soft rose
+    summer: 'rgba(15, 40, 100, 0.045)',   // stormy midnight blue
+    autumn: 'rgba(180, 83,   9, 0.040)',  // warm amber
+    winter: 'rgba(186, 220, 255, 0.040)', // cool ice blue
+  };
+  const atmosphereColor = ATMOSPHERE[resolvedSeason] ?? 'transparent';
+
   return createPortal(
     <div
       ref={setHostEl}
@@ -506,10 +521,22 @@ export const SeasonalEffects: React.FC<SeasonalEffectsProps> = ({
         position: 'fixed',
         inset: 0,
         pointerEvents: 'none',
-        zIndex: 50,
+        zIndex: 10,
         overflow: 'hidden',
       }}
     >
+      {/* Seasonal atmosphere tint */}
+      <div
+        style={{
+          position: 'absolute',
+          inset: 0,
+          background: atmosphereColor,
+          mixBlendMode: 'multiply',
+          transition: 'background 1.2s ease',
+          pointerEvents: 'none',
+        }}
+      />
+
       {resolvedSeason === 'summer' && (
         <canvas
           ref={canvasRef}
@@ -518,6 +545,8 @@ export const SeasonalEffects: React.FC<SeasonalEffectsProps> = ({
             inset: 0,
             width: '100%',
             height: '100%',
+            opacity: 0,
+            animation: 'se-fadein 0.9s ease forwards',
           }}
         />
       )}
@@ -531,10 +560,15 @@ export const SeasonalEffects: React.FC<SeasonalEffectsProps> = ({
 
       {resolvedSeason === 'spring' && (
         <MagicalButterfly
-          count={intensity === 'heavy' ? 6 : intensity === 'normal' ? 4 : 2}
+          count={
+            isMobile
+              ? Math.min(2, intensity === 'heavy' ? 6 : intensity === 'normal' ? 4 : 2)
+              : intensity === 'heavy' ? 6 : intensity === 'normal' ? 4 : 2
+          }
         />
       )}
     </div>,
     document.body,
   );
 };
+

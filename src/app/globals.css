@@ -1,6 +1,80 @@
 @import 'tailwindcss';
 @variant dark (&:where(.dark, .dark *));
 
+@theme {
+  /* Override brand colors to Violet */
+  --color-brand-50: #f5f3ff;
+  --color-brand-100: #ede9fe;
+  --color-brand-200: #ddd6fe;
+  --color-brand-300: #c4b5fd;
+  --color-brand-400: #a78bfa;
+  --color-brand-500: #8b5cf6;
+  --color-brand-600: #7c3aed;
+  --color-brand-700: #6d28d9;
+  --color-brand-800: #5b21b6;
+  --color-brand-900: #4c1d95;
+  --color-brand-950: #2e1065;
+
+  /* Map standard green classes to Violet */
+  --color-green-50: #f5f3ff;
+  --color-green-100: #ede9fe;
+  --color-green-200: #ddd6fe;
+  --color-green-300: #c4b5fd;
+  --color-green-400: #a78bfa;
+  --color-green-500: #8b5cf6;
+  --color-green-600: #7c3aed;
+  --color-green-700: #6d28d9;
+  --color-green-800: #5b21b6;
+  --color-green-900: #4c1d95;
+  --color-green-950: #2e1065;
+
+  /* Map standard emerald classes to Indigo */
+  --color-emerald-50: #eef2ff;
+  --color-emerald-100: #e0e7ff;
+  --color-emerald-200: #c7d2fe;
+  --color-emerald-300: #a5b4fc;
+  --color-emerald-400: #818cf8;
+  --color-emerald-500: #6366f1;
+  --color-emerald-600: #4f46e5;
+  --color-emerald-700: #3730a3;
+  --color-emerald-800: #1e1b4b;
+  --color-emerald-900: #312e81;
+}
+
+@utility glass-panel-light {
+  background-color: rgba(255, 255, 255, 0.65);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(226, 232, 240, 0.8);
+}
+
+@utility glass-panel-dark {
+  background-color: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+@utility glass-card-light {
+  background-color: rgba(255, 255, 255, 0.45);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.02);
+}
+
+@utility glass-card-dark {
+  background-color: rgba(15, 22, 42, 0.4);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.03);
+  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.15);
+}
+
+@utility text-glow-green {
+  text-shadow: 0 0 10px rgba(139, 92, 246, 0.4);
+}
+
 @layer utilities {
   .scrollbar-hide {
     -ms-overflow-style: none; /* IE and Edge */
@@ -14,11 +88,11 @@
 
 :root {
   /* 默认（浅色模式）为深色文字 */
-  --foreground-rgb: 0, 0, 0;
+  --foreground-rgb: 15, 23, 42;
 }
 
 html.dark {
-  --foreground-rgb: 255, 255, 255;
+  --foreground-rgb: 248, 250, 252;
 }
 
 html,
@@ -32,18 +106,23 @@ body {
 
 body {
   color: rgb(var(--foreground-rgb));
+  transition:
+    background-color 0.3s ease,
+    color 0.3s ease;
 }
 
 html:not(.dark) body {
-  background: linear-gradient(
-    180deg,
-    #e6f3fb 0%,
-    #eaf3f7 18%,
-    #f7f7f3 38%,
-    #e9ecef 60%,
-    #dbe3ea 80%,
-    #d3dde6 100%
+  background: radial-gradient(
+    circle at top,
+    #f8fafc 0%,
+    #f1f5f9 50%,
+    #e2e8f0 100%
   );
+  background-attachment: fixed;
+}
+
+html.dark body {
+  background: radial-gradient(circle at top, #0e1729 0%, #080c14 100%);
   background-attachment: fixed;
 }
 
@@ -109,6 +188,11 @@ html:not(.dark) body {
 }
 
 /* View Transitions API 动画 */
+@keyframes se-fadein {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
 @keyframes slide-from-top {
   from {
     clip-path: polygon(0 0, 100% 0, 100% 0, 0 0);
@@ -335,7 +419,7 @@ body.player-fullscreen-active {
 
 /* Level 1 indicator - add a small badge or change color */
 .player-level-fullscreen .art-icon-fullscreen-custom svg path {
-  fill: #22c55e; /* Green to indicate level 1 active */
+  fill: #8b5cf6; /* Violet to indicate level 1 active */
 }
 
 /* =====================================================
@@ -363,12 +447,12 @@ body.player-fullscreen-active {
 
 .mobile-fullscreen-btn:active {
   transform: scale(0.95);
-  background: rgba(34, 197, 94, 0.7) !important;
+  background: rgba(139, 92, 246, 0.7) !important;
 }
 
 /* Change icon color when in player-level fullscreen */
 .player-level-fullscreen .mobile-fullscreen-btn svg path {
-  fill: #22c55e;
+  fill: #8b5cf6;
 }
 
 /* Show exit icon when in fullscreen */
@@ -379,7 +463,7 @@ body.player-fullscreen-active {
   right: 2px;
   width: 14px;
   height: 14px;
-  background: #22c55e;
+  background: #8b5cf6;
   border-radius: 50%;
   font-size: 10px;
   color: white;
@@ -387,4 +471,13 @@ body.player-fullscreen-active {
   align-items: center;
   justify-content: center;
   font-weight: bold;
+}
+
+.sm-show-block {
+  display: none;
+}
+@media (min-width: 640px) {
+  .sm-show-block {
+    display: block !important;
+  }
 }

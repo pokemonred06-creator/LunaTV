@@ -22,10 +22,8 @@ function shouldSkipAuth(pathname: string): boolean {
     '/api/server-config',
     '/api/auth/verify', // Allow magic link verification
     '/api/seasonal-effects',
-    '/api/proxy/', // Go proxy handles its own HMAC auth
+    '/api/proxy/', // Handler verifies cookies or scoped media signatures
     '/api/image-proxy', // Image proxy has SSRF validation
-    '/api/live/precheck', // Stream type detection
-    '/api/live/m3u', // IPTV clients (e.g., Orion) cannot send site auth cookies
   ];
 
   return skipPaths.some((path) => pathname.startsWith(path));

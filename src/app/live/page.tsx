@@ -1,6 +1,14 @@
 'use client';
 
-import { AlertTriangle, Heart, Loader2, Radio, Tv } from 'lucide-react';
+import {
+  AlertTriangle,
+  ChevronLeft,
+  ChevronRight,
+  Heart,
+  Loader2,
+  Radio,
+  Tv,
+} from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
 import {
   Suspense,
@@ -20,6 +28,11 @@ import {
   saveFavorite,
   subscribeToDataUpdates,
 } from '@/lib/db.client';
+import {
+  guessLiveStreamType,
+  liveStreamMimeType,
+  type LiveStreamType,
+} from '@/lib/live-stream';
 import { parseCustomTimeFormat } from '@/lib/time';
 
 import EpgScrollableRow from '@/components/EpgScrollableRow';
@@ -55,6 +68,9 @@ interface LiveChannel {
   group: string;
   url: string;
 }
+
+type ChannelAvailabilityState =
+  'unknown' | 'checking' | 'playable' | 'unavailable' | 'unsupported';
 
 interface LiveSource {
   key: string;
@@ -125,6 +141,83 @@ const getProxiedLogoUrl = (logoUrl: string, sourceKey?: string) => {
   return `/api/proxy/logo?url=${encodeURIComponent(logoUrl)}&moontv-source=${sourceKey || ''}`;
 };
 
+const getLiveErrorPresentation = (message: string | null) => {
+  if (!message) {
+    return {
+      title: 'No Signal',
+      detail: '',
+    };
+  }
+
+  if (
+    message.startsWith('Stream unavailable') ||
+    message.startsWith('Precheck failed') ||
+    message.includes('HTTP 403') ||
+    message.includes('HTTP 404')
+  ) {
+    return {
+      title: 'Channel Unavailable',
+      detail: message,
+    };
+  }
+
+  if (message.startsWith('Unsupported protocol:')) {
+    return {
+      title: 'Protocol Not Supported',
+      detail: message,
+    };
+  }
+
+  return {
+    title: 'Format Not Supported',
+    detail: message,
+  };
+};
+
+const getUnsupportedLiveProtocol = (url: string) => {
+  try {
+    const scheme = new URL(url).protocol.replace(':', '').toLowerCase();
+    if (['http', 'https', 'rtmp', 'rtsp', 'udp', 'rtp'].includes(scheme))
+      return null;
+  } catch {
+    return null;
+  }
+
+  return 'Unsupported protocol';
+};
+
+const scoreChannelUrlForPlayback = (url: string) => {
+  const lower = url.trim().toLowerCase();
+  let score = 0;
+
+  if (lower.startsWith('https://')) score += 4;
+  else if (lower.startsWith('http://')) score += 2;
+
+  if (lower.includes('.m3u8')) score += 10;
+  if (lower.includes('.flv')) score += 8;
+  if (/\.(mp4|m4v|mov|webm)(\?|$)/i.test(lower)) score += 6;
+  if (/\/(rtp|udp)\//i.test(lower) || lower.includes('.ts')) score += 5;
+
+  if (
+    lower.includes('.php') ||
+    lower.includes('api.php') ||
+    lower.includes('live.php')
+  )
+    score -= 6;
+
+  return score;
+};
+
+const sortChannelsForPlayback = (input: LiveChannel[]) =>
+  input
+    .map((channel, index) => ({
+      channel,
+      index,
+      score: scoreChannelUrlForPlayback(channel.url),
+    }))
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .map(({ channel }) => channel);
+
 function useDebounce<T>(value: T, delay: number): T {
   const [debouncedValue, setDebouncedValue] = useState(value);
   useEffect(() => {
@@ -138,6 +231,10 @@ function useDebounce<T>(value: T, delay: number): T {
 
 function useLiveCore() {
   const searchParams = useSearchParams();
+  const initialSelectionRef = useRef({
+    source: searchParams.get('source'),
+    channel: searchParams.get('id'),
+  });
   const [sources, setSources] = useState<LiveSource[]>([]);
   const [channels, setChannels] = useState<LiveChannel[]>([]);
   const [currentSource, setCurrentSource] = useState<LiveSource | null>(null);
@@ -196,15 +293,16 @@ function useLiveCore() {
               : s,
           ),
         );
-        setChannels(parsedChannels);
+        const sortedChannels = sortChannelsForPlayback(parsedChannels);
+        setChannels(sortedChannels);
 
         const initialChannel = targetChannelId
-          ? parsedChannels.find((c) => c.id === targetChannelId) ||
-            parsedChannels[0]
-          : parsedChannels[0];
+          ? sortedChannels.find((c) => c.id === targetChannelId) ||
+            sortedChannels[0]
+          : sortedChannels[0];
 
         setCurrentChannel(initialChannel);
-        return { channels: parsedChannels, initialChannel };
+        return { channels: sortedChannels, initialChannel };
       } catch (err: unknown) {
         if (!controller.signal.aborted) {
           console.error(err);
@@ -241,8 +339,8 @@ function useLiveCore() {
         setSources(loadedSources);
 
         if (loadedSources.length > 0) {
-          const urlSource = searchParams.get('source');
-          const urlChannel = searchParams.get('id');
+          const urlSource = initialSelectionRef.current.source;
+          const urlChannel = initialSelectionRef.current.channel;
           const target =
             loadedSources.find((s: LiveSource) => s.key === urlSource) ||
             loadedSources[0];
@@ -264,7 +362,7 @@ function useLiveCore() {
     };
     init();
     return () => controller.abort();
-  }, [searchParams, fetchChannels]);
+  }, [fetchChannels]);
 
   return {
     sources,
@@ -280,70 +378,18 @@ function useLiveCore() {
   };
 }
 
-type LiveStreamType = 'm3u8' | 'flv' | 'mp4' | 'audio' | 'ts' | 'unknown';
-
 function guessType(url: string): {
   type: LiveStreamType;
   unsupportedReason?: string;
 } {
-  const raw = (url || '').trim();
-  if (!raw) return { type: 'unknown' };
-
-  try {
-    const u = new URL(raw);
-    const scheme = u.protocol.replace(':', '').toLowerCase();
-    if (['rtmp', 'rtsp', 'udp', 'rtp'].includes(scheme)) {
-      return {
-        type: 'unknown',
-        unsupportedReason: `Unsupported protocol: ${scheme}`,
-      };
-    }
-  } catch {
-    return { type: 'unknown' };
-  }
-
-  const lower = raw.toLowerCase();
-  if (/\.(flv|xs)(\?|$)/i.test(lower) || /huya|douyu/.test(lower)) {
-    return { type: 'flv' };
-  }
-  if (
-    lower.includes('.m3u8') ||
-    lower.includes('/m3u8') ||
-    lower.includes('playlist.m3u') ||
-    lower.includes('index.m3u')
-  ) {
-    return { type: 'm3u8' };
-  }
-  if (/\.(mp4|m4v|mov|webm|ogv)(\?|$)/i.test(lower)) {
-    return { type: 'mp4' };
-  }
-  if (/\.(mp3|aac|m4a|ogg|wav|flac)(\?|$)/i.test(lower)) {
-    return { type: 'audio' };
-  }
-  if (/\/(rtp|udp)\//i.test(lower)) {
-    return { type: 'ts' };
-  }
-  return { type: 'ts' };
+  return { type: guessLiveStreamType(url) };
 }
 
-function streamMimeType(type: LiveStreamType): string {
-  switch (type) {
-    case 'flv':
-      return 'video/x-flv';
-    case 'm3u8':
-      return 'application/x-mpegURL';
-    case 'mp4':
-      return 'video/mp4';
-    case 'audio':
-      return 'audio/mpeg';
-    case 'ts':
-      return 'video/mp2t';
-    default:
-      return 'application/octet-stream';
-  }
-}
-
-function usePlayerState(videoUrl: string, sourceKey?: string) {
+function usePlayerState(
+  videoUrl: string,
+  sourceKey?: string,
+  channelId?: string,
+) {
   const debouncedUrl = useDebounce(videoUrl, 500);
   const debouncedKey = useDebounce(sourceKey, 500);
 
@@ -370,7 +416,7 @@ function usePlayerState(videoUrl: string, sourceKey?: string) {
 
     const check = async () => {
       try {
-        const checkUrl = `/api/live/precheck?url=${encodeURIComponent(debouncedUrl)}&moontv-source=${debouncedKey}`;
+        const checkUrl = `/api/live/precheck?url=${encodeURIComponent(debouncedUrl)}&moontv-source=${encodeURIComponent(debouncedKey)}&moontv-channel=${encodeURIComponent(channelId || '')}`;
         const res = await fetch(checkUrl, { signal: controller.signal });
         if (!res.ok) throw new Error(`Precheck failed with ${res.status}`);
         const data = await res.json();
@@ -391,36 +437,29 @@ function usePlayerState(videoUrl: string, sourceKey?: string) {
           setProxiedUrl('');
           setStreamType('unknown');
         } else {
-          const selectedType: 'm3u8' | 'flv' | 'ts' =
-            detected === 'flv' ? 'flv' : detected === 'm3u8' ? 'm3u8' : 'ts';
-
-          setStreamType(
-            selectedType === 'm3u8'
-              ? 'm3u8'
-              : selectedType === 'flv'
-                ? 'flv'
-                : 'ts',
-          );
-          setProxiedUrl(
-            `/api/proxy/${selectedType}?url=${encodeURIComponent(debouncedUrl)}&moontv-source=${debouncedKey}`,
-          );
+          const nextProxyUrl = `/api/proxy/${detected}?url=${encodeURIComponent(debouncedUrl)}&moontv-source=${encodeURIComponent(debouncedKey)}&moontv-channel=${encodeURIComponent(channelId || '')}`;
+          setStreamType(detected);
+          setUnsupportedType(null);
+          setProxiedUrl(nextProxyUrl);
         }
       } catch (e) {
         if ((e as Error).name !== 'AbortError') {
+          if (controller.signal.aborted) return;
           const fallback = guessType(debouncedUrl);
-          if (fallback.type === 'unknown') {
-            setUnsupportedType(
-              fallback.unsupportedReason || 'Unsupported stream type',
-            );
+          const message =
+            e instanceof Error ? e.message : 'Unsupported stream type';
+          if (
+            fallback.type === 'unknown' ||
+            message.startsWith('Stream unavailable') ||
+            message.startsWith('Precheck failed')
+          ) {
+            setUnsupportedType(fallback.unsupportedReason || message);
             setProxiedUrl('');
-            setStreamType('unknown');
+            setStreamType(
+              fallback.type === 'unknown' ? 'unknown' : fallback.type,
+            );
           } else {
-            const typeParam =
-              fallback.type === 'flv'
-                ? 'flv'
-                : fallback.type === 'm3u8'
-                  ? 'm3u8'
-                  : 'ts';
+            const typeParam = fallback.type;
             setStreamType(fallback.type);
             setProxiedUrl(
               `/api/proxy/${typeParam}?url=${encodeURIComponent(debouncedUrl)}&moontv-source=${debouncedKey}`,
@@ -434,7 +473,7 @@ function usePlayerState(videoUrl: string, sourceKey?: string) {
 
     check();
     return () => controller.abort();
-  }, [debouncedUrl, debouncedKey, videoUrl]);
+  }, [debouncedUrl, debouncedKey, videoUrl, channelId]);
 
   return { proxiedUrl, isStreamLoading, unsupportedType, streamType };
 }
@@ -542,7 +581,24 @@ function LivePageClient() {
   } = useLiveCore();
 
   const { proxiedUrl, isStreamLoading, unsupportedType, streamType } =
-    usePlayerState(currentChannel?.url || '', currentSource?.key);
+    usePlayerState(
+      currentChannel?.url || '',
+      currentSource?.key,
+      currentChannel?.id,
+    );
+  const liveError = getLiveErrorPresentation(unsupportedType);
+  const [compatibilityChannel, setCompatibilityChannel] = useState('');
+  const [playbackFailure, setPlaybackFailure] = useState('');
+  const [playbackRetry, setPlaybackRetry] = useState(0);
+  const channelIdentity = `${currentSource?.key || ''}:${currentChannel?.id || ''}`;
+  useEffect(() => {
+    setPlaybackFailure('');
+    setPlaybackRetry(0);
+  }, [channelIdentity]);
+  const compatibilityPlayback = compatibilityChannel === channelIdentity;
+  const playbackUrl = compatibilityPlayback
+    ? `/api/live/relay?source=${encodeURIComponent(currentSource?.key || '')}&channel=${encodeURIComponent(currentChannel?.id || '')}`
+    : proxiedUrl;
 
   const { programs, isLoading: isEpgLoading } = useEpg(
     currentSource?.key,
@@ -562,10 +618,17 @@ function LivePageClient() {
   const [selectedGroup, setSelectedGroup] = useState<string>('');
   const [playerFocused, setPlayerFocused] = useState(false);
   const [isSwitchingSource, setIsSwitchingSource] = useState(false);
+  const [channelAvailability, setChannelAvailability] = useState<
+    Record<string, ChannelAvailabilityState>
+  >({});
+  const [channelAvailabilityDetails, setChannelAvailabilityDetails] = useState<
+    Record<string, string>
+  >({});
 
   const playerRef = useRef<Player | null>(null);
   const playerWrapperRef = useRef<HTMLDivElement>(null);
   const channelListRef = useRef<HTMLDivElement>(null);
+  const groupScrollerRef = useRef<HTMLDivElement>(null);
   const groupButtonRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
   const sourceRef = useRef<LiveSource | null>(null);
 
@@ -573,23 +636,51 @@ function LivePageClient() {
     sourceRef.current = currentSource;
   }, [currentSource]);
 
+  useEffect(() => {
+    setChannelAvailability({});
+    setChannelAvailabilityDetails({});
+  }, [currentSource?.key]);
+
+  const displayableChannels = useMemo(
+    () =>
+      channels.filter((channel) => !getUnsupportedLiveProtocol(channel.url)),
+    [channels],
+  );
+
   const groupedChannels = useMemo(() => {
     const groups: Record<string, LiveChannel[]> = {};
-    channels.forEach((c) => {
+    displayableChannels.forEach((c) => {
       const g = c.group || '其他';
       if (!groups[g]) groups[g] = [];
       groups[g].push(c);
     });
     return groups;
-  }, [channels]);
+  }, [displayableChannels]);
 
   const groupKeys = useMemo(
     () => Object.keys(groupedChannels).sort(),
     [groupedChannels],
   );
   const filteredChannels = useMemo(
-    () => (selectedGroup ? groupedChannels[selectedGroup] || [] : channels),
-    [selectedGroup, groupedChannels, channels],
+    () =>
+      selectedGroup
+        ? groupedChannels[selectedGroup] || []
+        : displayableChannels,
+    [selectedGroup, groupedChannels, displayableChannels],
+  );
+  const getChannelAvailabilityKey = useCallback(
+    (channel: LiveChannel) => `${currentSource?.key || 'global'}:${channel.id}`,
+    [currentSource?.key],
+  );
+  const getChannelAvailabilityState = useCallback(
+    (channel: LiveChannel): ChannelAvailabilityState => {
+      const protocolError = getUnsupportedLiveProtocol(channel.url);
+      if (protocolError) return 'unsupported';
+      return (
+        channelAvailability[getChannelAvailabilityKey(channel)] || 'unknown'
+      );
+    },
+    [channelAvailability, getChannelAvailabilityKey],
   );
 
   const videoOptions = useMemo(
@@ -659,6 +750,15 @@ function LivePageClient() {
     });
     if (channelListRef.current) channelListRef.current.scrollTop = 0;
   };
+
+  const scrollGroupRail = useCallback((direction: 'left' | 'right') => {
+    if (!groupScrollerRef.current) return;
+    const amount = Math.max(groupScrollerRef.current.clientWidth * 0.75, 220);
+    groupScrollerRef.current.scrollBy({
+      left: direction === 'left' ? -amount : amount,
+      behavior: 'smooth',
+    });
+  }, []);
 
   const handlePlayerReady = useCallback((player: Player) => {
     playerRef.current = player;
@@ -735,20 +835,6 @@ function LivePageClient() {
     }
   };
 
-  const handlePlayerWheel = useCallback(
-    (e: React.WheelEvent<HTMLDivElement>) => {
-      if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
-      if (e.deltaY === 0) return;
-
-      e.preventDefault();
-      window.scrollBy({
-        top: e.deltaY,
-        behavior: 'auto',
-      });
-    },
-    [],
-  );
-
   // Initial scroll
   useEffect(() => {
     if (currentChannel && !isChannelLoading) {
@@ -795,30 +881,21 @@ function LivePageClient() {
 
   return (
     <PageLayout activePath='/live'>
-      {/* 
-        LAYOUT STRATEGY (Attempt #3 - Robust Fix):
-        Mobile: Flex-Col. Player Top (Sticky). Info Middle. List Bottom (fills rest).
-        Desktop: Flex-Row. Player+Info Left. List Right (Sidebar).
-        No 'hidden' classes depending on state to ensure visibility.
-      */}
-      {/* OUTER CONTAINER: allow the page to grow vertically on desktop */}
-      <div className='flex flex-col lg:flex-row min-h-[calc(100vh-64px)] w-full'>
-        {/* === LEFT PANE: PLAYER & INFO === 
-            Mobile: flex-none (take only natural height). 
-            Desktop: flex-1 (grow to fill width), h-full (fill height).
-            removed 'overflow-y-auto' so mobile doesn't scroll this container.
-        */}
-        <div className='flex-none lg:flex-1 flex flex-col min-w-0 bg-black relative lg:min-h-[calc(100vh-64px)]'>
-          {/* PLAYER WRAPPER: Removed sticky, just relative now */}
+      {/* OUTER CONTAINER: Dark obsidian layout with deep spacing */}
+      <div className='flex flex-col lg:flex-row min-h-[calc(100vh-64px)] w-full bg-[#0a0f1d] text-slate-100 p-3 lg:p-6 gap-4 lg:gap-6'>
+        {/* === LEFT PANE: PLAYER & INFO === */}
+        <div className='flex-none lg:flex-1 flex flex-col min-w-0 bg-[#0f172a]/40 backdrop-blur-md border border-slate-800/60 rounded-3xl p-4 lg:p-6 gap-4 relative lg:min-h-[calc(100vh-64px)] shadow-2xl'>
+          {/* PLAYER WRAPPER */}
           <div
             ref={playerWrapperRef}
             className={`
               relative z-30
               w-full shrink-0
-              aspect-video lg:aspect-auto lg:flex-1
-              bg-black overflow-hidden
-              transition-ring duration-200
-              ${playerFocused ? 'ring-2 ring-blue-500/50' : ''}
+              aspect-video lg:flex-1
+              bg-black overflow-hidden rounded-2xl
+              border border-slate-800/80 shadow-[0_4px_30px_rgba(0,0,0,0.5)]
+              transition-all duration-300
+              ${playerFocused ? 'ring-2 ring-blue-500/50 shadow-[0_0_25px_rgba(59,130,246,0.3)]' : ''}
               [&_.video-js]:w-full [&_.video-js]:h-full
               [&_.vjs-tech]:object-contain
             `}
@@ -830,55 +907,133 @@ function LivePageClient() {
               setPlayerFocused(true);
               playerWrapperRef.current?.focus();
             }}
-            onWheelCapture={handlePlayerWheel}
           >
+            {proxiedUrl && !unsupportedType && (
+              <button
+                className='absolute top-4 right-4 z-40 rounded-full bg-slate-900/80 px-3 py-1.5 text-xs text-white'
+                onClick={() =>
+                  setCompatibilityChannel(
+                    compatibilityPlayback ? '' : channelIdentity,
+                  )
+                }
+              >
+                {compatibilityPlayback
+                  ? 'Original playback'
+                  : 'Compatibility playback'}
+              </button>
+            )}
+
+            {/* Pulsing Live Badge Overlay */}
+            {proxiedUrl && !unsupportedType && (
+              <div className='absolute top-4 left-4 z-40 bg-red-600/90 text-white text-[10px] font-bold tracking-wider px-2.5 py-1 rounded-full flex items-center gap-1.5 shadow-lg uppercase backdrop-blur-sm animate-pulse'>
+                <span className='w-1.5 h-1.5 bg-white rounded-full'></span>
+                Live
+              </div>
+            )}
+
             {proxiedUrl && !unsupportedType ? (
               <VideoJsPlayer
-                key={proxiedUrl}
-                url={proxiedUrl}
+                key={playbackUrl}
+                url={playbackUrl}
                 poster={getProxiedLogoUrl(
                   currentChannel?.logo || '',
                   currentSource?.key,
                 )}
-                type={streamMimeType(streamType || 'm3u8')}
+                type={liveStreamMimeType(
+                  compatibilityPlayback ? 'm3u8' : streamType || 'm3u8',
+                  currentChannel?.url,
+                )}
                 autoPlay={true}
                 onReady={handlePlayerReady}
+                reloadTrigger={playbackRetry}
+                onPlay={() => {
+                  setPlaybackFailure('');
+                  if (!currentChannel) return;
+                  setChannelAvailability((prev) => ({
+                    ...prev,
+                    [getChannelAvailabilityKey(currentChannel)]: 'playable',
+                  }));
+                }}
+                onError={(error) => {
+                  const code = (error as { code?: number })?.code;
+                  if (!compatibilityPlayback && (code === 3 || code === 4)) {
+                    setPlaybackFailure('');
+                    setCompatibilityChannel(channelIdentity);
+                    return;
+                  }
+                  const message =
+                    error instanceof Error
+                      ? error.message
+                      : (error as { message?: string })?.message ||
+                        'This source could not be played. Retry or choose another channel.';
+                  setPlaybackFailure(message);
+                  if (currentChannel)
+                    setChannelAvailabilityDetails((prev) => ({
+                      ...prev,
+                      [getChannelAvailabilityKey(currentChannel)]: message,
+                    }));
+                }}
                 className='w-full h-full'
                 isLive={true}
                 videoJsOptions={videoOptions}
               />
             ) : (
-              <div className='absolute inset-0 flex items-center justify-center text-gray-500'>
+              <div className='absolute inset-0 flex items-center justify-center text-slate-500 bg-slate-950/60'>
                 {unsupportedType ? (
-                  <div className='text-center text-red-400'>
-                    <AlertTriangle className='w-10 h-10 mx-auto mb-2' />
-                    <p>Format Not Supported: {unsupportedType}</p>
+                  <div className='text-center text-red-400 p-6'>
+                    <AlertTriangle className='w-12 h-12 mx-auto mb-3 text-red-500/80' />
+                    <p className='font-semibold'>{liveError.title}</p>
+                    <p className='text-xs text-slate-500 mt-1'>
+                      {liveError.detail}
+                    </p>
                   </div>
                 ) : (
-                  <p>No Signal</p>
+                  <div className='text-center'>
+                    <Tv className='w-12 h-12 mx-auto mb-3 opacity-20' />
+                    <p className='text-sm tracking-wider'>NO SIGNAL</p>
+                  </div>
                 )}
+              </div>
+            )}
+
+            {playbackFailure && (
+              <div
+                role='alert'
+                className='absolute bottom-20 left-4 right-4 z-40 rounded-xl bg-slate-950/95 p-4 text-center text-sm text-white'
+              >
+                <p>{playbackFailure}</p>
+                <button
+                  className='mt-2 rounded-lg bg-blue-600 px-4 py-2'
+                  onClick={() => {
+                    setPlaybackFailure('');
+                    setPlaybackRetry((value) => value + 1);
+                  }}
+                >
+                  Retry playback
+                </button>
               </div>
             )}
 
             {/* Overlay Loader */}
             {isStreamLoading && (
-              <div className='absolute inset-0 flex items-center justify-center bg-black/60 backdrop-blur-sm text-white z-20 pointer-events-none'>
-                <div className='flex flex-col items-center gap-2'>
-                  <Loader2 className='w-8 h-8 animate-spin' />
-                  <span className='text-sm font-medium'>Connecting...</span>
+              <div className='absolute inset-0 flex items-center justify-center bg-black/80 backdrop-blur-sm text-white z-20 pointer-events-none'>
+                <div className='flex flex-col items-center gap-3'>
+                  <Loader2 className='w-10 h-10 animate-spin text-blue-500' />
+                  <span className='text-sm font-medium tracking-wide text-slate-300'>
+                    Connecting Stream...
+                  </span>
                 </div>
               </div>
             )}
           </div>
 
-          {/* INFO BAR: shrink-0 ensures it doesn't collapse if space is tight */}
-          <div className='shrink-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 lg:border-t lg:border-b-0 p-4 relative z-20'>
-            {/* ... Info Content ... */}
+          {/* BASIC INFO BAR: logo, name, group, favorite button */}
+          <div className='shrink-0 bg-slate-900/50 border border-slate-800/50 rounded-2xl p-4 relative z-20'>
             {currentChannel ? (
               <>
-                <div className='flex items-center justify-between mb-4 gap-4'>
-                  <div className='flex items-center gap-3 overflow-hidden min-w-0'>
-                    <div className='w-10 h-10 sm:w-12 sm:h-12 bg-gray-50 dark:bg-gray-800 rounded-lg shrink-0 flex items-center justify-center p-1 border border-gray-100 dark:border-gray-700'>
+                <div className='flex items-center justify-between gap-4'>
+                  <div className='flex items-center gap-3.5 overflow-hidden min-w-0'>
+                    <div className='w-12 h-12 bg-slate-950/60 rounded-xl shrink-0 flex items-center justify-center p-1 border border-slate-800/60 shadow-inner'>
                       {currentChannel.logo ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img
@@ -891,15 +1046,19 @@ function LivePageClient() {
                           loading='lazy'
                         />
                       ) : (
-                        <Tv className='w-6 h-6 opacity-30' />
+                        <Tv className='w-6 h-6 opacity-30 text-slate-400' />
                       )}
                     </div>
                     <div className='min-w-0 flex-1'>
-                      <h2 className='text-base sm:text-lg font-bold truncate text-gray-900 dark:text-gray-100 leading-tight'>
+                      <h2 className='text-lg font-extrabold truncate text-white leading-tight tracking-wide flex items-center gap-2'>
                         {currentChannel.name}
+                        <span className='flex h-2 w-2 relative shrink-0'>
+                          <span className='animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75'></span>
+                          <span className='relative inline-flex rounded-full h-2 w-2 bg-green-500'></span>
+                        </span>
                       </h2>
-                      <div className='flex items-center gap-2 text-xs text-gray-500 mt-0.5'>
-                        <span className='px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 rounded'>
+                      <div className='flex items-center gap-2 text-xs text-slate-400 mt-1'>
+                        <span className='px-2 py-0.5 bg-blue-950/40 border border-blue-900/30 text-blue-400 font-medium rounded-md'>
                           {currentSource?.name}
                         </span>
                         <span className='truncate opacity-70'>
@@ -911,10 +1070,10 @@ function LivePageClient() {
 
                   <button
                     onClick={toggleFavorite}
-                    className={`p-2.5 rounded-full transition-colors active:scale-95 ${
+                    className={`p-3 rounded-full transition-all duration-200 active:scale-90 border ${
                       isFavorite
-                        ? 'bg-red-50 dark:bg-red-900/20 text-red-500'
-                        : 'bg-gray-100 dark:bg-gray-800 text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
+                        ? 'bg-red-500/10 border-red-500/30 text-red-500 shadow-[0_0_15px_rgba(239,68,68,0.15)] hover:bg-red-500/20'
+                        : 'bg-slate-950/40 border-slate-800/60 text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
                     }`}
                     title='Toggle Favorite'
                   >
@@ -923,148 +1082,250 @@ function LivePageClient() {
                     />
                   </button>
                 </div>
-                <EpgScrollableRow
-                  programs={programs}
-                  currentTime={new Date()}
-                  isLoading={isEpgLoading}
-                />
+
+                {/* EPG Timeline - Visible only on Desktop here */}
+                <div className='hidden lg:block mt-4 pt-4 border-t border-slate-800/60'>
+                  <EpgScrollableRow
+                    programs={programs}
+                    currentTime={new Date()}
+                    isLoading={isEpgLoading}
+                  />
+                </div>
               </>
             ) : (
-              <div className='text-gray-500 text-center py-4'>
-                Select a channel
+              <div className='text-slate-500 text-center py-4 text-sm font-medium'>
+                Select a channel from the list
               </div>
             )}
           </div>
         </div>
 
-        {/* === RIGHT PANE: CHANNEL LIST === 
-            Mobile: flex-1 (GROW to fill remaining vertical space).
-            Desktop: flex-none (Fixed width), h-full (Fill height).
-        */}
+        {/* === RIGHT PANE: SIDEBAR & CHANNEL LIST === */}
         <div
           className='
-            flex flex-col 
-            bg-white dark:bg-gray-900 
-            border-t lg:border-t-0 lg:border-l border-gray-200 dark:border-gray-800
-            w-full lg:w-80 lg:shrink-0
-            h-full lg:max-h-[calc(100vh-64px)]
+            flex flex-col
+            bg-[#0f172a]/40 backdrop-blur-md
+            border border-slate-800/60 rounded-3xl
+            w-full lg:w-85 lg:shrink-0
             overflow-hidden
-            lg:sticky lg:top-0
+            lg:sticky lg:top-6
+            lg:h-[calc(100vh-112px)]
             flex-1 lg:flex-none
+            shadow-2xl p-4 gap-4
           '
         >
           {/* TABS */}
-          <div className='flex border-b border-gray-200 dark:border-gray-800 shrink-0'>
+          <div className='flex p-1 bg-slate-950/40 border border-slate-800/60 rounded-xl shrink-0 gap-1'>
             <button
               onClick={() => setActiveTab('channels')}
-              className={`flex-1 py-3 text-sm font-medium transition-colors ${activeTab === 'channels' ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50/50 dark:bg-blue-900/10' : 'text-gray-500 hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
+              className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-all duration-200 ${
+                activeTab === 'channels'
+                  ? 'text-white bg-blue-600 shadow-md shadow-blue-900/20'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/30'
+              }`}
             >
               Channels
             </button>
             <button
               onClick={() => setActiveTab('sources')}
-              className={`flex-1 py-3 text-sm font-medium transition-colors ${activeTab === 'sources' ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50/50 dark:bg-blue-900/10' : 'text-gray-500 hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
+              className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-all duration-200 ${
+                activeTab === 'sources'
+                  ? 'text-white bg-blue-600 shadow-md shadow-blue-900/20'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/30'
+              }`}
             >
               Sources
             </button>
           </div>
 
-          {/* LIST CONTENT (Scrollable) */}
+          {/* LIST CONTENT */}
           {activeTab === 'channels' ? (
-            <>
-              {/* Groups Sticky Header */}
-              <div
-                className='overflow-x-auto p-2 border-b border-gray-100 dark:border-gray-800 scrollbar-hide shrink-0 bg-white dark:bg-gray-900'
-                onWheel={(e) => {
-                  e.currentTarget.scrollLeft += e.deltaY;
-                }}
-              >
-                <div className='flex gap-2'>
-                  {groupKeys.map((g) => (
-                    <button
-                      key={g}
-                      ref={(el: HTMLButtonElement | null) => {
-                        if (el) groupButtonRefs.current.set(g, el);
-                        else groupButtonRefs.current.delete(g);
-                      }}
-                      onClick={() => handleGroupChange(g)}
-                      className={`whitespace-nowrap px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${selectedGroup === g ? 'bg-blue-600 text-white shadow-md' : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'}`}
-                    >
-                      {g}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Channel Items */}
-              <div
-                className='flex-1 overflow-y-auto p-2 scrollbar-thin scrollbar-thumb-gray-200 dark:scrollbar-thumb-gray-700'
-                ref={channelListRef}
-              >
-                {isChannelLoading ? (
-                  <div className='flex flex-col items-center justify-center h-32 text-gray-400'>
-                    <Loader2 className='w-6 h-6 animate-spin mb-2' />
-                    <span className='text-xs'>Loading List...</span>
-                  </div>
-                ) : filteredChannels.length === 0 ? (
-                  <div className='p-4 text-center text-sm text-gray-500'>
-                    No channels in this group.
-                  </div>
-                ) : (
-                  <div className='space-y-1 pb-safe'>
-                    {filteredChannels.map((c) => (
+            <div className='flex flex-col flex-1 overflow-hidden gap-3'>
+              {/* Groups Selector (Horizontal Scroll) */}
+              <div className='flex items-center gap-2 lg:gap-3 shrink-0'>
+                <button
+                  type='button'
+                  onClick={() => scrollGroupRail('left')}
+                  className='hidden lg:flex items-center justify-center w-11 h-11 rounded-xl border border-slate-700/50 bg-slate-900/70 text-slate-200 hover:bg-slate-800 hover:text-white transition-colors'
+                  aria-label='Scroll categories left'
+                >
+                  <ChevronLeft className='w-5 h-5' />
+                </button>
+                <div
+                  ref={groupScrollerRef}
+                  className='overflow-x-auto p-1.5 lg:p-2 border border-slate-800/40 bg-slate-950/20 rounded-2xl scrollbar-none shrink-0 flex-1'
+                >
+                  <div className='flex gap-2'>
+                    {groupKeys.map((g) => (
                       <button
-                        key={c.id}
-                        data-channel-id={c.id}
-                        onClick={() => handleChannelSelect(c)}
-                        className={`w-full text-left p-2 rounded-lg flex items-center gap-3 transition-all ${c.id === currentChannel?.id ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 ring-1 ring-blue-200 dark:ring-blue-800' : 'hover:bg-gray-50 dark:hover:bg-gray-800'}`}
+                        key={g}
+                        ref={(el: HTMLButtonElement | null) => {
+                          if (el) groupButtonRefs.current.set(g, el);
+                          else groupButtonRefs.current.delete(g);
+                        }}
+                        onClick={() => handleGroupChange(g)}
+                        className={`whitespace-nowrap px-4 py-2.5 lg:px-5 lg:py-3 rounded-xl text-sm font-extrabold tracking-wide border transition-all duration-200 ${
+                          selectedGroup === g
+                            ? 'bg-blue-600 text-white border-blue-500 shadow-md shadow-blue-900/10'
+                            : 'bg-slate-800/40 text-slate-300 border-slate-700/30 hover:bg-slate-800 hover:text-white'
+                        }`}
                       >
-                        <div className='w-8 h-8 bg-gray-100 dark:bg-gray-800 rounded-md overflow-hidden shrink-0 flex items-center justify-center'>
-                          {c.logo ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                              src={getProxiedLogoUrl(
-                                c.logo,
-                                currentSource?.key,
-                              )}
-                              className='w-full h-full object-contain'
-                              loading='lazy'
-                              alt={c.name}
-                            />
-                          ) : (
-                            <Tv className='w-4 h-4 opacity-30' />
-                          )}
-                        </div>
-                        <span className='text-sm font-medium truncate'>
-                          {c.name}
-                        </span>
+                        {g}
                       </button>
                     ))}
                   </div>
+                </div>
+                <button
+                  type='button'
+                  onClick={() => scrollGroupRail('right')}
+                  className='hidden lg:flex items-center justify-center w-11 h-11 rounded-xl border border-slate-700/50 bg-slate-900/70 text-slate-200 hover:bg-slate-800 hover:text-white transition-colors'
+                  aria-label='Scroll categories right'
+                >
+                  <ChevronRight className='w-5 h-5' />
+                </button>
+              </div>
+
+              {/* Channel Items (Scrollable) */}
+              <div
+                className='flex-1 overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-slate-800 hover:scrollbar-thumb-slate-700 scrollbar-track-transparent'
+                ref={channelListRef}
+              >
+                {isChannelLoading ? (
+                  <div className='flex flex-col items-center justify-center h-48 text-slate-400'>
+                    <Loader2 className='w-8 h-8 animate-spin mb-2 text-blue-500' />
+                    <span className='text-xs font-medium'>
+                      Loading channel list...
+                    </span>
+                  </div>
+                ) : filteredChannels.length === 0 ? (
+                  <div className='p-8 text-center text-sm text-slate-500 border border-dashed border-slate-850 rounded-2xl mt-4'>
+                    No channels available in this group.
+                  </div>
+                ) : (
+                  <div className='space-y-1.5 pb-safe'>
+                    {filteredChannels.map((c) => {
+                      const availabilityKey = getChannelAvailabilityKey(c);
+                      const availabilityState = getChannelAvailabilityState(c);
+                      const availabilityDetail =
+                        channelAvailabilityDetails[availabilityKey] || '';
+
+                      return (
+                        <button
+                          key={c.id}
+                          data-channel-id={c.id}
+                          onClick={() => handleChannelSelect(c)}
+                          className={`w-full text-left p-2.5 rounded-xl flex items-center gap-3 transition-all duration-200 group border ${
+                            c.id === currentChannel?.id
+                              ? 'bg-blue-600/10 border-blue-500/40 text-blue-400 shadow-md'
+                              : availabilityState === 'unavailable' ||
+                                  availabilityState === 'unsupported'
+                                ? 'border-transparent text-slate-500 hover:bg-slate-800/20 hover:text-slate-300 opacity-70'
+                                : 'border-transparent text-slate-300 hover:bg-slate-800/30 hover:text-slate-100'
+                          }`}
+                        >
+                          <div
+                            className={`w-9 h-9 bg-slate-950/60 rounded-lg overflow-hidden shrink-0 flex items-center justify-center border transition-all duration-200 ${
+                              c.id === currentChannel?.id
+                                ? 'border-blue-500/40'
+                                : 'border-slate-850'
+                            }`}
+                          >
+                            {c.logo ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={getProxiedLogoUrl(
+                                  c.logo,
+                                  currentSource?.key,
+                                )}
+                                className='w-full h-full object-contain'
+                                loading='lazy'
+                                alt={c.name}
+                              />
+                            ) : (
+                              <Tv className='w-4.5 h-4.5 opacity-20' />
+                            )}
+                          </div>
+                          <div className='flex-1 min-w-0 flex items-center justify-between gap-2'>
+                            <span className='text-sm font-semibold truncate group-hover:translate-x-0.5 transition-transform duration-200'>
+                              {c.name}
+                            </span>
+                            {availabilityState === 'checking' && (
+                              <span className='shrink-0 rounded-full border border-slate-700/60 bg-slate-900/70 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-400'>
+                                Checking
+                              </span>
+                            )}
+                            {availabilityState === 'unavailable' && (
+                              <span
+                                title={availabilityDetail}
+                                className='shrink-0 rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-300'
+                              >
+                                Offline
+                              </span>
+                            )}
+                            {availabilityState === 'unsupported' && (
+                              <span
+                                title={availabilityDetail}
+                                className='shrink-0 rounded-full border border-rose-500/30 bg-rose-500/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-rose-300'
+                              >
+                                Unsupported
+                              </span>
+                            )}
+                            {c.id === currentChannel?.id && (
+                              <span className='flex h-2 w-2 relative shrink-0'>
+                                <span className='animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75'></span>
+                                <span className='relative inline-flex rounded-full h-2 w-2 bg-green-500'></span>
+                              </span>
+                            )}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
                 )}
               </div>
-            </>
+            </div>
           ) : (
-            <div className='flex-1 overflow-y-auto p-2 space-y-2 scrollbar-thin scrollbar-thumb-gray-200 dark:scrollbar-thumb-gray-700 pb-safe'>
+            <div className='flex-1 overflow-y-auto pr-1 space-y-2 scrollbar-thin scrollbar-thumb-slate-800 scrollbar-track-transparent pb-safe'>
               {sources.map((s) => (
                 <button
                   key={s.key}
                   onClick={() => handleSourceChange(s)}
-                  className={`w-full text-left p-3 rounded-xl flex items-center gap-3 border transition-all ${currentSource?.key === s.key ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 shadow-sm' : 'border-transparent bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700'}`}
+                  className={`w-full text-left p-3.5 rounded-2xl flex items-center gap-3 border transition-all duration-200 ${
+                    currentSource?.key === s.key
+                      ? 'border-blue-500/50 bg-blue-600/10 shadow-md shadow-blue-900/10'
+                      : 'border-transparent bg-slate-900/40 hover:bg-slate-850'
+                  }`}
                 >
                   <div
-                    className={`p-2 rounded-full ${currentSource?.key === s.key ? 'bg-blue-100 text-blue-600' : 'bg-gray-200 dark:bg-gray-700 text-gray-500'}`}
+                    className={`p-2.5 rounded-xl ${
+                      currentSource?.key === s.key
+                        ? 'bg-blue-600/20 text-blue-400'
+                        : 'bg-slate-850 text-slate-500'
+                    }`}
                   >
                     <Radio className='w-5 h-5' />
                   </div>
                   <div>
-                    <div className='font-semibold text-sm'>{s.name}</div>
-                    <div className='text-xs text-gray-500 mt-0.5'>
+                    <div className='font-bold text-sm text-slate-200'>
+                      {s.name}
+                    </div>
+                    <div className='text-xs text-slate-400 mt-1 font-medium'>
                       {s.channelNumber ?? 0} channels
                     </div>
                   </div>
                 </button>
               ))}
+            </div>
+          )}
+
+          {/* EPG Timeline - Visible only on Mobile here, placing it behind the Channel List flow */}
+          {currentChannel && (
+            <div className='block lg:hidden mt-2 pt-4 border-t border-slate-800/60 bg-slate-950/20 rounded-xl p-3'>
+              <EpgScrollableRow
+                programs={programs}
+                currentTime={new Date()}
+                isLoading={isEpgLoading}
+              />
             </div>
           )}
         </div>

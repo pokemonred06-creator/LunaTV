@@ -1,8 +1,8 @@
 # 使用官方 Node.js 镜像作为基础镜像
-FROM node:22-alpine AS base
+FROM node:22.23.4-alpine AS base
 
 # ===== Go Proxy Build Stage =====
-FROM golang:alpine AS go-builder
+FROM golang:1.26-alpine AS go-builder
 WORKDIR /go-app
 COPY scripts/proxy/go.mod .
 COPY scripts/proxy/server.go .
@@ -16,7 +16,7 @@ WORKDIR /app
 # 复制 package.json 和 lock 文件
 ENV NPM_CONFIG_UPDATE_NOTIFIER=false
 ENV PNPM_DISABLE_SELF_UPDATE_CHECK=1
-RUN npm install -g pnpm@10.28.0
+RUN npm install -g pnpm@10.33.0
 COPY package.json pnpm-lock.yaml ./
 COPY patches ./patches
 
@@ -24,14 +24,14 @@ COPY patches ./patches
 RUN rm -rf node_modules .next
 
 # Install dependencies using pnpm
-RUN pnpm install --no-frozen-lockfile
+RUN pnpm install --frozen-lockfile
 
 # ===== Next.js Build Stage =====
 FROM base AS builder
 WORKDIR /app
 ENV NPM_CONFIG_UPDATE_NOTIFIER=false
 ENV PNPM_DISABLE_SELF_UPDATE_CHECK=1
-RUN npm install -g pnpm@10.28.0
+RUN npm install -g pnpm@10.33.0
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
@@ -50,11 +50,13 @@ RUN npm run build
 
 # ===== Production Runner Stage =====
 FROM base AS runner
+RUN apk add --no-cache ffmpeg
 WORKDIR /app
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV DISABLE_SECURE_COOKIES=true
+ENV HOSTNAME=0.0.0.0
 
 # 创建非 root 用户
 RUN addgroup --system --gid 1001 nodejs
@@ -85,3 +87,5 @@ EXPOSE 3000 8080
 
 # 启动命令
 CMD ["/app/start.sh"]
+
+LABEL local.lunatv.review-release="20261021T205429Z"

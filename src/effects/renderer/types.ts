@@ -41,6 +41,8 @@ export interface RenderState {
   season: 'spring' | 'summer' | 'autumn' | 'winter';
   drops: DropState[];
   trails: TrailState[];
+  dropsData?: Float32Array;
+  trailsData?: Float32Array;
   sprites: SpriteState[];
   canvas: HTMLCanvasElement;
   backgroundImage: HTMLImageElement | null;
@@ -51,6 +53,10 @@ export interface RenderState {
   };
   time: number;
   flash: number; // 0.0 to 1.0 intensity
+  // Monotonic counters — bumped only when physics posts new data.
+  // Renderers use these to skip redundant GPU buffer uploads.
+  dropsVersion: number;
+  trailsVersion: number;
 }
 
 export interface Renderer {

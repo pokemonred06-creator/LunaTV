@@ -287,7 +287,7 @@ function PlayPageClient() {
     debugEnabledRef.current = debugEnabled;
   }, [debugEnabled]);
 
-  const lastProgressTimeRef = useRef<number>(Date.now());
+  const lastProgressTimeRef = useRef<number>(0);
   const handleVideoProgress = useCallback(() => {
     lastProgressTimeRef.current = Date.now();
   }, []);
@@ -380,110 +380,7 @@ function PlayPageClient() {
       return (sourceFailCountRef.current[candidateKey] || 0) < 2;
     });
 
-  // --- Effect: Loading Timeout (Event Driven) ---
-  useEffect(() => {
-    if (!isVideoLoading || !videoUrl) return;
 
-    lastProgressTimeRef.current = Date.now();
-    const CHECK_INTERVAL = 3000;
-    const TIMEOUT_DURATION = 15000;
-
-    const intervalId = window.setInterval(() => {
-      if (!isVideoLoading) return;
-
-      const now = Date.now();
-      if (now - lastProgressTimeRef.current > TIMEOUT_DURATION) {
-        window.clearInterval(intervalId);
-        console.warn('Video loading timeout - clearing loading state');
-        setIsVideoLoading(false);
-
-        const episodeIdx = currentEpisodeIndexRef.current;
-        if (sourceFailoverLockRef.current) return;
-
-        sourceFailoverLockRef.current = true;
-        void (async () => {
-          const activeSource = currentSourceRef.current;
-          const activeId = currentIdRef.current;
-          let candidates = pickFailoverCandidates(
-            availableSources,
-            episodeIdx,
-            activeSource,
-            activeId,
-          );
-          if (candidates.length === 0) {
-            const query = (
-              searchTitleRef.current ||
-              videoTitleRef.current ||
-              ''
-            ).trim();
-            if (query) {
-              try {
-                const res = await fetch(
-                  `/api/search?q=${encodeURIComponent(query)}`,
-                  { cache: 'no-store' },
-                );
-                if (res.ok) {
-                  const data = (await res.json()) as {
-                    results?: SearchResult[];
-                  };
-                  const rawResults = Array.isArray(data.results)
-                    ? data.results
-                    : [];
-                  const refreshedResults =
-                    filterSourcesForCurrentVideo(rawResults);
-
-                  if (refreshedResults.length > 0) {
-                    setAvailableSources(refreshedResults);
-                    candidates = pickFailoverCandidates(
-                      refreshedResults,
-                      episodeIdx,
-                      activeSource,
-                      activeId,
-                    );
-                  }
-                }
-              } catch {
-                // Ignore refresh errors
-              }
-            }
-          }
-
-          if (candidates.length === 0) return;
-
-          const rankedCandidates = sortSourcesByScore(candidates);
-          for (const candidate of rankedCandidates) {
-            const candidateEpisode = candidate.episodes?.[episodeIdx] || '';
-            const ok = await probeEpisodePlayable(
-              candidateEpisode,
-              candidate.source,
-              candidate.id,
-            );
-            if (!ok) continue;
-            await handleSourceChange(
-              candidate.source,
-              candidate.id,
-              candidate.title,
-            );
-            return;
-          }
-        })().finally(() => {
-          setTimeout(() => {
-            sourceFailoverLockRef.current = false;
-          }, 1000);
-        });
-      }
-    }, CHECK_INTERVAL);
-
-    return () => {
-      window.clearInterval(intervalId);
-    };
-  }, [
-    isVideoLoading,
-    currentEpisodeIndex,
-    videoUrl,
-    availableSources,
-    searchType,
-  ]);
 
   // --- Effects: 初始化配置 ---
   useEffect(() => {
@@ -1505,6 +1402,111 @@ function PlayPageClient() {
     }
   };
 
+  // --- Effect: Loading Timeout (Event Driven) ---
+  useEffect(() => {
+    if (!isVideoLoading || !videoUrl) return;
+
+    lastProgressTimeRef.current = Date.now();
+    const CHECK_INTERVAL = 3000;
+    const TIMEOUT_DURATION = 15000;
+
+    const intervalId = window.setInterval(() => {
+      if (!isVideoLoading) return;
+
+      const now = Date.now();
+      if (now - lastProgressTimeRef.current > TIMEOUT_DURATION) {
+        window.clearInterval(intervalId);
+        console.warn('Video loading timeout - clearing loading state');
+        setIsVideoLoading(false);
+
+        const episodeIdx = currentEpisodeIndexRef.current;
+        if (sourceFailoverLockRef.current) return;
+
+        sourceFailoverLockRef.current = true;
+        void (async () => {
+          const activeSource = currentSourceRef.current;
+          const activeId = currentIdRef.current;
+          let candidates = pickFailoverCandidates(
+            availableSources,
+            episodeIdx,
+            activeSource,
+            activeId,
+          );
+          if (candidates.length === 0) {
+            const query = (
+              searchTitleRef.current ||
+              videoTitleRef.current ||
+              ''
+            ).trim();
+            if (query) {
+              try {
+                const res = await fetch(
+                  `/api/search?q=${encodeURIComponent(query)}`,
+                  { cache: 'no-store' },
+                );
+                if (res.ok) {
+                  const data = (await res.json()) as {
+                    results?: SearchResult[];
+                  };
+                  const rawResults = Array.isArray(data.results)
+                    ? data.results
+                    : [];
+                  const refreshedResults =
+                    filterSourcesForCurrentVideo(rawResults);
+
+                  if (refreshedResults.length > 0) {
+                    setAvailableSources(refreshedResults);
+                    candidates = pickFailoverCandidates(
+                      refreshedResults,
+                      episodeIdx,
+                      activeSource,
+                      activeId,
+                    );
+                  }
+                }
+              } catch {
+                // Ignore refresh errors
+              }
+            }
+          }
+
+          if (candidates.length === 0) return;
+
+          const rankedCandidates = sortSourcesByScore(candidates);
+          for (const candidate of rankedCandidates) {
+            const candidateEpisode = candidate.episodes?.[episodeIdx] || '';
+            const ok = await probeEpisodePlayable(
+              candidateEpisode,
+              candidate.source,
+              candidate.id,
+            );
+            if (!ok) continue;
+            await handleSourceChange(
+              candidate.source,
+              candidate.id,
+              candidate.title,
+            );
+            return;
+          }
+        })().finally(() => {
+          setTimeout(() => {
+            sourceFailoverLockRef.current = false;
+          }, 1000);
+        });
+      }
+    }, CHECK_INTERVAL);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [
+    isVideoLoading,
+    currentEpisodeIndex,
+    videoUrl,
+    availableSources,
+    searchType,
+  ]);
+
   const requestWakeLock = async () => {
     try {
       if ('wakeLock' in navigator)
@@ -1819,7 +1821,9 @@ function PlayPageClient() {
 
   return (
     <PageLayout activePath='/play'>
-      <div className='flex flex-col gap-3 py-0 md:py-4 px-0 md:px-5 lg:px-12 2xl:px-20'>
+      <div
+        className='flex flex-col gap-3 py-0 md:py-4 px-0 md:px-5 lg:px-12 2xl:px-20'
+      >
         <div className='py-1'>
           <h1 className='text-xl font-semibold text-gray-900 dark:text-gray-100'>
             {convert(videoTitle || '影片标题')}
@@ -1857,7 +1861,9 @@ function PlayPageClient() {
             >
               <div className='relative w-full aspect-video lg:aspect-auto lg:h-full bg-black rounded-xl overflow-hidden shadow-2xl'>
                 {/* 核心播放器组件 */}
-                <div className='w-full h-full'>
+                <div
+                  className='w-full h-full'
+                >
                   {debugEnabled && (
                     <div className='fixed top-20 left-20 z-50 bg-red-600 text-white p-4 font-bold text-xl border-4 border-yellow-400 pointer-events-none'>
                       DEBUG MODE ACTIVE
@@ -2007,9 +2013,9 @@ function PlayPageClient() {
                         }, 1000);
                       });
                     }}
-                    enableSkip={skipConfigRef.current.enable}
-                    skipIntroTime={skipConfigRef.current.intro_time}
-                    skipOutroTime={skipConfigRef.current.outro_time}
+                    enableSkip={skipConfig.enable}
+                    skipIntroTime={skipConfig.intro_time}
+                    skipOutroTime={skipConfig.outro_time}
                     customHlsLoaderFactory={
                       blockAdEnabled ? createCustomHlsJsLoader : undefined
                     }

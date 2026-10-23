@@ -1,8 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
-import dns from 'node:dns/promises';
-import net from 'node:net';
+import { spawn } from 'node:child_process';
 
 import { getConfig } from '@/lib/config';
+import { getCachedLiveChannels } from '@/lib/live';
+import {
+  detectLiveStreamType,
+  guessLiveStreamType,
+  liveStreamMimeType,
+  rewriteLiveManifest,
+} from '@/lib/live-stream';
+import {
+  inspectStreamResponse,
+  readLiveManifest,
+} from '@/lib/live-stream-body';
+import { authorizeMediaRequest, signMediaUrl } from '@/lib/media-auth';
+import { safeImageResponse } from '@/lib/safe-image';
+import { validateSafeProxyUrl } from '@/lib/ssrf-guard';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -11,16 +24,27 @@ export const dynamic = 'force-dynamic';
 // keep SSRF protections (public IP-only), but allow a small, configurable port
 // set for legitimate streams.
 const DEFAULT_ALLOWED_PORTS = [
-  80, 88, 443, 777, 999, 4022, 8000, 8080, 8443, 8880, 8888, 8899, 9000, 35455,
+  80, 88, 98, 443, 554, 777, 999, 1111, 1935, 2096, 4022, 5000, 5004, 6610,
+  8000, 8080, 8081, 8082, 8443, 8880, 8888, 8899, 9000, 9999, 14311, 18080,
+  22226, 25455, 35455,
 ];
+
+const HTTP_PROXY_PROTOCOLS = new Set(['http:', 'https:']);
+const FFMPEG_RELAY_PROTOCOLS = new Set(['rtmp:', 'rtsp:', 'udp:', 'rtp:']);
+const MAX_ACTIVE_FFMPEG_RELAYS = Math.max(
+  1,
+  Math.floor(Number(process.env.FFMPEG_RELAY_LIMIT || 4)),
+);
+let activeFfmpegRelays = 0;
 
 const TRANSPARENT_GIF_1X1 = Uint8Array.from([
   71, 73, 70, 56, 57, 97, 1, 0, 1, 0, 128, 0, 0, 0, 0, 0, 255, 255, 255, 33,
   249, 4, 1, 0, 0, 1, 0, 44, 0, 0, 0, 0, 1, 0, 1, 0, 0, 2, 2, 68, 1, 0, 59,
 ]);
-function buildAllowedPorts(): Set<number> {
-  const ports = new Set<number>(DEFAULT_ALLOWED_PORTS);
+function buildAllowedPorts(): Set<number> | null {
   const raw = process.env.PROXY_ALLOWED_PORTS;
+  if (raw === '*' || raw === 'all') return null;
+  const ports = new Set<number>(DEFAULT_ALLOWED_PORTS);
   if (!raw) return ports;
   for (const part of raw.split(/[,\s]+/g)) {
     const n = Number(part.trim());
@@ -32,98 +56,22 @@ function buildAllowedPorts(): Set<number> {
 }
 const ALLOWED_PORTS = buildAllowedPorts();
 
-const BLOCKED_RANGES_IPV4 = [
-  '0.0.0.0/8',
-  '10.0.0.0/8',
-  '100.64.0.0/10',
-  '127.0.0.0/8',
-  '169.254.0.0/16',
-  '172.16.0.0/12',
-  '192.0.0.0/24',
-  '192.0.2.0/24',
-  '192.168.0.0/16',
-  // '198.18.0.0/15', // Allowed for Clash FakeIP routes
-  '224.0.0.0/4',
-  '240.0.0.0/4',
-];
-
-const BLOCKED_RANGES_IPV6 = [
-  '::/128',
-  '::1/128',
-  'fc00::/7',
-  'fe80::/10',
-  'ff00::/8',
-  '2001:db8::/32',
-];
-
-const BLOCKLIST = new net.BlockList();
-BLOCKED_RANGES_IPV4.forEach((cidr) => {
-  const [range, bits] = cidr.split('/');
-  BLOCKLIST.addSubnet(range, Number(bits), 'ipv4');
-});
-BLOCKED_RANGES_IPV6.forEach((cidr) => {
-  const [range, bits] = cidr.split('/');
-  BLOCKLIST.addSubnet(range, Number(bits), 'ipv6');
-});
-
-function isBlockedIp(ip: string): boolean {
-  const family = net.isIP(ip);
-  if (family === 4) return BLOCKLIST.check(ip, 'ipv4');
-  if (family === 6) return BLOCKLIST.check(ip, 'ipv6');
-  return true;
-}
-
-async function validateSafeUrl(urlStr: string) {
-  try {
-    const u = new URL(urlStr);
-    if (!['http:', 'https:'].includes(u.protocol)) return false;
-    if (u.username || u.password) return false;
-
-    const port = u.port ? Number(u.port) : u.protocol === 'https:' ? 443 : 80;
-    if (!ALLOWED_PORTS.has(port)) {
-      console.warn('[Proxy SSRF] Blocked Port:', port, urlStr);
-      return false;
-    }
-
-    const ipType = net.isIP(u.hostname);
-    if (ipType === 6) return !isBlockedIp(u.hostname);
-    if (ipType === 4) {
-      const blocked = isBlockedIp(u.hostname);
-      if (blocked) console.warn('[Proxy SSRF] Blocked IP:', u.hostname, urlStr);
-      return !blocked;
-    }
-    const addrs = await dns.lookup(u.hostname, { all: true, verbatim: true });
-    if (!addrs.length) {
-      console.warn('[Proxy SSRF] Empty DNS result:', u.hostname, urlStr);
-      return false;
-    }
-
-    const allPublic = addrs.every((a) => {
-      if (a.family !== 4 && a.family !== 6) return false;
-      return !isBlockedIp(a.address);
-    });
-    if (!allPublic) {
-      console.warn(
-        '[Proxy SSRF] Blocked resolved address:',
-        addrs.map((a) => a.address),
-        urlStr,
-      );
-    }
-    return allPublic;
-  } catch (err) {
-    console.warn('[Proxy SSRF] Validation Error:', err, urlStr);
-    return false;
-  }
-}
+// SSRF protection is provided by the shared ssrf-guard module (imported above).
+// BLOCKLIST and isBlockedIp are re-exported from ssrf-guard for use below.
 
 async function fetchWithValidatedRedirects(
   initialUrl: string,
   init: RequestInit,
   maxHops = 5,
+  allowedPorts = ALLOWED_PORTS,
 ) {
   let current = initialUrl;
   for (let hop = 0; hop <= maxHops; hop++) {
-    const safe = await validateSafeUrl(current);
+    const safe = await validateSafeProxyUrl(
+      current,
+      HTTP_PROXY_PROTOCOLS,
+      allowedPorts,
+    );
     if (!safe) {
       console.warn(`[Proxy] SSRF block at hop ${hop}: ${current}`);
       throw new Error(`SSRF Blocked: ${current}`);
@@ -136,6 +84,7 @@ async function fetchWithValidatedRedirects(
     if (res.status >= 300 && res.status < 400) {
       const loc = res.headers.get('location');
       if (!loc) return res;
+      await res.body?.cancel();
       try {
         current = new URL(loc, current).toString();
       } catch (e: unknown) {
@@ -156,6 +105,7 @@ async function fetchWithRetries(
   maxHops = 5,
   retries = 2,
   perAttemptTimeoutMs = 12000,
+  allowedPorts = ALLOWED_PORTS,
 ) {
   let lastErr: unknown = null;
   for (let attempt = 0; attempt <= retries; attempt++) {
@@ -168,21 +118,69 @@ async function fetchWithRetries(
     let onAbort: (() => void) | null = null;
     if (parentSignal) {
       onAbort = () => timeoutController.abort();
-      parentSignal.addEventListener('abort', onAbort, { once: true });
+      if (parentSignal.aborted) timeoutController.abort();
+      else parentSignal.addEventListener('abort', onAbort, { once: true });
     }
 
     try {
-      return await fetchWithValidatedRedirects(
+      const response = await fetchWithValidatedRedirects(
         initialUrl,
         {
           ...init,
           signal: timeoutController.signal,
         },
         maxHops,
+        allowedPorts,
       );
+      clearTimeout(timeoutId);
+      // Keep client cancellation and an idle deadline active through body reads.
+      const reader = response.body?.getReader();
+      if (!reader) return response;
+      const bodyAbortListener = onAbort;
+      let finished = false;
+      let idleTimer: ReturnType<typeof setTimeout> | undefined;
+      const cleanup = () => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(idleTimer);
+        if (parentSignal && bodyAbortListener)
+          parentSignal.removeEventListener('abort', bodyAbortListener);
+      };
+      const stream = new ReadableStream<Uint8Array>({
+        async pull(controller) {
+          idleTimer = setTimeout(
+            () => timeoutController.abort(),
+            perAttemptTimeoutMs,
+          );
+          try {
+            const { done, value } = await reader.read();
+            clearTimeout(idleTimer);
+            if (done) {
+              cleanup();
+              controller.close();
+            } else controller.enqueue(value);
+          } catch (error) {
+            cleanup();
+            controller.error(error);
+          }
+        },
+        async cancel(reason) {
+          cleanup();
+          timeoutController.abort();
+          await reader.cancel(reason).catch(() => {});
+        },
+      });
+      const wrapped = new Response(stream, {
+        status: response.status,
+        headers: response.headers,
+      });
+      Object.defineProperty(wrapped, 'url', { value: response.url });
+      // The stream owns this listener until completion/cancellation.
+      onAbort = null;
+      return wrapped;
     } catch (err) {
       lastErr = err;
-      if (attempt >= retries) throw err;
+      if (parentSignal?.aborted || attempt >= retries) throw err;
       await new Promise((resolve) => setTimeout(resolve, 150 * (attempt + 1)));
     } finally {
       clearTimeout(timeoutId);
@@ -192,12 +190,6 @@ async function fetchWithRetries(
     }
   }
   throw lastErr instanceof Error ? lastErr : new Error('Fetch failed');
-}
-
-function proxyTypeForUrl(url: string): string {
-  const path = new URL(url).pathname.toLowerCase();
-  if (path.endsWith('.m3u8')) return 'm3u8';
-  return 'ts'; // .ts, .aac, .key, etc. → stream directly
 }
 
 function toHttpFallbackUrl(urlStr: string): string | null {
@@ -241,61 +233,22 @@ function withLiveCacheBuster(urlStr: string): string {
   }
 }
 
-function rewriteM3U8(
-  text: string,
-  baseUrl: URL,
-  proxyOrigin: string,
-  sourceKey: string | null,
-) {
-  const out: string[] = [];
-  for (const line of text.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) {
-      // Handle #EXT-X-KEY or other URIs in tags
-      if (trimmed.startsWith('#') && trimmed.includes('URI="')) {
-        const rewritten = line.replace(/URI="([^"]+)"/g, (_, uri) => {
-          try {
-            const abs = new URL(uri, baseUrl);
-            const pType = proxyTypeForUrl(abs.toString());
-            const proxied = new URL(`/api/proxy/${pType}`, proxyOrigin);
-            proxied.searchParams.set('url', abs.toString());
-            if (sourceKey) proxied.searchParams.set('moontv-source', sourceKey);
-            return `URI="${proxied.pathname}${proxied.search}"`;
-          } catch {
-            return `URI="${uri}"`;
-          }
-        });
-        out.push(rewritten);
-      } else {
-        out.push(line);
-      }
-      continue;
-    }
-
-    try {
-      const abs = new URL(trimmed, baseUrl);
-      const pType = proxyTypeForUrl(abs.toString());
-      const proxied = new URL(`/api/proxy/${pType}`, proxyOrigin);
-      proxied.searchParams.set('url', abs.toString());
-      if (sourceKey) proxied.searchParams.set('moontv-source', sourceKey);
-      out.push(`${proxied.pathname}${proxied.search}`);
-    } catch {
-      out.push(line);
-    }
-  }
-  return out.join('\n');
-}
-
 interface ProxyParams {
   params: Promise<{ type: string }>;
 }
 
 export async function GET(request: NextRequest, props: ProxyParams) {
+  const access = await authorizeMediaRequest(request);
+  if (!access) return new NextResponse('Unauthorized', { status: 401 });
   const params = await props.params;
-  const type = (params.type || '').toLowerCase();
+  const type = (params.type || '')
+    .toLowerCase()
+    .replace(/\.(m3u8|ts|mp4|m4s|aac|key|vtt)$/, '');
   const { searchParams } = new URL(request.url);
   const urlParam = searchParams.get('url') || '';
   const sourceKey = searchParams.get('moontv-source');
+  const channelId = searchParams.get('moontv-channel');
+  const probeOnly = searchParams.get('probe') === '1';
 
   if (!urlParam) return new NextResponse('Missing url', { status: 400 });
   let upstreamUrl: URL;
@@ -309,9 +262,167 @@ export async function GET(request: NextRequest, props: ProxyParams) {
   const sourceConfig = config.LiveConfig?.find(
     (s: { key: string; ua?: string }) => s.key === sourceKey,
   );
+  const registeredChannels =
+    sourceConfig && sourceKey ? await getCachedLiveChannels(sourceKey) : null;
+  const channel = registeredChannels?.channels.find((channel) =>
+    channelId ? channel.id === channelId : channel.url === urlParam,
+  );
+  const requestAllowedPorts = ALLOWED_PORTS ? new Set(ALLOWED_PORTS) : null;
+  // Only a registered playlist target may add its public port to this request.
+  if (channel && requestAllowedPorts) {
+    const registeredUrl = new URL(channel.url);
+    if (registeredUrl.hostname === upstreamUrl.hostname && registeredUrl.port)
+      requestAllowedPorts.add(Number(registeredUrl.port));
+  }
   const ua =
+    channel?.headers?.['User-Agent'] ||
     sourceConfig?.ua ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
+  const upstreamScheme = upstreamUrl.protocol.replace(':', '').toLowerCase();
+  const shouldUseFfmpegRelay = ['rtmp', 'rtsp', 'udp', 'rtp'].includes(
+    upstreamScheme,
+  );
+
+  if (probeOnly && shouldUseFfmpegRelay)
+    return NextResponse.json({
+      success: true,
+      type: 'ts',
+      mimeType: 'video/mp2t',
+    });
+
+  if (shouldUseFfmpegRelay) {
+    if (type !== 'ts') {
+      return new NextResponse(
+        `Type mismatch: upstream is ${upstreamScheme}, relay expects ts`,
+        {
+          status: 415,
+          headers: {
+            'Access-Control-Allow-Origin': '*',
+          },
+        },
+      );
+    }
+
+    const safeRelayTarget = await validateSafeProxyUrl(
+      upstreamUrl.toString(),
+      FFMPEG_RELAY_PROTOCOLS,
+      requestAllowedPorts,
+    );
+    if (!safeRelayTarget) {
+      return new NextResponse('Blocked upstream target', {
+        status: 403,
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+        },
+      });
+    }
+
+    if (activeFfmpegRelays >= MAX_ACTIVE_FFMPEG_RELAYS) {
+      return new NextResponse('Too many active relay streams', {
+        status: 429,
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+        },
+      });
+    }
+    activeFfmpegRelays += 1;
+
+    const ffmpegArgs = [
+      '-loglevel',
+      'error',
+      '-nostdin',
+      '-fflags',
+      'nobuffer',
+      '-i',
+      upstreamUrl.toString(),
+      '-map',
+      '0:v:0?',
+      '-map',
+      '0:a:0?',
+      '-c',
+      'copy',
+      '-f',
+      'mpegts',
+      'pipe:1',
+    ];
+    const ffmpeg = spawn('ffmpeg', ffmpegArgs, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let releasedRelaySlot = false;
+    const releaseRelaySlot = () => {
+      if (releasedRelaySlot) return;
+      releasedRelaySlot = true;
+      activeFfmpegRelays = Math.max(0, activeFfmpegRelays - 1);
+    };
+
+    request.signal.addEventListener(
+      'abort',
+      () => {
+        ffmpeg.kill('SIGKILL');
+      },
+      { once: true },
+    );
+
+    const stderrChunks: Buffer[] = [];
+    ffmpeg.stderr.on('data', (chunk: Buffer) => {
+      if (stderrChunks.length < 8) stderrChunks.push(chunk);
+    });
+
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        let streamSettled = false;
+        const closeStream = () => {
+          if (streamSettled) return;
+          streamSettled = true;
+          controller.close();
+        };
+        const errorStream = (error: Error) => {
+          if (streamSettled) return;
+          streamSettled = true;
+          controller.error(error);
+        };
+
+        ffmpeg.stdout.on('data', (chunk: Buffer) => {
+          if (!streamSettled) controller.enqueue(new Uint8Array(chunk));
+        });
+        ffmpeg.stdout.on('end', () => {
+          closeStream();
+        });
+        ffmpeg.stdout.on('error', (error) => {
+          errorStream(error);
+        });
+        ffmpeg.on('error', (error) => {
+          releaseRelaySlot();
+          errorStream(error);
+        });
+        ffmpeg.on('close', (code) => {
+          releaseRelaySlot();
+          if (code && code !== 0) {
+            const stderrText = Buffer.concat(stderrChunks).toString() || '';
+            errorStream(
+              new Error(
+                `ffmpeg relay failed (${upstreamScheme}): ${stderrText}`,
+              ),
+            );
+          }
+        });
+      },
+      cancel() {
+        ffmpeg.kill('SIGKILL');
+      },
+    });
+
+    return new NextResponse(stream, {
+      status: 200,
+      headers: {
+        'content-type': 'video/mp2t',
+        'cache-control': 'no-store',
+        'Access-Control-Allow-Origin': '*',
+        'Accept-Ranges': 'none',
+      },
+    });
+  }
 
   const buildHeaders = (target: URL): Record<string, string> => {
     const headers: Record<string, string> = {
@@ -335,6 +446,13 @@ export async function GET(request: NextRequest, props: ProxyParams) {
       if (type !== 'flv') headers['Origin'] = target.origin;
     }
 
+    for (const [name, value] of Object.entries(channel?.headers || {})) {
+      if (
+        ['User-Agent', 'Referer', 'Origin'].includes(name) &&
+        !/[\r\n]/.test(value)
+      )
+        headers[name] = value;
+    }
     return headers;
   };
 
@@ -343,7 +461,8 @@ export async function GET(request: NextRequest, props: ProxyParams) {
   const httpFallbackUrl = toHttpFallbackUrl(urlParam);
   let triedHttpFallback = false;
 
-  const isLiveStream = type === 'flv';
+  const isLiveStream =
+    type === 'flv' || (type === 'ts' && !request.headers.has('range'));
   const timeoutMs = type === 'm3u8' ? 15000 : 20000;
   const liveConnectTimeoutMs = 12000;
   const liveConnectRetries = 2;
@@ -362,11 +481,12 @@ export async function GET(request: NextRequest, props: ProxyParams) {
       {
         headers,
         cache: 'no-store',
-        ...(isLiveStream ? { signal: request.signal } : {}),
+        signal: request.signal,
       },
       5,
       retries,
       isLiveStream ? liveConnectTimeoutMs : timeoutMs,
+      requestAllowedPorts,
     );
   };
 
@@ -475,6 +595,7 @@ export async function GET(request: NextRequest, props: ProxyParams) {
         console.log(
           `[Proxy] Retry Strategy ${i + 1}/${retryStrategies.length} for ${activeUrl.hostname}...`,
         );
+        await upstreamRes.body?.cancel().catch(() => {});
         upstreamRes = await fetchUpstream(activeUrl.toString(), nextHeaders, 1);
         upstreamRes = await retryTransient403(
           upstreamRes,
@@ -494,6 +615,7 @@ export async function GET(request: NextRequest, props: ProxyParams) {
       activeUrl.protocol === 'https:'
     ) {
       triedHttpFallback = true;
+      await upstreamRes.body?.cancel().catch(() => {});
       activeUrl = new URL(httpFallbackUrl);
       upstreamHeaders = buildHeaders(activeUrl);
       upstreamRes = await fetchUpstream(activeUrl.toString(), upstreamHeaders);
@@ -507,12 +629,14 @@ export async function GET(request: NextRequest, props: ProxyParams) {
       activeUrl.protocol === 'https:'
     ) {
       triedHttpFallback = true;
+      await upstreamRes.body?.cancel().catch(() => {});
       activeUrl = new URL(httpFallbackUrl);
       upstreamHeaders = buildHeaders(activeUrl);
       upstreamRes = await fetchUpstream(activeUrl.toString(), upstreamHeaders);
     }
 
     if (!upstreamRes.ok) {
+      await upstreamRes.body?.cancel().catch(() => {});
       if (type === 'logo') {
         return new NextResponse(TRANSPARENT_GIF_1X1, {
           status: 200,
@@ -536,152 +660,86 @@ export async function GET(request: NextRequest, props: ProxyParams) {
 
     // LOGO: pipe body with cache headers
     if (type === 'logo') {
-      const contentType = upstreamRes.headers.get('content-type') || 'image/*';
-      return new NextResponse(upstreamRes.body, {
-        status: 200,
-        headers: {
-          'content-type': contentType,
-          'cache-control': 'public, max-age=86400',
-          'Access-Control-Allow-Origin': '*',
-        },
-      });
+      return safeImageResponse(upstreamRes);
     }
 
-    const upstreamContentType = (
-      upstreamRes.headers.get('content-type') || ''
-    ).toLowerCase();
-    const isM3u8ContentType =
-      upstreamContentType.includes('mpegurl') ||
-      upstreamContentType.includes('x-mpegurl') ||
-      upstreamContentType.includes('vnd.apple.mpegurl');
-    const isFlvContentType =
-      upstreamContentType.includes('video/x-flv') ||
-      upstreamContentType.includes('/flv');
-    const isTsContentType =
-      upstreamContentType.includes('video/mp2t') ||
-      upstreamContentType.includes('mpegts') ||
-      upstreamContentType.includes('/mp2t') ||
-      upstreamContentType.includes('/ts');
-
-    if (type === 'flv' && isM3u8ContentType) {
-      return new NextResponse('Type mismatch: upstream is m3u8, not flv', {
+    const upstreamContentType = upstreamRes.headers.get('content-type') || '';
+    // Only nonzero byte ranges begin mid-container. FFmpeg sends bytes=0-
+    // for playlists too, including extensionless or image-disguised HLS.
+    const range = request.headers.get('range');
+    const isBinaryRange = !!range && !/^bytes=0-/i.test(range) && !probeOnly;
+    const inspected = isBinaryRange
+      ? { prefix: new Uint8Array(), body: upstreamRes.body! }
+      : await inspectStreamResponse(upstreamRes);
+    const detected = detectLiveStreamType(
+      inspected.prefix,
+      upstreamContentType,
+    );
+    const preview = new TextDecoder().decode(inspected.prefix).trimStart();
+    if (
+      !isBinaryRange &&
+      (!inspected.prefix.length ||
+        /^(?:<!doctype\s+html|<html|\{)/i.test(preview))
+    ) {
+      await inspected.body.cancel().catch(() => {});
+      return new NextResponse('Source returned no playable media', {
         status: 415,
-        headers: {
-          'x-moontv-actual-type': 'm3u8',
-          'Access-Control-Allow-Origin': '*',
-        },
       });
     }
 
-    if (type === 'ts' && isFlvContentType) {
-      return new NextResponse('Type mismatch: upstream is flv, not ts', {
-        status: 415,
-        headers: {
-          'x-moontv-actual-type': 'flv',
-          'Access-Control-Allow-Origin': '*',
-        },
-      });
-    }
-
-    // TS fallback: some IPTV sources are exposed via .php/ts routes but actually
-    // return HLS playlists. Detect and rewrite to keep client playback stable.
-    if (type === 'ts') {
-      let upstreamPath = '';
-      try {
-        upstreamPath = new URL(upstreamRes.url).pathname.toLowerCase();
-      } catch {
-        upstreamPath = '';
-      }
-      const looksLikeManifestPath =
-        upstreamPath.includes('.m3u8') ||
-        upstreamPath.includes('/m3u8') ||
-        upstreamPath.includes('playlist.m3u') ||
-        upstreamPath.includes('index.m3u');
-      if (isM3u8ContentType || looksLikeManifestPath) {
-        const playlistProbe = upstreamRes.clone();
-        const text = await playlistProbe.text();
-        if (text.includes('#EXTM3U')) {
-          const proxiedUrl = new URL(request.url);
-          const rewritten = rewriteM3U8(
-            text,
-            new URL(upstreamRes.url),
-            proxiedUrl.origin,
-            sourceKey,
-          );
-          return new NextResponse(rewritten, {
-            status: 200,
-            headers: {
-              'content-type': 'application/vnd.apple.mpegurl',
-              'cache-control': 'no-store',
-              'Access-Control-Allow-Origin': '*',
-            },
-          });
-        }
-      }
-    }
-
-    // M3U8: rewrite segments
-    if (type === 'm3u8') {
-      if (isFlvContentType || isTsContentType) {
-        return new NextResponse(
-          `Type mismatch: upstream is ${isFlvContentType ? 'flv' : 'ts'}, not m3u8`,
+    const actualType =
+      detected === 'unknown'
+        ? guessLiveStreamType(upstreamRes.url || activeUrl.toString())
+        : detected;
+    if (probeOnly) {
+      await inspected.body.cancel().catch(() => {});
+      if (
+        detected === 'unknown' &&
+        /^(text\/html|application\/json)/i.test(upstreamContentType)
+      )
+        return NextResponse.json(
           {
-            status: 415,
-            headers: {
-              'x-moontv-actual-type': isFlvContentType ? 'flv' : 'ts',
-              'Access-Control-Allow-Origin': '*',
-            },
+            success: false,
+            error: 'Source returned a web page instead of media',
+            type: 'unknown',
           },
+          { status: 415 },
         );
-      }
-
-      let upstreamPath = '';
-      try {
-        upstreamPath = new URL(upstreamRes.url).pathname.toLowerCase();
-      } catch {
-        upstreamPath = '';
-      }
-      const looksLikeManifestPath =
-        upstreamPath.includes('.m3u8') ||
-        upstreamPath.includes('/m3u8') ||
-        upstreamPath.includes('playlist.m3u') ||
-        upstreamPath.includes('index.m3u');
-      if (!isM3u8ContentType && !looksLikeManifestPath) {
-        return new NextResponse('Type mismatch: upstream is not m3u8', {
-          status: 415,
-          headers: {
-            'x-moontv-actual-type': 'unknown',
-            'Access-Control-Allow-Origin': '*',
-          },
-        });
-      }
-
-      const playlistProbe = upstreamRes.clone();
-      const text = await playlistProbe.text();
-      if (!text.includes('#EXTM3U')) {
-        return new NextResponse('Type mismatch: invalid m3u8 payload', {
-          status: 415,
-          headers: {
-            'x-moontv-actual-type': 'unknown',
-            'Access-Control-Allow-Origin': '*',
-          },
-        });
-      }
-
-      const proxiedUrl = new URL(request.url);
-      const rewritten = rewriteM3U8(
+      return NextResponse.json({
+        success: true,
+        type: actualType,
+        mimeType: upstreamContentType,
+      });
+    }
+    if (actualType === 'm3u8') {
+      const text = await readLiveManifest(inspected.body);
+      if (!text.trimStart().startsWith('#EXTM3U'))
+        return new NextResponse('Invalid HLS manifest', { status: 415 });
+      const rewritten = rewriteLiveManifest(
         text,
-        new URL(upstreamRes.url),
-        proxiedUrl.origin,
+        upstreamRes.url || activeUrl.toString(),
         sourceKey,
+        channelId,
+        searchParams.get('moontv-track') === 'subtitles',
+        (url) => signMediaUrl(url, access.username, access.expires),
       );
       return new NextResponse(rewritten, {
-        status: 200,
         headers: {
           'content-type': 'application/vnd.apple.mpegurl',
           'cache-control': 'no-store',
           'Access-Control-Allow-Origin': '*',
         },
+      });
+    }
+    if (
+      ['m3u8', 'flv'].includes(type) &&
+      actualType !== type &&
+      detected !== 'unknown'
+    ) {
+      await inspected.body.cancel().catch(() => {});
+      return new NextResponse(`Type mismatch: upstream is ${actualType}`, {
+        status: 415,
+        headers: { 'x-moontv-actual-type': actualType },
       });
     }
 
@@ -706,7 +764,19 @@ export async function GET(request: NextRequest, props: ProxyParams) {
       if (v) responseHeaders.set(h, v);
     });
 
-    return new NextResponse(upstreamRes.body, {
+    responseHeaders.set(
+      'content-type',
+      searchParams.get('moontv-track') === 'subtitles'
+        ? 'text/vtt'
+        : liveStreamMimeType(actualType, activeUrl.toString()),
+    );
+    responseHeaders.set('x-content-type-options', 'nosniff');
+    responseHeaders.set(
+      'content-security-policy',
+      "sandbox; default-src 'none'",
+    );
+    responseHeaders.set('cache-control', 'private, no-store');
+    return new NextResponse(inspected.body, {
       status: upstreamRes.status,
       headers: responseHeaders,
     });

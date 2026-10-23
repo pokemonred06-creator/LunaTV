@@ -1,14 +1,12 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
 import { NextRequest, NextResponse } from 'next/server';
 import { promisify } from 'util';
 import { gzip } from 'zlib';
 
 import { getAuthInfoFromCookie } from '@/lib/auth/server';
-import { getOwnerUsername, isOwnerUsername } from '@/lib/auth/shared';
+import { isOwnerUsername } from '@/lib/auth/shared';
+import { captureBackup, MAX_BACKUP_JSON_BYTES } from '@/lib/backup';
 import { ServerCrypto } from '@/lib/crypto';
 import { db } from '@/lib/db';
-import { getStoredUserPasswordHash } from '@/lib/storage-credentials';
 import { CURRENT_VERSION } from '@/lib/version';
 
 export const runtime = 'nodejs';
@@ -51,54 +49,25 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '请提供加密密码' }, { status: 400 });
     }
 
-    // 收集所有数据
     const exportData = {
-      timestamp: new Date().toISOString(),
+      ...(await captureBackup()),
       serverVersion: CURRENT_VERSION,
-      data: {
-        // 管理员配置
-        adminConfig: config,
-        // 所有用户数据
-        userData: {} as { [username: string]: any },
-      },
     };
-
-    // 获取所有用户
-    let allUsers = await db.getAllUsers();
-    // 添加站长用户
-    allUsers.push(getOwnerUsername());
-    allUsers = Array.from(new Set(allUsers));
-
-    // 为每个用户收集数据
-    for (const username of allUsers) {
-      const userData = {
-        // 播放记录
-        playRecords: await db.getAllPlayRecords(username),
-        // 收藏夹
-        favorites: await db.getAllFavorites(username),
-        // 搜索历史
-        searchHistory: await db.getSearchHistory(username),
-        // 跳过片头片尾配置
-        skipConfigs: await db.getAllSkipConfigs(username),
-        // Password snapshots are exported only as non-recoverable hashes.
-        passwordHash: await getUserPasswordHash(username),
-      };
-
-      exportData.data.userData[username] = userData;
-    }
 
     // 将数据转换为JSON字符串
     const jsonData = JSON.stringify(exportData);
 
     // 先压缩数据
+    if (Buffer.byteLength(jsonData) > MAX_BACKUP_JSON_BYTES)
+      throw new Error('Backup exceeds uncompressed size limit');
     const compressedData = await gzipAsync(jsonData);
 
-    // 使用提供的密码加密压缩后的数据
     // 使用提供的密码加密压缩后的数据
     const encryptedData = await ServerCrypto.encrypt(
       compressedData.toString('base64'),
       password,
       0, // No expiry for backups
+      'backup',
     );
 
     // 生成文件名
@@ -121,15 +90,5 @@ export async function POST(req: NextRequest) {
       { error: error instanceof Error ? error.message : '导出失败' },
       { status: 500 },
     );
-  }
-}
-
-// 辅助函数：获取用户密码（通过数据库直接访问）
-async function getUserPasswordHash(username: string): Promise<string | null> {
-  try {
-    return await getStoredUserPasswordHash((db as any).storage, username);
-  } catch (error) {
-    console.error(`获取用户 ${username} 密码哈希失败:`, error);
-    return null;
   }
 }

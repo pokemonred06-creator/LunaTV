@@ -28,7 +28,7 @@ const SeasonalEffectsContext = createContext<
 
 const seasonNames: Record<Season, string> = {
   spring: '春季 🌸',
-  summer: '夏季 🍃',
+  summer: '夏季 ⛈️',
   autumn: '秋季 🍁',
   winter: '冬季 ❄️',
   auto: '自动',
@@ -116,8 +116,8 @@ export const useSeasonalEffects = () => {
 // Export season options for admin settings UI
 export const seasonOptions: { value: Season; label: string }[] = [
   { value: 'auto', label: '自动（根据月份）' },
-  { value: 'spring', label: '春季 - 樱花雨 🌸💧' },
-  { value: 'summer', label: '夏季 - 绿叶雨 🍃💧' },
+  { value: 'spring', label: '春季 - 樱花蝴蝶 🌸🦋' },
+  { value: 'summer', label: '夏季 - 暴雨闪电 ⛈️💧' },
   { value: 'autumn', label: '秋季 - 红枫落叶 🍁🍂' },
   { value: 'winter', label: '冬季 - 雪花飘落 ❄️' },
   { value: 'off', label: '关闭效果' },
