@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { spawn } from 'node:child_process';
 
 import { getConfig } from '@/lib/config';
+import { guardedFetch } from '@/lib/guarded-fetch';
 import { getCachedLiveChannels } from '@/lib/live';
 import {
   detectLiveStreamType,
@@ -15,7 +16,7 @@ import {
 } from '@/lib/live-stream-body';
 import { authorizeMediaRequest, signMediaUrl } from '@/lib/media-auth';
 import { safeImageResponse } from '@/lib/safe-image';
-import { validateSafeProxyUrl } from '@/lib/ssrf-guard';
+import { resolveSafeRelayUrl, validateSafeProxyUrl } from '@/lib/ssrf-guard';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -78,7 +79,7 @@ async function fetchWithValidatedRedirects(
     }
 
     console.log(`[Proxy] Hop ${hop}: Fetching ${current}`);
-    const res = await fetch(current, { ...init, redirect: 'manual' });
+    const res = await guardedFetch(current, { ...init, redirect: 'manual' });
     console.log(`[Proxy] Hop ${hop} Status: ${res.status}`);
 
     if (res.status >= 300 && res.status < 400) {
@@ -304,11 +305,11 @@ export async function GET(request: NextRequest, props: ProxyParams) {
       );
     }
 
-    const safeRelayTarget = await validateSafeProxyUrl(
+    const safeRelayTarget = await resolveSafeRelayUrl(
       upstreamUrl.toString(),
       FFMPEG_RELAY_PROTOCOLS,
       requestAllowedPorts,
-    );
+    ).catch(() => null);
     if (!safeRelayTarget) {
       return new NextResponse('Blocked upstream target', {
         status: 403,
@@ -334,8 +335,11 @@ export async function GET(request: NextRequest, props: ProxyParams) {
       '-nostdin',
       '-fflags',
       'nobuffer',
+      ...(upstreamScheme === 'rtmp'
+        ? ['-rtmp_tcurl', upstreamUrl.toString()]
+        : []),
       '-i',
-      upstreamUrl.toString(),
+      safeRelayTarget.toString(),
       '-map',
       '0:v:0?',
       '-map',

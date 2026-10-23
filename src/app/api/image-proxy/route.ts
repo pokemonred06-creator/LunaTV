@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getConfig } from '@/lib/config';
+import { guardedFetch } from '@/lib/guarded-fetch';
 import { safeImageResponse } from '@/lib/safe-image';
 import { validateSafeUrl } from '@/lib/ssrf-guard';
 
@@ -19,10 +20,11 @@ async function fetchWithValidatedRedirects(
     if (!(await validateSafeUrl(current)))
       throw new Error(`SSRF Blocked: ${current}`);
 
-    const res = await fetch(current, { ...init, redirect: 'manual' });
+    const res = await guardedFetch(current, { ...init, redirect: 'manual' });
     if (res.status >= 300 && res.status < 400) {
       const loc = res.headers.get('location');
       if (!loc) return res;
+      await res.body?.cancel();
       try {
         current = new URL(loc, current).toString();
         continue;

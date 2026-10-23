@@ -170,3 +170,30 @@ function getPortForUrl(u: URL): number | null {
   if (u.protocol === 'rtsp:') return 554;
   return null;
 }
+
+/** Resolve a relay destination once and pass only that checked address to FFmpeg. */
+export async function resolveSafeRelayUrl(
+  raw: string,
+  protocols: Set<string>,
+  ports: Set<number> | null,
+): Promise<URL> {
+  if (!(await validateSafeProxyUrl(raw, protocols, ports))) {
+    throw new Error('SSRF blocked relay target');
+  }
+  const url = new URL(raw);
+  const hostname = url.hostname.replace(/^\[|\]$/g, '');
+  if (!net.isIP(hostname)) {
+    const records = await dns.lookup(hostname, { all: true, verbatim: true });
+    if (
+      !records.length ||
+      records.some((record) => isBlockedIp(record.address))
+    ) {
+      throw new Error('SSRF blocked relay address');
+    }
+    const selected =
+      records.find((record) => record.family === 4) ?? records[0];
+    url.hostname =
+      selected.family === 6 ? `[${selected.address}]` : selected.address;
+  }
+  return url;
+}

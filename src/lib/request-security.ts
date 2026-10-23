@@ -60,7 +60,7 @@ function isBlockedIpv6(ip: string): boolean {
   return blockedAddresses.check(ip, 'ipv6');
 }
 
-function isBlockedIp(ip: string): boolean {
+export function isBlockedRemoteIp(ip: string): boolean {
   if (net.isIPv4(ip)) {
     return isBlockedIpv4(ip);
   }
@@ -89,7 +89,7 @@ export async function assertSafeRemoteUrl(rawUrl: string): Promise<URL> {
   if (!hostname || hostname === 'localhost') {
     throw new Error('Local destinations are not allowed');
   }
-  if (net.isIP(hostname) && isBlockedIp(hostname)) {
+  if (net.isIP(hostname) && isBlockedRemoteIp(hostname)) {
     throw new Error('Private network destinations are not allowed');
   }
 
@@ -97,7 +97,7 @@ export async function assertSafeRemoteUrl(rawUrl: string): Promise<URL> {
   if (records.length === 0) {
     throw new Error('Unable to resolve remote host');
   }
-  if (records.some((record) => isBlockedIp(record.address))) {
+  if (records.some((record) => isBlockedRemoteIp(record.address))) {
     throw new Error('Private network destinations are not allowed');
   }
 

@@ -28,6 +28,10 @@ jest.mock('@/lib/config', () => ({
   }),
 }));
 jest.mock('@/lib/live', () => ({ getCachedLiveChannels: jest.fn() }));
+jest.mock('@/lib/guarded-fetch', () => ({
+  guardedFetch: (...args) => global.fetch(...args),
+}));
+
 jest.mock('@/lib/ssrf-guard', () => ({ validateSafeProxyUrl: jest.fn() }));
 
 beforeEach(() => {

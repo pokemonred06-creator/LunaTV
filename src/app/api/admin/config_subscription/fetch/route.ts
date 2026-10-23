@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { getAuthInfoFromCookie } from '@/lib/auth/server';
 import { isOwnerUsername } from '@/lib/auth/shared';
+import { guardedFetch } from '@/lib/guarded-fetch';
 import { assertSafeRemoteUrl } from '@/lib/request-security';
 
 export const runtime = 'nodejs';
@@ -29,11 +30,15 @@ export async function POST(request: NextRequest) {
     }
 
     const safeUrl = await assertSafeRemoteUrl(url);
-    const response = await fetch(safeUrl, {
-      redirect: 'error',
-      signal: AbortSignal.timeout(10_000),
-      cache: 'no-store',
-    });
+    const response = await guardedFetch(
+      safeUrl,
+      {
+        redirect: 'error',
+        signal: AbortSignal.timeout(10_000),
+        cache: 'no-store',
+      },
+      'remote',
+    );
 
     if (!response.ok) {
       return NextResponse.json(

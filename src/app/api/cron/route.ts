@@ -4,6 +4,7 @@ import { getOwnerUsername } from '@/lib/auth/shared';
 import { getConfig, refineConfig } from '@/lib/config';
 import { db } from '@/lib/db';
 import { fetchVideoDetail } from '@/lib/fetchVideoDetail';
+import { guardedFetch } from '@/lib/guarded-fetch';
 import { refreshLiveChannels } from '@/lib/live';
 import { assertSafeRemoteUrl } from '@/lib/request-security';
 import { SearchResult } from '@/lib/types';
@@ -98,11 +99,15 @@ async function refreshConfig() {
   ) {
     try {
       const safeUrl = await assertSafeRemoteUrl(config.ConfigSubscription.URL);
-      const response = await fetch(safeUrl, {
-        redirect: 'error',
-        signal: AbortSignal.timeout(10_000),
-        cache: 'no-store',
-      });
+      const response = await guardedFetch(
+        safeUrl,
+        {
+          redirect: 'error',
+          signal: AbortSignal.timeout(10_000),
+          cache: 'no-store',
+        },
+        'remote',
+      );
 
       if (!response.ok) {
         throw new Error(`请求失败: ${response.status} ${response.statusText}`);

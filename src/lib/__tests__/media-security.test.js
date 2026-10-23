@@ -24,6 +24,10 @@ jest.mock('@/lib/config', () => ({
   getConfig: async () => ({ LiveConfig: [{ key: 'allowed' }] }),
 }));
 jest.mock('@/lib/live', () => ({ getCachedLiveChannels: jest.fn() }));
+jest.mock('@/lib/guarded-fetch', () => ({
+  guardedFetch: (...args) => global.fetch(...args),
+}));
+
 jest.mock('@/lib/ssrf-guard', () => ({
   validateSafeProxyUrl: async () => true,
   validateSafeUrl: async () => true,
