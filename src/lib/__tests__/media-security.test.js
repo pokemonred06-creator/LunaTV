@@ -3,10 +3,11 @@
 import { NextRequest } from 'next/server';
 
 import { getAuthInfoFromCookie, isActiveUsername } from '@/lib/auth/server';
-import { getAvailableLiveSources } from '@/lib/config';
+import { getAvailableApiSites, getAvailableLiveSources } from '@/lib/config';
 import { getCachedLiveChannels } from '@/lib/live';
 import { authorizeMediaRequest, signMediaUrl } from '@/lib/media-auth';
 import { safeImageResponse } from '@/lib/safe-image';
+import { getVodProxyUrl } from '@/lib/vod-playback';
 
 import { GET as image } from '@/app/api/image-proxy/route';
 import { GET as channels } from '@/app/api/live/channels/route';
@@ -20,6 +21,7 @@ jest.mock('@/lib/auth/server', () => ({
   isActiveUsername: jest.fn(),
 }));
 jest.mock('@/lib/config', () => ({
+  getAvailableApiSites: jest.fn(),
   getAvailableLiveSources: jest.fn(),
   getConfig: async () => ({ LiveConfig: [{ key: 'allowed' }] }),
 }));
@@ -43,6 +45,9 @@ beforeEach(() => {
   isActiveUsername.mockResolvedValue(true);
   getAvailableLiveSources.mockResolvedValue([
     { key: 'allowed', name: 'Allowed' },
+  ]);
+  getAvailableApiSites.mockResolvedValue([
+    { key: 'vod-allowed', name: 'Allowed VOD' },
   ]);
   getCachedLiveChannels.mockResolvedValue({
     channels: [
@@ -179,6 +184,89 @@ test('checks a signed-in viewer source permission before fetching media', async 
   });
   const response = await proxy(
     request(media.replace('moontv-source=allowed', 'moontv-source=restricted')),
+    { params: Promise.resolve({ type: 'm3u8' }) },
+  );
+  expect(response.status).toBe(401);
+  expect(fetch).not.toHaveBeenCalled();
+});
+
+test('keeps VOD permission context on signed manifests, keys, and segments', async () => {
+  getAuthInfoFromCookie.mockResolvedValue({
+    username: 'viewer',
+    timestamp: Date.now(),
+  });
+  fetch.mockResolvedValue(
+    new Response(
+      '#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI="key.bin"\n#EXTINF:2,\nsegment.ts\n#EXT-X-STREAM-INF:BANDWIDTH=1000\nvariant.m3u8',
+    ),
+  );
+  const response = await proxy(
+    request(getVodProxyUrl('https://media.example/index.m3u8', 'vod-allowed')),
+    { params: Promise.resolve({ type: 'm3u8' }) },
+  );
+  expect(response.status).toBe(200);
+  const text = await response.text();
+  const links = [...text.matchAll(/(?:URI="|^)(\/api\/proxy\/[^"\n]+)/gm)].map(
+    (match) => match[1],
+  );
+  expect(links).toHaveLength(3);
+  getAuthInfoFromCookie.mockResolvedValue(null);
+  for (const link of links) {
+    const query = new URL(link, 'https://site.example').searchParams;
+    expect(query.get('moontv-vod-source')).toBe('vod-allowed');
+    expect(query.has('moontv-source')).toBe(false);
+    expect(await authorizeMediaRequest(request(link))).toMatchObject({
+      username: 'viewer',
+    });
+    expect(
+      await authorizeMediaRequest(
+        request(link.replace('vod-allowed', 'vod-denied')),
+      ),
+    ).toBeNull();
+  }
+  fetch.mockResolvedValue(new Response('#EXTM3U\n#EXTINF:2,\nsecond.ts'));
+  const variant = links.find((link) => link.startsWith('/api/proxy/m3u8'));
+  const childResponse = await proxy(request(variant), {
+    params: Promise.resolve({ type: 'm3u8.m3u8' }),
+  });
+  expect(childResponse.status).toBe(200);
+  const nestedLink = (await childResponse.text())
+    .split('\n')
+    .find((line) => line.startsWith('/api/proxy/'));
+  expect(await authorizeMediaRequest(request(nestedLink))).toMatchObject({
+    username: 'viewer',
+  });
+  expect(
+    new URL(nestedLink, 'https://site.example').searchParams.get(
+      'moontv-vod-source',
+    ),
+  ).toBe('vod-allowed');
+  getAvailableApiSites.mockResolvedValue([]);
+  for (const link of links)
+    expect(await authorizeMediaRequest(request(link))).toBeNull();
+});
+
+test('requires a session for initial VOD playback', async () => {
+  const response = await proxy(
+    request(getVodProxyUrl('https://media.example/index.m3u8', 'vod-allowed')),
+    { params: Promise.resolve({ type: 'm3u8' }) },
+  );
+  expect(response.status).toBe(401);
+  expect(fetch).not.toHaveBeenCalled();
+});
+
+test.each([
+  'moontv-vod-source=vod-denied',
+  'moontv-vod-source=',
+  'moontv-vod-source=vod-allowed&moontv-source=allowed',
+  'moontv-source=vod-allowed',
+])('rejects unauthorized or mixed VOD context: %s', async (context) => {
+  getAuthInfoFromCookie.mockResolvedValue({
+    username: 'viewer',
+    timestamp: Date.now(),
+  });
+  const response = await proxy(
+    request(media.replace('moontv-source=allowed', context)),
     { params: Promise.resolve({ type: 'm3u8' }) },
   );
   expect(response.status).toBe(401);

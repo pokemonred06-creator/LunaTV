@@ -138,7 +138,10 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
       setAttemptedSources((prev) => new Set(prev).add(sourceKey));
 
       try {
-        const info = await getVideoResolutionFromM3u8(episodeUrl, { signal });
+        const info = await getVideoResolutionFromM3u8(episodeUrl, {
+          signal,
+          sourceId: source.source,
+        });
         setVideoInfoMap((prev) => new Map(prev).set(sourceKey, info));
       } catch (error: unknown) {
         if ((error as Error)?.name === 'AbortError') return;

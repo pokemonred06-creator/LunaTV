@@ -248,6 +248,7 @@ export async function GET(request: NextRequest, props: ProxyParams) {
   const { searchParams } = new URL(request.url);
   const urlParam = searchParams.get('url') || '';
   const sourceKey = searchParams.get('moontv-source');
+  const vodSourceKey = searchParams.get('moontv-vod-source');
   const channelId = searchParams.get('moontv-channel');
   const probeOnly = searchParams.get('probe') === '1';
 
@@ -725,7 +726,16 @@ export async function GET(request: NextRequest, props: ProxyParams) {
         sourceKey,
         channelId,
         searchParams.get('moontv-track') === 'subtitles',
-        (url) => signMediaUrl(url, access.username, access.expires),
+        (url) => {
+          const child = new URL(url, request.url);
+          if (vodSourceKey)
+            child.searchParams.set('moontv-vod-source', vodSourceKey);
+          return signMediaUrl(
+            `${child.pathname}${child.search}`,
+            access.username,
+            access.expires,
+          );
+        },
       );
       return new NextResponse(rewritten, {
         headers: {

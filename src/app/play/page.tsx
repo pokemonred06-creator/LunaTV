@@ -24,6 +24,7 @@ import {
 } from '@/lib/db.client';
 import { SearchResult } from '@/lib/types';
 import { getVideoResolutionFromM3u8, processImageUrl } from '@/lib/utils';
+import { getVodProxyUrl } from '@/lib/vod-playback';
 
 import EpisodeSelector from '@/components/EpisodeSelector';
 import { useLanguage } from '@/components/LanguageProvider';
@@ -463,7 +464,10 @@ function PlayPageClient() {
       setVideoUrl('');
       return;
     }
-    const newUrl = detail.episodes[currentEpisodeIndex] || '';
+    const newUrl = getVodProxyUrl(
+      detail.episodes[currentEpisodeIndex] || '',
+      detail.source,
+    );
     if (newUrl !== videoUrl) {
       setVideoUrl(newUrl);
     }
@@ -892,9 +896,7 @@ function PlayPageClient() {
         ): Promise<boolean> => {
           if (!episodeUrl) return false;
           try {
-            const probeUrl = /^https?:\/\//i.test(episodeUrl)
-              ? `/api/proxy/m3u8?url=${encodeURIComponent(episodeUrl)}&moontv-source=${encodeURIComponent(sourceId || 'global')}`
-              : episodeUrl;
+            const probeUrl = getVodProxyUrl(episodeUrl, sourceId);
             const controller = new AbortController();
             const timeoutId = window.setTimeout(() => controller.abort(), 6000);
             const res = await fetch(probeUrl, {
@@ -904,6 +906,10 @@ function PlayPageClient() {
             clearTimeout(timeoutId);
             if (!res.ok) return false;
             const ct = (res.headers.get('content-type') || '').toLowerCase();
+            if (ct.startsWith('video/') || ct.startsWith('audio/')) {
+              await res.body?.cancel();
+              return true;
+            }
             const text = await res.text();
             return (
               ct.includes('mpegurl') ||
@@ -1012,7 +1018,7 @@ function PlayPageClient() {
           detailData.episodes?.[preferredEpisodeIndex] || '';
         const primaryPlayable = await probeEpisodePlayableInInit(
           primaryEpisodeUrl,
-          detailData.id,
+          detailData.source,
         );
         if (!primaryPlayable) {
           // If we took the Fast Path and it failed the probe, we must wait for the background search to finish
@@ -1044,7 +1050,7 @@ function PlayPageClient() {
             if (!candidateEpisode) continue;
             const ok = await probeEpisodePlayableInInit(
               candidateEpisode,
-              source.id,
+              source.source,
             );
             if (ok) {
               detailData = source;
@@ -1374,9 +1380,7 @@ function PlayPageClient() {
     }
 
     try {
-      const probeUrl = /^https?:\/\//i.test(episodeUrl)
-        ? `/api/proxy/m3u8?url=${encodeURIComponent(episodeUrl)}&moontv-source=${encodeURIComponent(id || 'global')}`
-        : episodeUrl;
+      const probeUrl = getVodProxyUrl(episodeUrl, source);
       const controller = new AbortController();
       const timeoutId = window.setTimeout(() => controller.abort(), 7000);
       const res = await fetch(probeUrl, {
@@ -1389,6 +1393,11 @@ function PlayPageClient() {
         return false;
       }
       const ct = (res.headers.get('content-type') || '').toLowerCase();
+      if (ct.startsWith('video/') || ct.startsWith('audio/')) {
+        await res.body?.cancel();
+        episodeProbeCacheRef.current[cacheKey] = true;
+        return true;
+      }
       const text = await res.text();
       const playable =
         ct.includes('mpegurl') ||

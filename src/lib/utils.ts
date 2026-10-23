@@ -1,6 +1,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import he from 'he';
 
+import { getVodProxyUrl } from '@/lib/vod-playback';
+
 function getDoubanImageProxyConfig(): {
   proxyType:
     | 'direct'
@@ -11,6 +13,11 @@ function getDoubanImageProxyConfig(): {
     | 'custom';
   proxyUrl: string;
 } {
+  // Client components also render on the server, where browser settings are absent.
+  if (typeof window === 'undefined') {
+    return { proxyType: 'cmliussss-cdn-tencent', proxyUrl: '' };
+  }
+
   const doubanImageProxyType =
     localStorage.getItem('doubanImageProxyType') ||
     (window as any).RUNTIME_CONFIG?.DOUBAN_IMAGE_PROXY_TYPE ||
@@ -184,7 +191,10 @@ async function getVideoResolutionFast(m3u8Url: string): Promise<{
  * 使用HLS.js获取视频分辨率（慢速但准确）
  * 通过实际加载视频片段获取真实分辨率
  */
-async function getVideoResolutionWithHls(m3u8Url: string): Promise<{
+async function getVideoResolutionWithHls(
+  m3u8Url: string,
+  sourceId: string,
+): Promise<{
   quality: string;
   loadSpeed: string;
   pingTime: number;
@@ -192,10 +202,7 @@ async function getVideoResolutionWithHls(m3u8Url: string): Promise<{
   return new Promise((resolve, reject) => {
     (async () => {
       // Always use same-origin proxy for speed tests to avoid browser CORS blocks.
-      const testUrl =
-        /^https?:\/\//i.test(m3u8Url) && !m3u8Url.includes('/api/proxy/')
-          ? `/api/proxy/m3u8?url=${encodeURIComponent(m3u8Url)}&moontv-source=global`
-          : m3u8Url;
+      const testUrl = getVodProxyUrl(m3u8Url, sourceId);
 
       const video = document.createElement('video');
       video.muted = true;
@@ -361,9 +368,7 @@ export async function probeStreamStatus(
   }
 
   try {
-    const probeUrl = /^https?:\/\//i.test(url)
-      ? `/api/proxy/m3u8?url=${encodeURIComponent(url)}&moontv-source=${encodeURIComponent(sourceId || 'global')}`
-      : url;
+    const probeUrl = getVodProxyUrl(url, sourceId);
 
     // We do a GET with a small Range request to avoid downloading the whole manifest if it's huge,
     // but still get the HTTP status code and headers.
@@ -428,7 +433,7 @@ export async function getVideoResolutionFromM3u8(
   // 先进行轻量级连通性探测 (Stage 1)
   const isPlayable = await probeStreamStatus(
     m3u8Url,
-    options?.sourceId || 'global',
+    options?.sourceId || '',
     options,
   );
   if (!isPlayable) {
@@ -437,7 +442,7 @@ export async function getVideoResolutionFromM3u8(
 
   // 直接使用 HLS 方法，以确保测速准确（需要下载真实分片）
   // 之前的 Fast 方法只下载文本文件，导致测速结果极低且不准确
-  return await getVideoResolutionWithHls(m3u8Url);
+  return await getVideoResolutionWithHls(m3u8Url, options?.sourceId || '');
 }
 
 export function cleanHtmlTags(text: string): string {

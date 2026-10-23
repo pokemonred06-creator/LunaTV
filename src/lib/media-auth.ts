@@ -2,7 +2,7 @@ import type { NextRequest } from 'next/server';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
 import { getAuthInfoFromCookie, isActiveUsername } from '@/lib/auth/server';
-import { getAvailableLiveSources } from '@/lib/config';
+import { getAvailableApiSites, getAvailableLiveSources } from '@/lib/config';
 
 const lifetime = 7 * 24 * 60 * 60 * 1000;
 
@@ -64,6 +64,17 @@ export async function authorizeMediaRequest(
     expires = auth.timestamp + lifetime;
   }
   const source = query.get('moontv-source');
+  const vodSource = query.get('moontv-vod-source');
+  if (query.has('moontv-vod-source')) {
+    if (
+      !vodSource ||
+      query.has('moontv-source') ||
+      !(await getAvailableApiSites(username)).some(
+        (entry) => entry.key === vodSource,
+      )
+    )
+      return null;
+  }
   if (
     source &&
     !(await getAvailableLiveSources(username)).some(
