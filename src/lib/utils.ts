@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import he from 'he';
+import * as he from 'he';
 
 import { getVodProxyUrl } from '@/lib/vod-playback';
 

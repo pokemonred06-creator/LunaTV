@@ -1,3 +1,4 @@
+import { fixupPluginRules } from '@eslint/compat';
 import { FlatCompat } from '@eslint/eslintrc';
 import js from '@eslint/js';
 import path from 'path';
@@ -48,7 +49,7 @@ export default tseslint.config(
     files: ['**/*.ts', '**/*.tsx', '**/*.js', '**/*.jsx'],
     plugins: {
       '@next/next': nextPlugin,
-      react: reactPlugin,
+      react: fixupPluginRules(reactPlugin),
       'react-hooks': reactHooksPlugin,
       'simple-import-sort': simpleImportSort,
       'unused-imports': unusedImports,

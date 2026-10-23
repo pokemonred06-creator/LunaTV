@@ -244,7 +244,8 @@ export class Canvas2DRenderer implements Renderer {
        // --- 6. Draw Drops ---
     const numDrops = state.dropsData ? state.dropsData.length / 9 : drops.length;
     for (let i = 0; i < numDrops; i++) {
-      let x = 0, y = 0, r = 0, stretch = 0, vy = 0, seed = 0, wobble = 0, falling = false;
+      let x: number, y: number, r: number, stretch: number, vy: number, seed: number, wobble: number;
+      let falling: boolean;
       if (state.dropsData) {
         const off = i * 9;
         x = state.dropsData[off + 0];

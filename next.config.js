@@ -1,6 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: 'standalone',
+  // he 2 is ESM-only; compile it consistently for Next.js and next/jest.
+  transpilePackages: ['he'],
   poweredByHeader: false,
   // Pin tracing root project to avoid monorepo lockfile warnings.
   outputFileTracingRoot: __dirname,

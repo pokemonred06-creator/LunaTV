@@ -1,0 +1,263 @@
+{
+  "checkedAt": "2026-10-23T13:49:06.997Z",
+  "scope": "LunaTV web dependencies; OrionTV unchanged",
+  "changedDirectDependencies": [
+    {
+      "name": "framer-motion",
+      "section": "dependencies",
+      "before": "^13.4.2",
+      "after": "^14.6.0",
+      "installed": "14.6.0",
+      "registryLatest": "14.6.0"
+    },
+    {
+      "name": "he",
+      "section": "dependencies",
+      "before": "^1.2.0",
+      "after": "^2.0.0",
+      "installed": "2.0.0",
+      "registryLatest": "2.0.0"
+    },
+    {
+      "name": "lucide-react",
+      "section": "dependencies",
+      "before": "^1.47.0",
+      "after": "^1.61.0",
+      "installed": "1.61.0",
+      "registryLatest": "1.61.0"
+    },
+    {
+      "name": "react",
+      "section": "dependencies",
+      "before": "^19.3.0",
+      "after": "^19.3.1",
+      "installed": "19.3.1",
+      "registryLatest": "19.3.1"
+    },
+    {
+      "name": "react-dom",
+      "section": "dependencies",
+      "before": "^19.3.0",
+      "after": "^19.3.1",
+      "installed": "19.3.1",
+      "registryLatest": "19.3.1"
+    },
+    {
+      "name": "redis",
+      "section": "dependencies",
+      "before": "^6.2.1",
+      "after": "^6.3.0",
+      "installed": "6.3.0",
+      "registryLatest": "6.3.0"
+    },
+    {
+      "name": "swiper",
+      "section": "dependencies",
+      "before": "^14.2.0",
+      "after": "^14.3.0",
+      "installed": "14.3.0",
+      "registryLatest": "14.3.0"
+    },
+    {
+      "name": "video.js",
+      "section": "dependencies",
+      "before": "^8.24.1",
+      "after": "8.24.1",
+      "installed": "8.24.1",
+      "registryLatest": "10.2.0"
+    },
+    {
+      "name": "zod",
+      "section": "dependencies",
+      "before": "^4.6.5",
+      "after": "^4.6.7",
+      "installed": "4.6.7",
+      "registryLatest": "4.6.7"
+    },
+    {
+      "name": "@commitlint/cli",
+      "section": "devDependencies",
+      "before": "^21.2.3",
+      "after": "^21.2.4",
+      "installed": "21.2.4",
+      "registryLatest": "21.2.4"
+    },
+    {
+      "name": "@commitlint/config-conventional",
+      "section": "devDependencies",
+      "before": "^21.2.3",
+      "after": "^21.2.4",
+      "installed": "21.2.4",
+      "registryLatest": "21.2.4"
+    },
+    {
+      "name": "@eslint/compat",
+      "section": "devDependencies",
+      "before": null,
+      "after": "^2.1.1",
+      "installed": "2.1.1",
+      "registryLatest": "2.1.1"
+    },
+    {
+      "name": "@eslint/js",
+      "section": "devDependencies",
+      "before": "^9.39.5",
+      "after": "^10.0.1",
+      "installed": "10.0.1",
+      "registryLatest": "10.0.1"
+    },
+    {
+      "name": "@next/eslint-plugin-next",
+      "section": "devDependencies",
+      "before": "16.4.2",
+      "after": "16.4.3",
+      "installed": "16.4.3",
+      "registryLatest": "16.4.3"
+    },
+    {
+      "name": "@playwright/test",
+      "section": "devDependencies",
+      "before": "^1.63.0",
+      "after": "^1.64.1",
+      "installed": "1.64.1",
+      "registryLatest": "1.64.1"
+    },
+    {
+      "name": "@types/node",
+      "section": "devDependencies",
+      "before": "^26.6.2",
+      "after": "^26.6.5",
+      "installed": "26.6.5",
+      "registryLatest": "26.6.5"
+    },
+    {
+      "name": "@typescript-eslint/eslint-plugin",
+      "section": "devDependencies",
+      "before": "^8.70.1",
+      "after": "^8.72.0",
+      "installed": "8.72.0",
+      "registryLatest": "8.72.0"
+    },
+    {
+      "name": "@typescript-eslint/parser",
+      "section": "devDependencies",
+      "before": "^8.70.1",
+      "after": "^8.72.0",
+      "installed": "8.72.0",
+      "registryLatest": "8.72.0"
+    },
+    {
+      "name": "eslint",
+      "section": "devDependencies",
+      "before": "^9.39.5",
+      "after": "^10.13.0",
+      "installed": "10.13.0",
+      "registryLatest": "10.13.0"
+    },
+    {
+      "name": "eslint-config-next",
+      "section": "devDependencies",
+      "before": "16.4.2",
+      "after": "16.4.3",
+      "installed": "16.4.3",
+      "registryLatest": "16.4.3"
+    },
+    {
+      "name": "globals",
+      "section": "devDependencies",
+      "before": "^17.12.0",
+      "after": "^17.13.0",
+      "installed": "17.13.0",
+      "registryLatest": "17.13.0"
+    },
+    {
+      "name": "lint-staged",
+      "section": "devDependencies",
+      "before": "^17.5.1",
+      "after": "^17.6.0",
+      "installed": "17.6.0",
+      "registryLatest": "17.6.0"
+    },
+    {
+      "name": "postcss",
+      "section": "devDependencies",
+      "before": "^8.5.28",
+      "after": "^8.5.31",
+      "installed": "8.5.31",
+      "registryLatest": "8.5.31"
+    },
+    {
+      "name": "prettier",
+      "section": "devDependencies",
+      "before": "^3.9.9",
+      "after": "^3.9.10",
+      "installed": "3.9.10",
+      "registryLatest": "3.9.10"
+    },
+    {
+      "name": "typescript-eslint",
+      "section": "devDependencies",
+      "before": "^8.70.1",
+      "after": "^8.72.0",
+      "installed": "8.72.0",
+      "registryLatest": "8.72.0"
+    }
+  ],
+  "packageManager": {
+    "before": "pnpm@10.33.0",
+    "after": "pnpm@12.15.0"
+  },
+  "transitiveOverrides": {
+    "sharp": "0.35.5 (unchanged)",
+    "sourceMapJs": "1.2.2 (unchanged)",
+    "webpack": "5.112.1 → 5.112.2"
+  },
+  "exceptions": [
+    {
+      "name": "typescript",
+      "retained": "6.0.3",
+      "latest": "7.0.2",
+      "reason": "TypeScript 7 replaces the classic compiler API with native APIs; typescript-eslint 8.72 declares TypeScript >=4.8.4 <6.1.0. Next/Jest tooling requires classic APIs.",
+      "officialRelease": "https://github.com/microsoft/TypeScript/releases/tag/v7.0.2"
+    },
+    {
+      "name": "video.js",
+      "retained": "8.24.1",
+      "latest": "10.2.0",
+      "reason": "Video.js 10 is a migration stub for @videojs/html/@videojs/react that throws for Video.js 8 patterns; existing player and plugin integration requires 8 API. Pinned exact latest-8 stable version to avoid next-8 8.24.2.",
+      "officialRelease": "https://github.com/videojs/video.js/releases/tag/video.js%4010.2.0"
+    },
+    {
+      "name": "media-icons",
+      "retained": "1.1.5",
+      "latestTag": "0.10.0",
+      "reason": "Registry latest tag is older 2023 release while current official 1.1.5 was published in 2024 under next. Official repository main is 1.1.4; avoid needless downgrade. No application source imports the package."
+    }
+  ],
+  "checks": {
+    "pnpmInstall": "pass",
+    "typecheck": "pass",
+    "lint": "pass",
+    "jest": "113 tests / 14 suites pass",
+    "productionBuild": "pass on macOS with explicit pnpm12 runner",
+    "npmLockDryRun": "npm ci --ignore-scripts --dry-run passes",
+    "productionAudit": {
+      "info": 0,
+      "low": 0,
+      "moderate": 0,
+      "high": 0,
+      "critical": 0,
+      "total": 0
+    },
+    "pnpmFrozenInstall": "pass",
+    "finalTypecheckLintTest": "pass after media-icons retained1.1.5"
+  },
+  "notes": [
+    "Next latest tag remains 16.4.2; Next eslint packages latest tags are 16.4.3.",
+    "pnpm12 settings migrate to pnpm-workspace.yaml. Existing sharp/source-map/webpack overrides preserved. Explicit allowBuilds false preserves skipped scripts; release-age exclusions name exact newly published packages only.",
+    "Official @eslint/compat fixes React plugin APIs for ESLint10 across both npm/pnpm; targeted peer overrides match verified ESLint10. Obsolete pnpm-only patch removed.",
+    "Host global pnpm10.33 cannot auto-switch to native pnpm12 (ENOEXEC). Bootstrap with npm exec --yes --package=pnpm@12.15.0 -- pnpm install, and use the same prefix for run build/typecheck/test. Docker installs pnpm12 directly.",
+    "An initially returned braces audit GHSA-vfj7-8cjw-p6xm is withdrawn upstream 2026-10-23T12:53:02Z; final production npm audit reports zero advisories."
+  ],
+  "upgradedDirectDependencyCount": 23
+}

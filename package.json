@@ -34,69 +34,70 @@
     "clsx": "^2.1.1",
     "crypto-js": "^4.2.0",
     "flv.js": "^1.6.2",
-    "framer-motion": "^13.4.2",
-    "he": "^1.2.0",
+    "framer-motion": "^14.6.0",
+    "he": "^2.0.0",
     "hls.js": "^1.7.3",
-    "lucide-react": "^1.47.0",
+    "lucide-react": "^1.61.0",
     "media-icons": "^1.1.5",
     "mpegts.js": "^1.8.2",
     "next": "16.4.2",
     "next-themes": "^0.4.6",
     "opencc-js": "^1.4.2",
-    "react": "^19.3.0",
-    "react-dom": "^19.3.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
     "react-icons": "^5.7.0",
-    "redis": "^6.2.1",
+    "redis": "^6.3.0",
     "server-only": "^0.0.1",
     "sonner": "^2.0.8",
-    "swiper": "^14.2.0",
+    "swiper": "^14.3.0",
     "tailwind-merge": "^3.7.0",
     "undici": "8.12.3",
-    "video.js": "^8.24.1",
+    "video.js": "8.24.1",
     "videojs-flvjs": "^0.3.1",
     "videojs-hotkeys": "^0.2.30",
     "videojs-mobile-ui": "^1.2.7",
-    "zod": "^4.6.5"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@commitlint/cli": "^21.2.3",
-    "@commitlint/config-conventional": "^21.2.3",
+    "@commitlint/cli": "^21.2.4",
+    "@commitlint/config-conventional": "^21.2.4",
+    "@eslint/compat": "^2.1.1",
     "@eslint/eslintrc": "^3.3.7",
-    "@eslint/js": "^9.39.5",
-    "@next/eslint-plugin-next": "16.4.2",
-    "@playwright/test": "^1.63.0",
+    "@eslint/js": "^10.0.1",
+    "@next/eslint-plugin-next": "16.4.3",
+    "@playwright/test": "^1.64.1",
     "@svgr/webpack": "^8.1.0",
     "@tailwindcss/forms": "^0.5.11",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",
     "@types/crypto-js": "^4.2.2",
     "@types/he": "^1.2.3",
-    "@types/node": "^26.6.2",
+    "@types/node": "^26.6.5",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@types/video.js": "^7.3.58",
-    "@typescript-eslint/eslint-plugin": "^8.70.1",
-    "@typescript-eslint/parser": "^8.70.1",
+    "@typescript-eslint/eslint-plugin": "^8.72.0",
+    "@typescript-eslint/parser": "^8.72.0",
     "autoprefixer": "^10.6.1",
-    "eslint": "^9.39.5",
-    "eslint-config-next": "16.4.2",
+    "eslint": "^10.13.0",
+    "eslint-config-next": "16.4.3",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-simple-import-sort": "^14.0.0",
     "eslint-plugin-unused-imports": "^4.4.1",
-    "globals": "^17.12.0",
+    "globals": "^17.13.0",
     "husky": "^9.1.7",
     "jest": "^30.5.2",
     "jest-environment-jsdom": "^30.5.2",
-    "lint-staged": "^17.5.1",
+    "lint-staged": "^17.6.0",
     "next-router-mock": "^1.0.5",
-    "postcss": "^8.5.28",
-    "prettier": "^3.9.9",
+    "postcss": "^8.5.31",
+    "prettier": "^3.9.10",
     "prettier-plugin-tailwindcss": "^0.8.1",
     "tailwindcss": "^4.3.3",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.70.1",
+    "typescript-eslint": "^8.72.0",
     "webpack-obfuscator": "^3.6.1"
   },
   "lint-staged": {
@@ -108,25 +109,19 @@
       "prettier -w"
     ]
   },
-  "pnpm": {
-    "ignoredBuiltDependencies": [
-      "javascript-obfuscator",
-      "sharp",
-      "unrs-resolver"
-    ],
-    "patchedDependencies": {
-      "eslint-plugin-react@7.37.5": "patches/eslint-plugin-react.patch"
-    },
-    "overrides": {
-      "sharp": "0.35.5",
-      "source-map-js": "1.2.2",
-      "webpack": "5.112.1"
-    }
-  },
-  "packageManager": "pnpm@10.33.0",
+  "packageManager": "pnpm@12.15.0",
   "overrides": {
     "sharp": "0.35.5",
     "source-map-js": "1.2.2",
-    "webpack": "5.112.1"
+    "webpack": "5.112.2",
+    "eslint-plugin-react": {
+      "eslint": "$eslint"
+    },
+    "eslint-plugin-import": {
+      "eslint": "$eslint"
+    },
+    "eslint-plugin-jsx-a11y": {
+      "eslint": "$eslint"
+    }
   }
 }

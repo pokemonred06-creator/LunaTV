@@ -1,0 +1,21 @@
+packages:
+  - .
+
+allowBuilds:
+  '@parcel/watcher': false
+  javascript-obfuscator: false
+  sharp: false
+  unrs-resolver: false
+
+overrides:
+  sharp: 0.35.5
+  source-map-js: 1.2.2
+  webpack: 5.112.2
+  eslint-plugin-react>eslint: 10.13.0
+  eslint-plugin-import>eslint: 10.13.0
+  eslint-plugin-jsx-a11y>eslint: 10.13.0
+
+minimumReleaseAgeExclude:
+  - '@next/eslint-plugin-next@16.4.3'
+  - eslint-config-next@16.4.3
+  - webpack@5.112.2

@@ -16,9 +16,8 @@ WORKDIR /app
 # 复制 package.json 和 lock 文件
 ENV NPM_CONFIG_UPDATE_NOTIFIER=false
 ENV PNPM_DISABLE_SELF_UPDATE_CHECK=1
-RUN npm install -g pnpm@10.33.0
-COPY package.json pnpm-lock.yaml ./
-COPY patches ./patches
+RUN npm install -g pnpm@12.15.0
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 
 # Aggressively clean any pre-existing artifacts just in case
 RUN rm -rf node_modules .next
@@ -31,7 +30,7 @@ FROM base AS builder
 WORKDIR /app
 ENV NPM_CONFIG_UPDATE_NOTIFIER=false
 ENV PNPM_DISABLE_SELF_UPDATE_CHECK=1
-RUN npm install -g pnpm@10.33.0
+RUN npm install -g pnpm@12.15.0
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
