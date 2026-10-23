@@ -1,0 +1,308 @@
+{
+  "verifiedAt": "2026-10-23T13:22:12.493245+00:00",
+  "image": "lunatv:playback-fix-20261023",
+  "imageId": "sha256:b882ed7f895f00d0b0ef14f3318e18baddade3d697f42f63958540c67e3e3837",
+  "health": "healthy",
+  "restartCount": 0,
+  "oomKilled": false,
+  "sourceCommit": "142ecee68757a53a001ca1590e718ede29bc5d11",
+  "sourceBranch": "codex/playback-repair-20261023",
+  "rollbackImage": "lunatv-playback-rollback/lunatv:20261023",
+  "rollbackRoot": "/volume5/docker/.lunatv-playback-repair-20261023",
+  "scope": "Only LunaTV replaced; 51 other NAS containers unchanged",
+  "configuration": "Environment, mounts, networks, resources and healthcheck preserved",
+  "tests": {
+    "passed": 113,
+    "suites": 14,
+    "typecheck": "passed",
+    "webLint": "passed",
+    "linuxProductionBuild": "passed"
+  },
+  "candidate": {
+    "success": true,
+    "checks": [
+      {
+        "kind": "SSR-Douban-cover",
+        "status": 200,
+        "ssrError": false
+      },
+      {
+        "kind": "anonymous-proxy",
+        "status": 401,
+        "expected": 401
+      },
+      {
+        "kind": "unknown-vod",
+        "status": 401,
+        "expected": 401
+      },
+      {
+        "kind": "private-target",
+        "status": 403,
+        "expected": 403
+      },
+      {
+        "kind": "anonymous-live",
+        "status": 401,
+        "expected": 401
+      },
+      {
+        "kind": "private-image",
+        "status": 403,
+        "expected": 403
+      }
+    ]
+  },
+  "vod": {
+    "verifiedAt": "2026-10-23T13:20:45.166Z",
+    "success": true,
+    "checks": [
+      {
+        "kind": "play-page-douban-SSR",
+        "status": 200,
+        "ssrError": false
+      },
+      {
+        "kind": "anonymous-vod",
+        "status": 401
+      },
+      {
+        "kind": "unknown-vod-source",
+        "status": 401
+      },
+      {
+        "kind": "mixed-source-context",
+        "status": 401
+      },
+      {
+        "kind": "tampered-signed-vod",
+        "status": 401
+      }
+    ],
+    "preservedData": {
+      "users": 6,
+      "vodSources": 25,
+      "liveSources": 1
+    },
+    "vod": {
+      "source": "bfzy",
+      "title": "离开后，终于知我是总裁",
+      "levels": [
+        {
+          "depth": 0,
+          "status": 200,
+          "mime": "application/vnd.apple.mpegurl"
+        },
+        {
+          "depth": 1,
+          "status": 200,
+          "mime": "video/mp2t"
+        }
+      ],
+      "segmentBytes": 16384
+    }
+  },
+  "live": {
+    "success": true,
+    "channelCount": 1225,
+    "signedPlaylistEntries": 1225,
+    "tamperedTargetStatus": 401,
+    "nativePlayback": {
+      "channel": "CGTN英语",
+      "status": 200,
+      "mime": "application/vnd.apple.mpegurl",
+      "receivedBytes": 1249,
+      "childStatus": 200,
+      "childBytes": 16384
+    }
+  },
+  "httpChecks": {
+    "checks": [
+      {
+        "origin": "internal",
+        "path": "/login",
+        "expected": 200,
+        "actual": 200
+      },
+      {
+        "origin": "internal",
+        "path": "/api/proxy/mp4",
+        "expected": 401,
+        "actual": 401
+      },
+      {
+        "origin": "internal",
+        "path": "/api/live/m3u",
+        "expected": 401,
+        "actual": 401
+      },
+      {
+        "origin": "internal",
+        "path": "/api/live/precheck",
+        "expected": 401,
+        "actual": 401
+      },
+      {
+        "origin": "internal",
+        "path": "/api/live/sources",
+        "expected": 401,
+        "actual": 401
+      },
+      {
+        "origin": "public-https",
+        "path": "/login",
+        "expected": 200,
+        "actual": 200
+      },
+      {
+        "origin": "public-https",
+        "path": "/api/proxy/mp4",
+        "expected": 401,
+        "actual": 401
+      },
+      {
+        "origin": "public-https",
+        "path": "/api/live/m3u",
+        "expected": 401,
+        "actual": 401
+      },
+      {
+        "origin": "public-https",
+        "path": "/api/live/precheck",
+        "expected": 401,
+        "actual": 401
+      },
+      {
+        "origin": "public-https",
+        "path": "/api/live/sources",
+        "expected": 401,
+        "actual": 401
+      },
+      {
+        "origin": "public-https",
+        "path": "/api/login",
+        "expected": 200,
+        "actual": 200
+      },
+      {
+        "origin": "public-https",
+        "path": "/",
+        "expected": 200,
+        "actual": 200
+      },
+      {
+        "origin": "public-https",
+        "path": "/live",
+        "expected": 200,
+        "actual": 200
+      },
+      {
+        "origin": "public-https",
+        "path": "/douban",
+        "expected": 200,
+        "actual": 200
+      },
+      {
+        "origin": "public-https",
+        "path": "/api/live/sources",
+        "expected": 200,
+        "actual": 200
+      },
+      {
+        "origin": "public-https",
+        "path": "/api/live/sources",
+        "expected": 401,
+        "actual": 401
+      },
+      {
+        "origin": "public-https",
+        "path": "/api/live/sources",
+        "expected": 401,
+        "actual": 401
+      },
+      {
+        "origin": "public-https",
+        "path": "/api/live/sources",
+        "expected": 401,
+        "actual": 401
+      },
+      {
+        "origin": "go-loopback",
+        "path": "/api/proxy/m3u8",
+        "expected": 403,
+        "actual": 403
+      },
+      {
+        "origin": "public-https",
+        "path": "/api/image-proxy",
+        "expected": [
+          415,
+          403
+        ],
+        "actual": 415
+      },
+      {
+        "origin": "public-https",
+        "path": "/api/image-proxy",
+        "expected": 403,
+        "actual": 403
+      },
+      {
+        "origin": "internal",
+        "path": "/api/admin/config",
+        "expected": 200,
+        "actual": 200
+      },
+      {
+        "origin": "internal",
+        "path": "/api/admin/data_migration/export",
+        "expected": 200,
+        "actual": 200
+      }
+    ],
+    "node": "v22.23.4",
+    "sourceAcl": "no existing restricted-live account available; covered by regression tests",
+    "availableLiveSourceCount": 1,
+    "vodSourceCount": 25,
+    "userCount": 6,
+    "backup": {
+      "encryptedBytes": 80498,
+      "exportedUsers": 6,
+      "decryptedSuccessfully": true
+    },
+    "success": true
+  },
+  "browserPlayback": {
+    "vod": {
+      "resolution": [
+        720,
+        1280
+      ],
+      "samples": [
+        {
+          "seconds": 19.646333,
+          "frames": 414
+        },
+        {
+          "seconds": 42.484401,
+          "frames": 984
+        }
+      ],
+      "readyState": 4,
+      "error": null,
+      "screenshot": "output/playwright/vod-repaired-20261023.png"
+    },
+    "live": {
+      "channel": "CGTN英语",
+      "resolution": [
+        1280,
+        720
+      ],
+      "seconds": 27.882084,
+      "frames": 701,
+      "readyState": 4,
+      "error": null,
+      "screenshot": "output/playwright/live-repaired-20261023.png"
+    }
+  }
+}
