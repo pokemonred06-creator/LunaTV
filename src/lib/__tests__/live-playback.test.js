@@ -260,7 +260,104 @@ test('preserves binary HLS byte ranges and partial-response headers', async () =
   expect(new Uint8Array(await proxied.arrayBuffer())).toEqual(bytes);
 });
 
-test('rewrites image-disguised HLS requested by FFmpeg with a zero-start range', async () => {
+test.each(['mp4', 'ts'])(
+  'preserves native two-byte range probes for binary %s media',
+  async (type) => {
+    const bytes = Uint8Array.from([0, 0]);
+    fetch.mockResolvedValue(
+      new Response(bytes, {
+        status: 206,
+        headers: {
+          'content-type': type === 'mp4' ? 'video/mp4' : 'video/mp2t',
+          'content-range': 'bytes 0-1/200',
+        },
+      }),
+    );
+    const response = await request(
+      type,
+      `https://media.example/movie.${type}`,
+      {},
+      {
+        Range: 'bytes=0-1',
+      },
+    );
+    expect(response.status).toBe(206);
+    expect(response.headers.get('content-range')).toBe('bytes 0-1/200');
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(new Headers(fetch.mock.calls[0][1].headers).get('range')).toBe(
+      'bytes=0-1',
+    );
+  },
+);
+
+test.each(['bytes=0-1', 'bytes=0-', 'bytes=2-'])(
+  'loads a complete native HLS manifest despite the client Range %s',
+  async (range) => {
+    fetch.mockImplementation(async (_url, init) => {
+      if (new Headers(init.headers).has('range'))
+        return new Response('#E', {
+          status: 206,
+          headers: {
+            'content-type': 'application/vnd.apple.mpegurl',
+            'content-range': 'bytes 0-1/100',
+          },
+        });
+      return new Response('#EXTM3U\n#EXTINF:4,\nsegment.ts', {
+        headers: { 'content-type': 'application/vnd.apple.mpegurl' },
+      });
+    });
+    const response = await request(
+      'm3u8',
+      'https://media.example/extensionless-playlist',
+      {},
+      { Range: range },
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-range')).toBeNull();
+    expect(await response.text()).toContain('/api/proxy/ts.ts?');
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(new Headers(fetch.mock.calls[0][1].headers).has('range')).toBe(
+      false,
+    );
+  },
+);
+
+test('refetches a complete manifest when a ranged media target is identified as HLS', async () => {
+  fetch
+    .mockResolvedValueOnce(
+      new Response('#E', {
+        status: 206,
+        headers: {
+          'content-type': 'application/vnd.apple.mpegurl',
+          'content-range': 'bytes 0-1/100',
+        },
+      }),
+    )
+    .mockResolvedValueOnce(
+      new Response('#EXTM3U\n#EXTINF:4,\nsegment.ts', {
+        headers: { 'content-type': 'application/vnd.apple.mpegurl' },
+      }),
+    );
+  const response = await request(
+    'ts',
+    'https://media.example/disguised.jpg',
+    {},
+    {
+      Range: 'bytes=0-1',
+    },
+  );
+  expect(response.status).toBe(200);
+  expect(response.headers.get('content-range')).toBeNull();
+  expect(await response.text()).toContain('/api/proxy/ts.ts?');
+  expect(fetch).toHaveBeenCalledTimes(2);
+  expect(new Headers(fetch.mock.calls[0][1].headers).get('range')).toBe(
+    'bytes=0-1',
+  );
+  expect(new Headers(fetch.mock.calls[1][1].headers).has('range')).toBe(false);
+});
+
+test('rewrites image-disguised HLS requested with a native two-byte range', async () => {
   fetch.mockResolvedValue(
     upstream(
       '#EXTM3U\n#EXTINF:8,\nstream_0.jpg?u=example\n',
@@ -272,7 +369,7 @@ test('rewrites image-disguised HLS requested by FFmpeg with a zero-start range',
     'm3u8',
     'https://cdn.example/channel/playlist.jpg',
     {},
-    { Range: 'bytes=0-' },
+    { Range: 'bytes=0-1' },
   );
   expect(response.status).toBe(200);
   expect(response.headers.get('content-type')).toContain('mpegurl');

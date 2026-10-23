@@ -435,7 +435,9 @@ export async function GET(request: NextRequest, props: ProxyParams) {
       Accept: '*/*',
     };
 
-    if (request.headers.get('range'))
+    // Safari probes native HLS with bytes=0-1. Manifests must be fetched and
+    // rewritten in full; forwarding that range turns a valid playlist into #E.
+    if (type !== 'm3u8' && request.headers.get('range'))
       headers['Range'] = request.headers.get('range')!;
 
     const raw = target.toString().toLowerCase();
@@ -463,6 +465,7 @@ export async function GET(request: NextRequest, props: ProxyParams) {
 
   let activeUrl = upstreamUrl;
   let upstreamHeaders: Record<string, string> = buildHeaders(activeUrl);
+  let lastUpstreamHeaders = upstreamHeaders;
   const httpFallbackUrl = toHttpFallbackUrl(urlParam);
   let triedHttpFallback = false;
 
@@ -477,6 +480,7 @@ export async function GET(request: NextRequest, props: ProxyParams) {
     headers: Record<string, string>,
     retries: number = isLiveStream ? liveConnectRetries : 2,
   ) => {
+    lastUpstreamHeaders = headers;
     const finalTarget =
       isLiveStream && isHuyaLikeUrl(targetUrl)
         ? withLiveCacheBuster(targetUrl)
@@ -668,18 +672,49 @@ export async function GET(request: NextRequest, props: ProxyParams) {
       return safeImageResponse(upstreamRes);
     }
 
-    const upstreamContentType = upstreamRes.headers.get('content-type') || '';
+    let upstreamContentType = upstreamRes.headers.get('content-type') || '';
     // Only nonzero byte ranges begin mid-container. FFmpeg sends bytes=0-
     // for playlists too, including extensionless or image-disguised HLS.
-    const range = request.headers.get('range');
-    const isBinaryRange = !!range && !/^bytes=0-/i.test(range) && !probeOnly;
-    const inspected = isBinaryRange
+    const range = lastUpstreamHeaders.Range;
+    let isBinaryRange =
+      upstreamRes.status === 206 &&
+      !!range &&
+      !/^bytes=0-/i.test(range) &&
+      !probeOnly;
+    let inspected = isBinaryRange
       ? { prefix: new Uint8Array(), body: upstreamRes.body! }
       : await inspectStreamResponse(upstreamRes);
-    const detected = detectLiveStreamType(
+    let detected = detectLiveStreamType(
       inspected.prefix,
       upstreamContentType,
     );
+    // A generic media target can turn out to be HLS after redirects or content
+    // sniffing. Discard a partial response before rewriting that manifest too.
+    if (
+      range &&
+      upstreamRes.status === 206 &&
+      (detected === 'm3u8' ||
+        guessLiveStreamType(upstreamRes.url || activeUrl.toString()) ===
+          'm3u8')
+    ) {
+      await inspected.body.cancel().catch(() => {});
+      const fullHeaders = { ...lastUpstreamHeaders };
+      delete fullHeaders.Range;
+      upstreamRes = await fetchUpstream(
+        upstreamRes.url || activeUrl.toString(),
+        fullHeaders,
+      );
+      if (!upstreamRes.ok) {
+        await upstreamRes.body?.cancel().catch(() => {});
+        return new NextResponse('Unable to read complete HLS manifest', {
+          status: upstreamRes.status,
+        });
+      }
+      upstreamContentType = upstreamRes.headers.get('content-type') || '';
+      isBinaryRange = false;
+      inspected = await inspectStreamResponse(upstreamRes);
+      detected = detectLiveStreamType(inspected.prefix, upstreamContentType);
+    }
     const preview = new TextDecoder().decode(inspected.prefix).trimStart();
     if (
       !isBinaryRange &&
