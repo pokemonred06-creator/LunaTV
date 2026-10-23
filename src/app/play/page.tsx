@@ -1554,10 +1554,9 @@ function PlayPageClient() {
 
     if ((player as any).mobileUi) {
       (player as any).mobileUi({
+        // The custom player owns touch gestures and playback controls.
         touchControls: {
-          seekSeconds: 10,
-          tapToPlay: true,
-          disableOnEnd: false,
+          disabled: true,
         },
         fullscreen: {
           enterOnRotate: true,
