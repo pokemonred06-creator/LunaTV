@@ -1,0 +1,841 @@
+{
+  "timestamp": "2026-10-08T13:03:43.736Z",
+  "base": "https://tv.fishred.duckdns.org",
+  "verification": "Public HTTPS precheck, media response and first HLS media segment; not per-channel decoding",
+  "total": 100,
+  "available": 16,
+  "failureCounts": {
+    "HTTP 502: Proxy fetch failed": 66,
+    "HTTP 403: Upstream HTTP 403 (r.jdshipin.com)": 2,
+    "HTTP 404: Upstream HTTP 404: source not found (10.fast.hidns.vip)": 4,
+    "Timeout": 11,
+    "HTTP 403: Blocked upstream target": 1
+  },
+  "results": [
+    {
+      "id": "github.com/suxuang/myIPTV-116",
+      "name": "CCTV1",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-120",
+      "name": "CCTV4美洲",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-119",
+      "name": "CCTV4",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-121",
+      "name": "CCTV4欧洲",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-117",
+      "name": "CCTV2",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-123",
+      "name": "CCTV5+",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-124",
+      "name": "CCTV6",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-122",
+      "name": "CCTV5",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-125",
+      "name": "CCTV7",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-126",
+      "name": "CCTV8",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-128",
+      "name": "CCTV10",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-129",
+      "name": "CCTV11",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-127",
+      "name": "CCTV9",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-131",
+      "name": "CCTV13",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-133",
+      "name": "CCTV15",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-130",
+      "name": "CCTV12",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-135",
+      "name": "CCTV17",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-134",
+      "name": "CCTV16",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-137",
+      "name": "CCTV老故事",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-136",
+      "name": "CCTV发现之旅",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-138",
+      "name": "CCTV中学生",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-139",
+      "name": "CGTN",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-118",
+      "name": "CCTV3",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-141",
+      "name": "东方卫视",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-140",
+      "name": "CGTN纪录",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-142",
+      "name": "重庆卫视",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-145",
+      "name": "内蒙古卫视",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-132",
+      "name": "CCTV14",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-146",
+      "name": "宁夏卫视",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-144",
+      "name": "辽宁卫视",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-147",
+      "name": "甘肃卫视",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-143",
+      "name": "吉林卫视",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-149",
+      "name": "陕西卫视",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-148",
+      "name": "青海卫视",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-150",
+      "name": "山东卫视",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-152",
+      "name": "湖北卫视",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-151",
+      "name": "河南卫视",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-155",
+      "name": "江苏卫视",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-153",
+      "name": "湖南卫视",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-156",
+      "name": "东南卫视",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-157",
+      "name": "海峡卫视",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-158",
+      "name": "广东卫视",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-160",
+      "name": "广西卫视",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-159",
+      "name": "大湾区卫视",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-154",
+      "name": "江西卫视",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-161",
+      "name": "云南卫视",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-164",
+      "name": "西藏卫视",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-163",
+      "name": "新疆卫视",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-162",
+      "name": "贵州卫视",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-166",
+      "name": "四海钓鱼",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-165",
+      "name": "海南卫视",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-167",
+      "name": "CHC动作电影",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-169",
+      "name": "东方影视",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-172",
+      "name": "上视纪实人文",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-170",
+      "name": "上海新闻综合",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-168",
+      "name": "CHC家庭影院",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-171",
+      "name": "上海第一财经",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-174",
+      "name": "法治天地",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-173",
+      "name": "上海外语",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-177",
+      "name": "乐游",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-178",
+      "name": "欢笑剧场",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-176",
+      "name": "魅力足球",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-175",
+      "name": "劲爆体育",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-434",
+      "name": "咪咕视频4K",
+      "port": "2096",
+      "available": false,
+      "status": 403,
+      "reason": "Upstream HTTP 403 (r.jdshipin.com)"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-181",
+      "name": "优漫卡通",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-435",
+      "name": "咪咕视频4K-2",
+      "port": "2096",
+      "available": false,
+      "status": 403,
+      "reason": "Upstream HTTP 403 (r.jdshipin.com)"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-179",
+      "name": "七彩戏剧",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-552",
+      "name": "凤凰卫视台",
+      "port": "2096",
+      "available": true,
+      "status": 200,
+      "bytes": 1369,
+      "mime": "image/jpeg",
+      "type": "m3u8"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-553",
+      "name": "凤凰资讯台",
+      "port": "2096",
+      "available": true,
+      "status": 200,
+      "bytes": 2032,
+      "mime": "image/jpeg",
+      "type": "m3u8"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-554",
+      "name": "凤凰香港台",
+      "port": "2096",
+      "available": true,
+      "status": 200,
+      "bytes": 1369,
+      "mime": "image/jpeg",
+      "type": "m3u8"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-180",
+      "name": "游戏风云",
+      "port": "98",
+      "available": false,
+      "status": 502,
+      "reason": "Proxy fetch failed"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-556",
+      "name": "翡翠台",
+      "port": "2096",
+      "available": true,
+      "status": 200,
+      "bytes": 1845,
+      "mime": "image/jpeg",
+      "type": "m3u8"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-557",
+      "name": "翡翠台北美版",
+      "port": "2096",
+      "available": true,
+      "status": 200,
+      "bytes": 2032,
+      "mime": "image/jpeg",
+      "type": "m3u8"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-559",
+      "name": "明珠台",
+      "port": "2096",
+      "available": true,
+      "status": 200,
+      "bytes": 1369,
+      "mime": "image/jpeg",
+      "type": "m3u8"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-474",
+      "name": "TVB翡翠台 1080P",
+      "port": "2096",
+      "available": false,
+      "status": 404,
+      "reason": "Upstream HTTP 404: source not found (10.fast.hidns.vip)",
+      "type": "m3u8"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-470",
+      "name": "TVB无线星河",
+      "port": "2096",
+      "available": false,
+      "reason": "Timeout"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-558",
+      "name": "TVB Plus",
+      "port": "2096",
+      "available": false,
+      "reason": "Timeout"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-561",
+      "name": "VIUTV",
+      "port": "2096",
+      "available": false,
+      "status": 404,
+      "reason": "Upstream HTTP 404: source not found (10.fast.hidns.vip)",
+      "type": "m3u8"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-560",
+      "name": "VIUTV",
+      "port": "2096",
+      "available": false,
+      "status": 404,
+      "reason": "Upstream HTTP 404: source not found (10.fast.hidns.vip)",
+      "type": "m3u8"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-565",
+      "name": "HOY TV",
+      "port": "2096",
+      "available": true,
+      "status": 200,
+      "bytes": 1369,
+      "mime": "image/jpeg",
+      "type": "m3u8"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-563",
+      "name": "RTHK31",
+      "port": "2096",
+      "available": true,
+      "status": 200,
+      "bytes": 3409,
+      "mime": "image/jpeg",
+      "type": "m3u8"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-564",
+      "name": "RTHK32",
+      "port": "2096",
+      "available": true,
+      "status": 200,
+      "bytes": 2014,
+      "mime": "image/jpeg",
+      "type": "m3u8"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-464",
+      "name": "澳门卫视",
+      "port": "2096",
+      "available": true,
+      "status": 200,
+      "bytes": 3409,
+      "mime": "image/jpeg",
+      "type": "m3u8"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-465",
+      "name": "澳视澳门",
+      "port": "2096",
+      "available": true,
+      "status": 200,
+      "bytes": 2030,
+      "mime": "image/jpeg",
+      "type": "m3u8"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-562",
+      "name": "无线新闻台",
+      "port": "2096",
+      "available": false,
+      "reason": "Timeout"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-576",
+      "name": "Astro AOD",
+      "port": "2096",
+      "available": true,
+      "status": 200,
+      "bytes": 3222,
+      "mime": "image/jpeg",
+      "type": "m3u8"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-572",
+      "name": "千禧经典台",
+      "port": "2096",
+      "available": false,
+      "reason": "Timeout"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-575",
+      "name": "天映经典",
+      "port": "2096",
+      "available": false,
+      "reason": "Timeout"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-574",
+      "name": "天映频道",
+      "port": "2096",
+      "available": false,
+      "reason": "Timeout"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-573",
+      "name": "美亚电影台",
+      "port": "2096",
+      "available": false,
+      "reason": "Timeout"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-581",
+      "name": "华丽翡翠台",
+      "port": "2096",
+      "available": true,
+      "status": 200,
+      "bytes": 1846,
+      "mime": "image/jpeg",
+      "type": "m3u8"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-577",
+      "name": "Astro AEC",
+      "port": "2096",
+      "available": false,
+      "reason": "Timeout"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-578",
+      "name": "爱奇艺",
+      "port": "2096",
+      "available": false,
+      "reason": "Timeout"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-582",
+      "name": "亚洲武侠",
+      "port": "2096",
+      "available": true,
+      "status": 200,
+      "bytes": 2738,
+      "mime": "image/jpeg",
+      "type": "m3u8"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-583",
+      "name": "TVB生活台",
+      "port": "2096",
+      "available": false,
+      "status": 403,
+      "reason": "Blocked upstream target"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-584",
+      "name": "TVB娱乐新闻台",
+      "port": "2096",
+      "available": true,
+      "status": 200,
+      "bytes": 3409,
+      "mime": "image/jpeg",
+      "type": "m3u8"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-585",
+      "name": "无线新闻台",
+      "port": "2096",
+      "available": true,
+      "status": 200,
+      "bytes": 2016,
+      "mime": "image/jpeg",
+      "type": "m3u8"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-579",
+      "name": "Astro QJ",
+      "port": "2096",
+      "available": false,
+      "reason": "Timeout"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-580",
+      "name": "Astro欢喜台",
+      "port": "2096",
+      "available": false,
+      "reason": "Timeout"
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-586",
+      "name": "TVB星河",
+      "port": "2096",
+      "available": false,
+      "status": 404,
+      "reason": "Upstream HTTP 404: source not found (10.fast.hidns.vip)",
+      "type": "m3u8"
+    }
+  ]
+}

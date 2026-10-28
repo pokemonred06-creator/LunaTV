@@ -1,0 +1,767 @@
+{
+  "timestamp": "2026-10-08T14:28:41.740Z",
+  "verification": "Existing playlist entries with identical display names and successful media transport; broadcast equivalence and decoding not individually verified",
+  "results": [
+    {
+      "id": "github.com/suxuang/myIPTV-14",
+      "name": "浙江卫视",
+      "reason": "HTTP 404",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-231",
+          "host": "ali-m-l.cztv.com",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-81",
+      "name": "浙江卫视",
+      "reason": "The operation was aborted due to timeout",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-231",
+          "host": "ali-m-l.cztv.com",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-83",
+      "name": "东方卫视",
+      "reason": "The operation was aborted due to timeout",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-192",
+          "host": "bp-resource-dfl.bestv.cn",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-87",
+      "name": "河北卫视",
+      "reason": "The operation was aborted due to timeout",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-13",
+          "host": "event.pull.hebtv.com",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-90",
+      "name": "黑龙江卫视",
+      "reason": "The operation was aborted due to timeout",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-15",
+          "host": "idclive.hljtv.com",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-100",
+      "name": "山东教育",
+      "reason": "The operation was aborted due to timeout",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-225",
+          "host": "test1.live.sdetv.com.cn",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-141",
+      "name": "东方卫视",
+      "reason": "HTTP 502",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-192",
+          "host": "bp-resource-dfl.bestv.cn",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-140",
+      "name": "CGTN纪录",
+      "reason": "HTTP 502",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-404",
+          "host": "0472.org",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-165",
+      "name": "海南卫视",
+      "reason": "HTTP 502",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-229",
+          "host": "nn.7x9d.cn",
+          "type": "m3u8"
+        },
+        {
+          "id": "github.com/suxuang/myIPTV-1081",
+          "host": "nn.7x9d.cn",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-185",
+      "name": "浙江卫视",
+      "reason": "HTTP 404",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-231",
+          "host": "ali-m-l.cztv.com",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-204",
+      "name": "河北卫视",
+      "reason": "The operation was aborted due to timeout",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-13",
+          "host": "event.pull.hebtv.com",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-210",
+      "name": "黑龙江卫视",
+      "reason": "The operation was aborted due to timeout",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-15",
+          "host": "idclive.hljtv.com",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-211",
+      "name": "海南卫视",
+      "reason": "The operation was aborted due to timeout",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-229",
+          "host": "nn.7x9d.cn",
+          "type": "m3u8"
+        },
+        {
+          "id": "github.com/suxuang/myIPTV-1081",
+          "host": "nn.7x9d.cn",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-218",
+      "name": "海南卫视",
+      "reason": "The operation was aborted due to timeout",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-229",
+          "host": "nn.7x9d.cn",
+          "type": "m3u8"
+        },
+        {
+          "id": "github.com/suxuang/myIPTV-1081",
+          "host": "nn.7x9d.cn",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-252",
+      "name": "浙江卫视",
+      "reason": "HTTP 500",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-231",
+          "host": "ali-m-l.cztv.com",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-262",
+      "name": "河北卫视",
+      "reason": "HTTP 500",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-13",
+          "host": "event.pull.hebtv.com",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-271",
+      "name": "黑龙江卫视",
+      "reason": "HTTP 500",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-15",
+          "host": "idclive.hljtv.com",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-292",
+      "name": "苏州4K",
+      "reason": "HTTP 502",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-9",
+          "host": "live-auth.51kandianshi.com",
+          "type": "m3u8"
+        },
+        {
+          "id": "github.com/suxuang/myIPTV-214",
+          "host": "tylive.kan0512.com",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-293",
+      "name": "河北4K",
+      "reason": "HTTP 502",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-10",
+          "host": "event.pull.hebtv.com",
+          "type": "m3u8"
+        },
+        {
+          "id": "github.com/suxuang/myIPTV-215",
+          "host": "event.pull.hebtv.com",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-298",
+      "name": "东方卫视",
+      "reason": "HTTP 409",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-192",
+          "host": "bp-resource-dfl.bestv.cn",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-299",
+      "name": "浙江卫视",
+      "reason": "HTTP 409",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-231",
+          "host": "ali-m-l.cztv.com",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-309",
+      "name": "河北卫视",
+      "reason": "HTTP 409",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-13",
+          "host": "event.pull.hebtv.com",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-319",
+      "name": "海南卫视",
+      "reason": "HTTP 409",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-229",
+          "host": "nn.7x9d.cn",
+          "type": "m3u8"
+        },
+        {
+          "id": "github.com/suxuang/myIPTV-1081",
+          "host": "nn.7x9d.cn",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-397",
+      "name": "凤凰香港台",
+      "reason": "HTTP 404",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-554",
+          "host": "php.jdshipin.com",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-396",
+      "name": "凤凰资讯台",
+      "reason": "HTTP 404",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-553",
+          "host": "php.jdshipin.com",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-417",
+      "name": "明珠台",
+      "reason": "media HTTP 404",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-418",
+          "host": "r.jdshipin.com",
+          "type": "m3u8"
+        },
+        {
+          "id": "github.com/suxuang/myIPTV-559",
+          "host": "php.jdshipin.com",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-420",
+      "name": "TVB Plus",
+      "reason": "media HTTP 404",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-419",
+          "host": "r.jdshipin.com",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-437",
+      "name": "凤凰资讯",
+      "reason": "The operation was aborted due to timeout",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-406",
+          "host": "r.jdshipin.com",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-438",
+      "name": "凤凰香港",
+      "reason": "The operation was aborted due to timeout",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-407",
+          "host": "r.jdshipin.com",
+          "type": "m3u8"
+        },
+        {
+          "id": "github.com/suxuang/myIPTV-408",
+          "host": "r.jdshipin.com",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-439",
+      "name": "翡翠台",
+      "reason": "The operation was aborted due to timeout",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-412",
+          "host": "r.jdshipin.com",
+          "type": "m3u8"
+        },
+        {
+          "id": "github.com/suxuang/myIPTV-416",
+          "host": "r.jdshipin.com",
+          "type": "m3u8"
+        },
+        {
+          "id": "github.com/suxuang/myIPTV-415",
+          "host": "r.jdshipin.com",
+          "type": "m3u8"
+        },
+        {
+          "id": "github.com/suxuang/myIPTV-413",
+          "host": "r.jdshipin.com",
+          "type": "m3u8"
+        },
+        {
+          "id": "github.com/suxuang/myIPTV-414",
+          "host": "r.jdshipin.com",
+          "type": "m3u8"
+        },
+        {
+          "id": "github.com/suxuang/myIPTV-556",
+          "host": "php.jdshipin.com",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-441",
+      "name": "明珠台",
+      "reason": "The operation was aborted due to timeout",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-418",
+          "host": "r.jdshipin.com",
+          "type": "m3u8"
+        },
+        {
+          "id": "github.com/suxuang/myIPTV-559",
+          "host": "php.jdshipin.com",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-450",
+      "name": "明珠台",
+      "reason": "The operation was aborted due to timeout",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-418",
+          "host": "r.jdshipin.com",
+          "type": "m3u8"
+        },
+        {
+          "id": "github.com/suxuang/myIPTV-559",
+          "host": "php.jdshipin.com",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-455",
+      "name": "凤凰中文",
+      "reason": "HTTP 502",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-405",
+          "host": "r.jdshipin.com",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-456",
+      "name": "凤凰资讯",
+      "reason": "HTTP 502",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-406",
+          "host": "r.jdshipin.com",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-457",
+      "name": "凤凰香港",
+      "reason": "HTTP 502",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-407",
+          "host": "r.jdshipin.com",
+          "type": "m3u8"
+        },
+        {
+          "id": "github.com/suxuang/myIPTV-408",
+          "host": "r.jdshipin.com",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-453",
+      "name": "翡翠台",
+      "reason": "The operation was aborted due to timeout",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-412",
+          "host": "r.jdshipin.com",
+          "type": "m3u8"
+        },
+        {
+          "id": "github.com/suxuang/myIPTV-416",
+          "host": "r.jdshipin.com",
+          "type": "m3u8"
+        },
+        {
+          "id": "github.com/suxuang/myIPTV-415",
+          "host": "r.jdshipin.com",
+          "type": "m3u8"
+        },
+        {
+          "id": "github.com/suxuang/myIPTV-413",
+          "host": "r.jdshipin.com",
+          "type": "m3u8"
+        },
+        {
+          "id": "github.com/suxuang/myIPTV-414",
+          "host": "r.jdshipin.com",
+          "type": "m3u8"
+        },
+        {
+          "id": "github.com/suxuang/myIPTV-556",
+          "host": "php.jdshipin.com",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-475",
+      "name": "华丽翡翠台",
+      "reason": "HTTP 523",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-424",
+          "host": "r.jdshipin.com",
+          "type": "m3u8"
+        },
+        {
+          "id": "github.com/suxuang/myIPTV-581",
+          "host": "php.jdshipin.com",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-478",
+      "name": "TVB Plus",
+      "reason": "The operation was aborted due to timeout",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-419",
+          "host": "r.jdshipin.com",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-558",
+      "name": "TVB Plus",
+      "reason": "The operation was aborted due to timeout",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-419",
+          "host": "r.jdshipin.com",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-562",
+      "name": "无线新闻台",
+      "reason": "The operation was aborted due to timeout",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-585",
+          "host": "php.jdshipin.com",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-588",
+      "name": "澳视卫星",
+      "reason": "HTTP 415",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-410",
+          "host": "r.jdshipin.com",
+          "type": "m3u8"
+        },
+        {
+          "id": "github.com/suxuang/myIPTV-567",
+          "host": "php.jdshipin.com",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-589",
+      "name": "澳视澳门",
+      "reason": "HTTP 415",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-409",
+          "host": "r.jdshipin.com",
+          "type": "m3u8"
+        },
+        {
+          "id": "github.com/suxuang/myIPTV-465",
+          "host": "php.jdshipin.com",
+          "type": "m3u8"
+        },
+        {
+          "id": "github.com/suxuang/myIPTV-566",
+          "host": "php.jdshipin.com",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-696",
+      "name": "河北少儿",
+      "reason": "HTTP 403",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-1018",
+          "host": "1.94.31.214",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-950",
+      "name": "辽宁北方",
+      "reason": "HTTP 415",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-940",
+          "host": "dassby.qqff.top",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-948",
+      "name": "辽宁公共",
+      "reason": "The operation was aborted due to timeout",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-939",
+          "host": "dassby.qqff.top",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-949",
+      "name": "辽宁公共",
+      "reason": "The operation was aborted due to timeout",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-939",
+          "host": "dassby.qqff.top",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-953",
+      "name": "辽宁生活",
+      "reason": "The operation was aborted due to timeout",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-943",
+          "host": "dassby.qqff.top",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-962",
+      "name": "广东体育",
+      "reason": "HTTP 415",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-429",
+          "host": "r.jdshipin.com",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-954",
+      "name": "辽宁经济",
+      "reason": "The operation was aborted due to timeout",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-944",
+          "host": "dassby.qqff.top",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-955",
+      "name": "辽宁经济",
+      "reason": "The operation was aborted due to timeout",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-944",
+          "host": "dassby.qqff.top",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-956",
+      "name": "辽宁都市",
+      "reason": "The operation was aborted due to timeout",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-945",
+          "host": "dassby.qqff.top",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-957",
+      "name": "辽宁都市",
+      "reason": "The operation was aborted due to timeout",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-945",
+          "host": "dassby.qqff.top",
+          "type": "m3u8"
+        }
+      ]
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-1014",
+      "name": "河北卫视",
+      "reason": "HTTP 403",
+      "candidates": [
+        {
+          "id": "github.com/suxuang/myIPTV-13",
+          "host": "event.pull.hebtv.com",
+          "type": "m3u8"
+        }
+      ]
+    }
+  ]
+}

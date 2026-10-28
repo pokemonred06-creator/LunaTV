@@ -1,0 +1,10 @@
+{
+  "image": "sha256:40c14e5642f2d7da314236f0b840fbcd350d32a070c2a20e2aacdbd0a6412c48",
+  "healthy": true,
+  "runtimeConfigPreserved": true,
+  "immediateRollback": "lunatv:rollback-slots-20261009",
+  "relayRouteSha256": "dadedfa89bf4af8ec9ec44a44ceaae5ee7e1521c2f831320259e4558c617f15d",
+  "tests": 50,
+  "typecheck": "passed",
+  "lintWeb": "passed"
+}

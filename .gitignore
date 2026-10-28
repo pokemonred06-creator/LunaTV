@@ -50,3 +50,17 @@ chunks/
 # local docker config (may contain credentials)
 docker-compose.yml
 /cache/
+
+# Local runtime data and generated verification artifacts
+/cookies.txt
+/data/
+/local-synology-test/
+/proxy_bin
+/test-results/
+/playwright-report/
+/output/
+/lint_output.txt
+/.idea/
+/.playwright-cli/
+/.serena/
+/apps/

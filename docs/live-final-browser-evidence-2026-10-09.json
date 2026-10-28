@@ -1,0 +1,45 @@
+{
+  "verification": "Public HTTPS with no overrides; advancing playback time and decoded-frame counts",
+  "results": [
+    {
+      "id": "github.com/suxuang/myIPTV-556",
+      "name": "翡翠台",
+      "timestamp": "2026-10-09T01:24:09.793Z",
+      "width": 1280,
+      "height": 720,
+      "time": 3.33663,
+      "frames": 173,
+      "readyState": 4,
+      "error": null,
+      "compatibility": true,
+      "patchedAsset": true,
+      "patchedRuntime": true
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-559",
+      "name": "明珠台",
+      "timestamp": "2026-10-09T01:24:23.018Z",
+      "width": 1920,
+      "height": 1080,
+      "time": 27.324147,
+      "frames": 171,
+      "readyState": 4,
+      "error": null,
+      "compatibility": false,
+      "patchedAsset": true,
+      "patchedRuntime": true
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-559",
+      "name": "明珠台 compatibility",
+      "width": 1280,
+      "height": 720,
+      "time": 3.131446,
+      "frames": 161,
+      "readyState": 4,
+      "error": null,
+      "compatibility": true,
+      "screenshot": "output/playwright/live-pearl-final-20261009.png"
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+# 2. Final Runner (Clean Base)
+FROM node:20-alpine
+WORKDIR /app
+
+# Enable standard library compatibility
+RUN apk add --no-cache libc6-compat
+
+ENV NODE_ENV production
+ENV PORT 3000
+ENV HOSTNAME "0.0.0.0"
+
+RUN addgroup --system --gid 1001 nodejs
+RUN adduser --system --uid 1001 nextjs
+
+# Copy Go Proxy (Built locally)
+COPY proxy_bin /app/goproxy
+
+# Copy Local Build Artifacts
+# Note: These must be present locally (npm run build)
+COPY public /app/public
+COPY .next/standalone /app
+COPY .next/static /app/.next/static
+COPY start.sh /app/start.sh
+
+# Permissions and Data Dir
+RUN chmod +x /app/start.sh
+RUN mkdir -p /app/data && chown -R nextjs:nodejs /app
+
+USER nextjs
+
+EXPOSE 3000 8080
+
+CMD ["/app/start.sh"]

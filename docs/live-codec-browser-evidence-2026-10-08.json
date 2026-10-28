@@ -1,0 +1,33 @@
+{
+  "verification": "Public HTTPS with no overrides; advancing playback time and decoded-frame counts",
+  "results": [
+    {
+      "id": "github.com/suxuang/myIPTV-556",
+      "name": "翡翠台",
+      "timestamp": "2026-10-08T14:55:50.135Z",
+      "width": 1280,
+      "height": 720,
+      "time": 13.340208,
+      "frames": 172,
+      "readyState": 4,
+      "error": null,
+      "compatibility": true,
+      "patchedAsset": true,
+      "patchedRuntime": true
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-559",
+      "name": "明珠台",
+      "timestamp": "2026-10-08T14:56:02.265Z",
+      "width": 1920,
+      "height": 1080,
+      "time": 27.322757,
+      "frames": 172,
+      "readyState": 4,
+      "error": null,
+      "compatibility": false,
+      "patchedAsset": true,
+      "patchedRuntime": true
+    }
+  ]
+}

@@ -1,0 +1,217 @@
+{
+  "verifiedAtUtc": "2026-10-21T21:09:59.188660+00:00",
+  "release": "20261021T205429Z",
+  "publicUrl": "https://tv.fishred.duckdns.org",
+  "image": "lunatv:review-fixes-20261021T205429Z",
+  "nasImageId": "sha256:769c4eeccdaaf963118d0eed4c466835cd041b4f3fc5a8525fa940c0511a654a",
+  "localManifestId": "sha256:9a3a5a73c96c95ea6760d1af15ab1b22b75271b6dbc0fc2b9f6dc33774a0ab7c",
+  "platform": "linux/amd64",
+  "node": "v22.23.4",
+  "next": "16.3.6",
+  "sourceHead": "f3c09c89d37f719294173214ca2e51cb9b41e582",
+  "sourceState": "tested working-tree snapshot, with data/env/cookies/generated output and OrionTV excluded",
+  "baseNodeImage": "node:22.23.4-alpine",
+  "baseNodeDigest": "sha256:ce8d97f7cfc7c5386421eb932df20a29df99b1a7f469f6157d5c9956702ffadc",
+  "archiveSha256": "3666ec2459bec08b7340418fd57e20812d0126a8d98683c37dc5cbb7063d43cc",
+  "health": "healthy",
+  "restartCount": 0,
+  "oomKilled": false,
+  "httpVerification": {
+    "checks": [
+      {
+        "origin": "internal",
+        "path": "/login",
+        "expected": 200,
+        "actual": 200
+      },
+      {
+        "origin": "internal",
+        "path": "/api/proxy/mp4",
+        "expected": 401,
+        "actual": 401
+      },
+      {
+        "origin": "internal",
+        "path": "/api/live/m3u",
+        "expected": 401,
+        "actual": 401
+      },
+      {
+        "origin": "internal",
+        "path": "/api/live/precheck",
+        "expected": 401,
+        "actual": 401
+      },
+      {
+        "origin": "internal",
+        "path": "/api/live/sources",
+        "expected": 401,
+        "actual": 401
+      },
+      {
+        "origin": "public-https",
+        "path": "/login",
+        "expected": 200,
+        "actual": 200
+      },
+      {
+        "origin": "public-https",
+        "path": "/api/proxy/mp4",
+        "expected": 401,
+        "actual": 401
+      },
+      {
+        "origin": "public-https",
+        "path": "/api/live/m3u",
+        "expected": 401,
+        "actual": 401
+      },
+      {
+        "origin": "public-https",
+        "path": "/api/live/precheck",
+        "expected": 401,
+        "actual": 401
+      },
+      {
+        "origin": "public-https",
+        "path": "/api/live/sources",
+        "expected": 401,
+        "actual": 401
+      },
+      {
+        "origin": "public-https",
+        "path": "/api/login",
+        "expected": 200,
+        "actual": 200
+      },
+      {
+        "origin": "public-https",
+        "path": "/",
+        "expected": 200,
+        "actual": 200
+      },
+      {
+        "origin": "public-https",
+        "path": "/live",
+        "expected": 200,
+        "actual": 200
+      },
+      {
+        "origin": "public-https",
+        "path": "/douban",
+        "expected": 200,
+        "actual": 200
+      },
+      {
+        "origin": "public-https",
+        "path": "/api/live/sources",
+        "expected": 200,
+        "actual": 200
+      },
+      {
+        "origin": "public-https",
+        "path": "/api/live/sources",
+        "expected": 401,
+        "actual": 401
+      },
+      {
+        "origin": "public-https",
+        "path": "/api/live/sources",
+        "expected": 401,
+        "actual": 401
+      },
+      {
+        "origin": "public-https",
+        "path": "/api/live/sources",
+        "expected": 401,
+        "actual": 401
+      },
+      {
+        "origin": "go-loopback",
+        "path": "/api/proxy/m3u8",
+        "expected": 403,
+        "actual": 403
+      },
+      {
+        "origin": "public-https",
+        "path": "/api/image-proxy",
+        "expected": [
+          415,
+          403
+        ],
+        "actual": 415
+      },
+      {
+        "origin": "public-https",
+        "path": "/api/image-proxy",
+        "expected": 403,
+        "actual": 403
+      },
+      {
+        "origin": "internal",
+        "path": "/api/admin/config",
+        "expected": 200,
+        "actual": 200
+      },
+      {
+        "origin": "internal",
+        "path": "/api/admin/data_migration/export",
+        "expected": 200,
+        "actual": 200
+      }
+    ],
+    "node": "v22.23.4",
+    "sourceAcl": "no existing restricted-live account available; covered by regression tests",
+    "availableLiveSourceCount": 1,
+    "vodSourceCount": 25,
+    "userCount": 6,
+    "backup": {
+      "encryptedBytes": 80498,
+      "exportedUsers": 6,
+      "decryptedSuccessfully": true
+    },
+    "success": true
+  },
+  "liveVerification": {
+    "success": true,
+    "channelCount": 1225,
+    "signedPlaylistEntries": 1225,
+    "tamperedTargetStatus": 401,
+    "nativePlayback": {
+      "channel": "CGTN\u82f1\u8bed",
+      "status": 200,
+      "mime": "application/vnd.apple.mpegurl",
+      "receivedBytes": 1249,
+      "childStatus": 200,
+      "childBytes": 16384
+    }
+  },
+  "preservation": {
+    "otherExistingContainersUnchanged": true,
+    "changedOtherContainers": [],
+    "checkedOtherContainerCount": 51,
+    "redisContainerUnchanged": true,
+    "environmentUnchanged": true,
+    "privateBackupDirectoryMode": "0o700",
+    "privateBackupModes": {
+      "redis.before.rdb": "0o600",
+      "data.before.tar.gz": "0o600",
+      "compose.before.yml": "0o600",
+      "environment.before": "0o600",
+      "lunatv.inspect.private.json": "0o600"
+    }
+  },
+  "rollbackImage": "lunatv:rollback-review-20261021T205429Z",
+  "rollbackImageId": "sha256:938adf1453cc9e219f5313afb1dcf4d76352a5d6f4a466cce3092e1cd005e210",
+  "protectedBackupDirectory": "/volume5/docker/.lunatv-review-20261021T205429Z",
+  "rollbackCommand": "ssh synology python3 /volume5/docker/.lunatv-review-20261021T205429Z/rollout.py --rollback",
+  "localEvidenceDirectory": "/tmp/lunatv-deploy-20261021T205429Z",
+  "applicationDataImportedOrCleared": false,
+  "orionApkBuiltOrInstalled": false,
+  "physicalDecoderPlaybackVerified": false,
+  "buildSnapshotChecksums": {
+    "Dockerfile": "227717ddf5a957a4b089eb2b80d3f0be59f7cb7be3d56c0c6c281fba7d27eaeb",
+    "package.json": "86d10a989feb71e752a10a171e6ddbd2218189f93de15c97cfb17ae4b4f6e739",
+    "pnpm-lock.yaml": "308b4d37907780544ab09587f8540245e4c593afdf69d920e37dbacdbd7d634b"
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "verification": "Public HTTPS with no overrides; advancing playback time and decoded-frame counts",
+  "results": [
+    {
+      "id": "github.com/suxuang/myIPTV-55",
+      "name": "CGTN英语 (HLS)",
+      "timestamp": "2026-10-08T14:59:09.553Z",
+      "width": 1280,
+      "height": 720,
+      "time": 3.649137,
+      "frames": 96,
+      "readyState": 4,
+      "error": null,
+      "compatibility": false,
+      "patchedAsset": true,
+      "patchedRuntime": true
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-703",
+      "name": "七龙珠 (FLV)",
+      "timestamp": "2026-10-08T14:59:17.255Z",
+      "width": 960,
+      "height": 720,
+      "time": 3.643699,
+      "frames": 113,
+      "readyState": 4,
+      "error": null,
+      "compatibility": false,
+      "patchedAsset": true,
+      "patchedRuntime": true
+    },
+    {
+      "id": "github.com/suxuang/myIPTV-1141",
+      "name": "1994年春晚 (MP4)",
+      "timestamp": "2026-10-08T14:59:23.422Z",
+      "width": 982,
+      "height": 720,
+      "time": 3.668245,
+      "frames": 96,
+      "readyState": 4,
+      "error": null,
+      "compatibility": false,
+      "patchedAsset": true,
+      "patchedRuntime": true
+    }
+  ]
+}

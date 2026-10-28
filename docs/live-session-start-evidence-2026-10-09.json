@@ -1,0 +1,21 @@
+{
+  "timestamp": "2026-10-09T01:21:10.110Z",
+  "verification": "Isolated real conversion startup; not sustained concurrent decoding",
+  "results": [
+    {
+      "id": 55,
+      "status": 200,
+      "manifest": true
+    },
+    {
+      "id": 703,
+      "status": 200,
+      "manifest": true
+    },
+    {
+      "id": 559,
+      "status": 502,
+      "error": "Compatibility player is busy; try again shortly"
+    }
+  ]
+}

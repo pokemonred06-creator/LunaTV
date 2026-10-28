@@ -1,0 +1,20 @@
+{
+  "timestamp": "2026-10-08T14:57:58.610Z",
+  "image": "sha256:cde71189750e75ffa3f7db5cf3d8030c863fdec32e40f7d3e146a32c5550df32",
+  "healthy": true,
+  "patchedFilesVerified": 11,
+  "baseImage": "sha256:b3263922bce43b03388a82fdbdc15a0e3a28f1db3ffa3f7229fcc3243850dc80",
+  "runtimeConfigPreserved": true,
+  "immediateRollback": "lunatv:rollback-codec-20261008",
+  "rangeRepairRollback": "lunatv:rollback-range-20261008",
+  "storageCounts": {
+    "live": 1,
+    "vod": 25,
+    "differentFields": []
+  },
+  "validation": {
+    "tests": 49,
+    "typecheck": "passed",
+    "lintWeb": "passed"
+  }
+}

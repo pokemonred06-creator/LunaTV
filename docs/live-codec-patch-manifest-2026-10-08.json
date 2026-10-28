@@ -1,0 +1,64 @@
+{
+  "baseImage": "lunatv:range-fix-20261008",
+  "sourceHelperSha256": "25dd6d8474e9a5eb3dfa4a4cafcf0926d6227fae29fba4aa3e2bf89efdebae34",
+  "originalPlayerSha256": "6b80892e056073bd88a7c09ecb575e075132f247baca20f428fc7515c9d8ca3f",
+  "playerName": "static/chunks/3065-a2fca2582ad8acd1.js",
+  "runtimeName": "static/chunks/webpack-2ff36e27a4146f6b.js",
+  "files": [
+    {
+      "file": "/app/.next/static/chunks/3065-a2fca2582ad8acd1.js",
+      "sha256": "a2fca2582ad8acd12a77868fa722f4dc7ff6b256fbfe96ba4df553f0a42a0647",
+      "originalSha256": null
+    },
+    {
+      "file": "/app/.next/static/chunks/webpack-2ff36e27a4146f6b.js",
+      "sha256": "2ff36e27a4146f6b3ccbc0cc42a2ef713e127864e4a576bb5e5efd606856b0d6",
+      "originalSha256": null
+    },
+    {
+      "file": "/app/.next/server/chunks/3788.js",
+      "sha256": "e118f34ad3a396e87ec75c2677d926b13f836f101299caf799f4edef6b298da0",
+      "originalSha256": "f49d7675bd2139793c4c0508c9a9b915d6742eb858441fcd57e99b71da3792f3"
+    },
+    {
+      "file": "/app/.next/server/app/api/live/relay/route.js",
+      "sha256": "6073949122c8e408072239fcc737321b35104e8a90bb2fe2a4c0c7bfc73cb0d9",
+      "originalSha256": "ad4af9a4e7337fb39d7cc11f9c3161865ab5e72f54c42efba59dfbe3deb8d36b"
+    },
+    {
+      "file": "/app/.next/react-loadable-manifest.json",
+      "sha256": "eb563e589408a22cbf2de9e7d067955efe77c7175156856f44d5102dd591a7fe",
+      "originalSha256": "7ab94b676b1e0a197ff8abed98732676fbc123d9e5f77c90ad211a67ef1632c4"
+    },
+    {
+      "file": "/app/.next/server/app/live/page_client-reference-manifest.js",
+      "sha256": "9b427a0f6a5354a1b160a305ce62077e583e96d7baffe3f074faaec368951a24",
+      "originalSha256": "127072eb8bec3a8231536658aeaf4314c20adbb1db5f9c9d62e21b34acde22fb"
+    },
+    {
+      "file": "/app/.next/server/middleware-react-loadable-manifest.js",
+      "sha256": "e77641dc658a63ab02a7b3a288238841c9a8a8af9760a75071743398bd30fd3c",
+      "originalSha256": "8e3a66371bf32ed1ff6af4983334968d5b95b4687ed6f5f020957e86819eca78"
+    },
+    {
+      "file": "/app/.next/build-manifest.json",
+      "sha256": "aa8104555a35ab3fd49486c563de45cb46124490572ec9ae6f554220f23f5bcd",
+      "originalSha256": "26dbfabdd973b707627e1f2c3bc7c6369025bd0e41d37258ce5d83d67cb1f02a"
+    },
+    {
+      "file": "/app/.next/server/middleware-build-manifest.js",
+      "sha256": "1ad51136ccca06640dcccdefb687e82437afe14828c0db9e643049af0df286ce",
+      "originalSha256": "fd46724bd6a27458bba26d0370ce40d45861602d15b6c7b0ae8bff2525cbc727"
+    },
+    {
+      "file": "/app/.next/server/pages/500.html",
+      "sha256": "c1b014b9b5fee9a181565e46161b64cb06eb85a5cce83f4c43a121839b607786",
+      "originalSha256": "40e36713604778eadbe02c12ed3a29e97ac25cdb820537c0d9beaaad66827fb7"
+    },
+    {
+      "file": "/app/.next/server/app/_global-error.html",
+      "sha256": "c1b014b9b5fee9a181565e46161b64cb06eb85a5cce83f4c43a121839b607786",
+      "originalSha256": "40e36713604778eadbe02c12ed3a29e97ac25cdb820537c0d9beaaad66827fb7"
+    }
+  ]
+}

@@ -1,0 +1,93 @@
+{
+  "timestamp": "2026-10-08T14:38:42.947Z",
+  "method": "Direct registered public endpoint with playlist User-Agent; redirects not followed",
+  "results": [
+    {
+      "host": "t.061899.xyz",
+      "name": "CCTV1",
+      "id": "github.com/suxuang/myIPTV-116",
+      "status": 302,
+      "locationHeaderPresent": true,
+      "mime": "text/html; charset=UTF-8",
+      "hls": false,
+      "html": false
+    },
+    {
+      "host": "zby.130519.xyz",
+      "name": "CCTV-1",
+      "id": "github.com/suxuang/myIPTV-274",
+      "error": "TypeError",
+      "causeCode": "ERR_SSL_SSL/TLS_ALERT_HANDSHAKE_FAILURE"
+    },
+    {
+      "host": "111.22.153.159",
+      "name": "求索纪录",
+      "id": "github.com/suxuang/myIPTV-350",
+      "error": "TypeError",
+      "causeCode": "ECONNREFUSED"
+    },
+    {
+      "host": "101.35.240.114",
+      "name": "浙江卫视4K",
+      "id": "github.com/suxuang/myIPTV-3",
+      "status": 404,
+      "locationHeaderPresent": false,
+      "mime": "text/html",
+      "hls": false,
+      "html": true,
+      "title": "404 Not Found",
+      "errorTerms": [
+        "404",
+        "Not Found"
+      ]
+    },
+    {
+      "host": "tvbox6.icu",
+      "name": "求索纪录4K",
+      "id": "github.com/suxuang/myIPTV-357",
+      "status": 200,
+      "locationHeaderPresent": false,
+      "mime": "text/html; charset=utf-8",
+      "hls": false,
+      "html": true,
+      "title": "tvbox6.icu",
+      "errorTerms": []
+    },
+    {
+      "host": "cdn6.163189.xyz",
+      "name": "翡翠台4K",
+      "id": "github.com/suxuang/myIPTV-555",
+      "status": 307,
+      "locationHeaderPresent": true,
+      "mime": "text/html; charset=UTF-8",
+      "hls": false,
+      "html": true,
+      "title": "307 Temporary Redirect",
+      "errorTerms": [
+        "cloudflare"
+      ]
+    },
+    {
+      "host": "8.138.7.223",
+      "name": "北京卫视4K",
+      "id": "github.com/suxuang/myIPTV-0",
+      "status": 302,
+      "locationHeaderPresent": true,
+      "mime": "text/html; charset=UTF-8",
+      "hls": false,
+      "html": false
+    },
+    {
+      "host": "112.27.235.94",
+      "name": "CCTV1",
+      "id": "github.com/suxuang/myIPTV-232",
+      "status": 500,
+      "locationHeaderPresent": false,
+      "mime": "text/html",
+      "hls": false,
+      "html": true,
+      "title": "500 Internal Server Error",
+      "errorTerms": []
+    }
+  ]
+}

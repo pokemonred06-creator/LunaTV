@@ -1,0 +1,36 @@
+{
+  "timestamp": "2026-10-08T14:57:06.471Z",
+  "base": "https://tv.fishred.duckdns.org",
+  "results": [
+    {
+      "name": "Approved port 98",
+      "status": 502,
+      "body": "Proxy fetch failed"
+    },
+    {
+      "name": "Approved port 2096",
+      "status": 400,
+      "body": "Upstream HTTP 400 (php.jdshipin.com)"
+    },
+    {
+      "name": "Approved port 14311",
+      "status": 404,
+      "body": "Upstream HTTP 404: source not found (httplive.slave.bfgd.com.cn)"
+    },
+    {
+      "name": "Private address remains blocked",
+      "status": 403,
+      "body": "Blocked upstream target"
+    },
+    {
+      "name": "Unapproved port remains blocked",
+      "status": 403,
+      "body": "Blocked upstream target"
+    },
+    {
+      "name": "CGTN existing playback precheck",
+      "status": 200,
+      "body": "{\"success\":true,\"type\":\"m3u8\",\"mimeType\":\"application/vnd.apple.mpegurl\"}"
+    }
+  ]
+}
