@@ -1,0 +1,30 @@
+{
+  "status": "DEPLOYED_EPISODE_HANDOFF_FIX",
+  "at": "2026-11-22T05:36:47.583619+00:00",
+  "image": "sha256:5ab5f7391aabbd35972ae0e41bf6e8a76bdd260f98f61103aa7b71e29cb090a0",
+  "tag": "lunatv:episode-handoff-20261122",
+  "health": "healthy",
+  "rollbackImage": "sha256:ba1eff265472029681ea69d8f1a35148859b785b342b17a2a7af1ad20a5e89e2",
+  "backupBytes": 8324449,
+  "localHttp": {
+    "login": 200,
+    "unauthenticatedSearch": 401
+  },
+  "publicHttps": {
+    "login": 200,
+    "unauthenticatedSearch": 401
+  },
+  "publicPlayerAssetHashes": {
+    "/_next/static/chunks/app/play/page-692a0fb604eb22cd.js": "e927da01735af5a190ae89821c4b558632de6efac89f52e6d2c781c126cbffc3",
+    "/_next/static/chunks/7817-6a27b6bd3f2b036b.js": "bc51f2781aa1a2a55539f972e96f1ed44124843a949d6930ff19faf96346bdb3"
+  },
+  "inventory": {
+    "authorized_configuration_changes": [
+      "lunatv"
+    ],
+    "independent_runtime_changes": [],
+    "all_unrelated_runtime_states_unchanged": true
+  },
+  "authenticatedBrowserOnCanary": true,
+  "physicalDeviceTested": false
+}

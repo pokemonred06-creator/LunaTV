@@ -1,0 +1,149 @@
+{
+  "baseline": {
+    "passed": true,
+    "baseline": true,
+    "checks": [
+      {
+        "kind": "hongguo",
+        "action": "auto",
+        "oldRestart": true,
+        "preparations": 1,
+        "fullscreen": true
+      },
+      {
+        "kind": "mp4",
+        "action": "auto",
+        "oldRestart": false,
+        "preparations": 0,
+        "fullscreen": false
+      },
+      {
+        "kind": "hls",
+        "action": "auto",
+        "oldRestart": false,
+        "preparations": 0,
+        "fullscreen": false
+      },
+      {
+        "kind": "hls",
+        "action": "next",
+        "oldRestart": true,
+        "preparations": 0,
+        "fullscreen": false
+      }
+    ],
+    "assets": {
+      "/_next/static/chunks/app/play/page-40e64a2f176c093a.js": "3226c0ecd6afabeb69ce89d9bacc12ffe7c0fc4f8a723c11c5369d0cfbdc3ae1",
+      "/_next/static/chunks/7817-29b978c2599d7017.js": "e1382e3c1aa7772b9f3073bf671503832a3d8a0e796ce9c6ccdac216d29b9428"
+    }
+  },
+  "candidate": {
+    "passed": true,
+    "baseline": false,
+    "checks": [
+      {
+        "kind": "hongguo",
+        "action": "auto",
+        "oldRestart": false,
+        "preparations": 1,
+        "fullscreen": true
+      },
+      {
+        "kind": "mp4",
+        "action": "auto",
+        "oldRestart": false,
+        "preparations": 0,
+        "fullscreen": false
+      },
+      {
+        "kind": "hls",
+        "action": "auto",
+        "oldRestart": false,
+        "preparations": 0,
+        "fullscreen": false
+      },
+      {
+        "kind": "hls",
+        "action": "next",
+        "oldRestart": false,
+        "preparations": 0,
+        "fullscreen": false
+      },
+      {
+        "kind": "hongguo",
+        "action": "pick-third",
+        "oldRestart": false,
+        "preparations": 1,
+        "fullscreen": false,
+        "finalReplay": true
+      }
+    ],
+    "assets": {
+      "/_next/static/chunks/app/play/page-692a0fb604eb22cd.js": "e927da01735af5a190ae89821c4b558632de6efac89f52e6d2c781c126cbffc3",
+      "/_next/static/chunks/7817-6a27b6bd3f2b036b.js": "bc51f2781aa1a2a55539f972e96f1ed44124843a949d6930ff19faf96346bdb3"
+    },
+    "candidateImage": "sha256:5ab5f7391aabbd35972ae0e41bf6e8a76bdd260f98f61103aa7b71e29cb090a0"
+  },
+  "fullscreenAndEightMovie": {
+    "passed": true,
+    "checks": [
+      "inline scroll without changing episode",
+      "first boundary resists and returns",
+      "short swipe follows and snaps back",
+      "canceled swipe settles without selecting",
+      "mid-drag red and green frames from adjacent episodes; controls fixed",
+      "second up to last",
+      "last boundary",
+      "reverse slide shows blue and green frames and returns to previous",
+      "reduced motion changes episodes without moving the picture",
+      "horizontal seek without changing episode",
+      "exit restores inline mode",
+      "ordinary video unaffected",
+      "real EightMovie next episode decodes and down returns to original"
+    ],
+    "geometry": [
+      {
+        "inspect": "forward",
+        "dy": -286,
+        "actual": -286,
+        "pixels": [
+          [
+            248,
+            36,
+            0
+          ],
+          [
+            0,
+            255,
+            1
+          ]
+        ]
+      },
+      {
+        "inspect": "back",
+        "dy": 282,
+        "actual": 282,
+        "pixels": [
+          [
+            26,
+            35,
+            255
+          ],
+          [
+            0,
+            255,
+            1
+          ]
+        ]
+      }
+    ],
+    "provider": "eightmovie",
+    "series": "21274",
+    "differentMedia": true,
+    "gestureAssets": {
+      "/_next/static/chunks/app/play/page-692a0fb604eb22cd.js": "e927da01735af5a190ae89821c4b558632de6efac89f52e6d2c781c126cbffc3",
+      "/_next/static/chunks/7817-6a27b6bd3f2b036b.js": "bc51f2781aa1a2a55539f972e96f1ed44124843a949d6930ff19faf96346bdb3"
+    },
+    "physicalDeviceTested": false
+  }
+}

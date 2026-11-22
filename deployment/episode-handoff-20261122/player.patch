@@ -1,0 +1,226 @@
+--- a/src/app/play/page.tsx
++++ b/src/app/play/page.tsx
+@@ -305,6 +305,7 @@
+   >('initing');
+
+   const totalEpisodes = detail?.episodes?.length || 0;
++  const canStartFromLoadingMask = videoLoadingStage === 'initing' && !!videoUrl;
+
+   useEffect(() => {
+     if (detail?.source === 'hongguo') {
+@@ -1355,6 +1356,7 @@
+     // Save the departing episode above, then publish this selection immediately;
+     // a pending source callback must not wait for React's ref-sync effect.
+     currentEpisodeIndexRef.current = nextIndex;
++    activeVideoUrlRef.current = '';
+
+     setIsVideoLoading(true);
+     setVideoLoadingStage('sourceChanging');
+@@ -1722,16 +1724,15 @@
+   };
+
+   const handleEnded = () => {
+-    // 1. Handle TV Series (Multiple episodes in one source)
+     if (
+-      detail &&
+-      detail.episodes &&
+-      currentEpisodeIndex < detail.episodes.length - 1
+-    ) {
+-      setTimeout(() => {
+-        handleEpisodeChange(currentEpisodeIndex + 2);
+-      }, 1000);
+-      saveCurrentPlayProgress();
++      !videoUrl ||
++      activeVideoUrlRef.current !== videoUrl ||
++      currentEpisodeIndexRef.current !== currentEpisodeIndex
++    ) return;
++
++    saveCurrentPlayProgress();
++    if (currentEpisodeIndex + 1 < (detail?.episodes.length ?? 0)) {
++      handleEpisodeChange(currentEpisodeIndex + 2);
+       return;
+     }
+
+@@ -1747,16 +1748,25 @@
+     );
+
+     if (nextInQueue) {
++      const player = playerRef.current;
++      const episodeIntent = episodeIntentRef.current;
+       setTimeout(() => {
+-        handleSourceChange(
++        if (
++          !player ||
++          player.isDisposed() ||
++          !player.ended() ||
++          currentSourceRef.current !== currentSource ||
++          currentIdRef.current !== currentId ||
++          episodeIntentRef.current !== episodeIntent ||
++          currentEpisodeIndexRef.current !== currentEpisodeIndex
++        ) return;
++        void handleSourceChange(
+           nextInQueue.source,
+           nextInQueue.id,
+           nextInQueue.title,
+         );
+       }, 1500);
+     }
+-
+-    saveCurrentPlayProgress();
+   };
+
+   const handleKeyboardShortcuts = (e: KeyboardEvent) => {
+@@ -2189,21 +2199,10 @@
+                 {/* 加载遮罩 */}
+                 {isVideoLoading && !episodeError && (
+                   <div
+-                    className='absolute inset-0 bg-black/85 backdrop-blur-sm rounded-xl flex items-center justify-center z-500 transition-all duration-300 cursor-pointer active:scale-[0.99] select-none'
+-                    onClick={() => {
+-                      // GESTURE REFRESH: Clicking here gives us a fresh user gesture context
+-                      // so the player can actually auto-play when the URL is ready.
+-                      if (playerRef.current) {
+-                        try {
+-                          playerRef.current.play()?.catch(() => {});
+-                        } catch {
+-                          /* ignore */
+-                        }
+-                      }
+-                      console.log(
+-                        '[Gesture] Refreshing user context via loading mask click',
+-                      );
+-                    }}
++                    className={`absolute inset-0 bg-black/85 backdrop-blur-sm rounded-xl flex items-center justify-center z-500 transition-all duration-300 select-none ${canStartFromLoadingMask ? 'cursor-pointer active:scale-[0.99]' : ''}`}
++                    onClick={canStartFromLoadingMask
++                      ? () => playerRef.current?.play()?.catch(() => {})
++                      : undefined}
+                   >
+                     <div className='text-center max-w-md mx-auto px-6 pointer-events-none'>
+                       <div className='relative mb-8'>
+@@ -2219,7 +2218,7 @@
+                             : convert('🔄 视频加载中...')}
+                         </p>
+                         <p className='text-sm text-gray-400 opacity-60'>
+-                          {convert('加载中，可点击此处保持唤醒...')}
++                          {convert(canStartFromLoadingMask ? '加载中，可点击此处保持唤醒...' : '加载中...')}
+                         </p>
+                         {videoDesc && (
+                           <div className='max-w-xs mx-auto overflow-hidden relative h-12 flex items-center'>
+--- a/src/components/VideoJsPlayer.tsx
++++ b/src/components/VideoJsPlayer.tsx
+@@ -1542,6 +1542,7 @@
+   const isSwitchingRef = useRef(false);
+   const switchGuardRef = useRef<number | null>(null);
+   const autoplayEpochRef = useRef(0);
++  const hasSourceRef = useRef(false);
+   const playbackIntentRef = useRef(0);
+   const autoplayRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+   const nativeAutoplayRef = useRef<{
+@@ -1800,11 +1801,12 @@
+   }, []);
+
+   const tryPlayNow = useCallback(async () => {
+-    if (!mountedRef.current || !playerRef.current) return;
++    if (!mountedRef.current || !hasSourceRef.current || !playerRef.current)
++      return;
+     const p = playerRef.current;
+     const epoch = autoplayEpochRef.current;
+     const intent = playbackIntentRef.current;
+-    const ownsAttempt = () => mountedRef.current && playerRef.current === p &&
++    const ownsAttempt = () => mountedRef.current && hasSourceRef.current && playerRef.current === p &&
+       autoplayEpochRef.current === epoch && playbackIntentRef.current === intent &&
+       !(p as any).isDisposed?.();
+     clearAutoplayRetry();
+@@ -1974,7 +1976,7 @@
+
+   const playbackUrl = hongguoCompatibility.playbackUrl;
+   const finalUrl = useMemo(() => {
+-    if (!reloadTrigger || reloadTrigger <= 0) return playbackUrl;
++    if (!playbackUrl || !reloadTrigger || reloadTrigger <= 0) return playbackUrl;
+     return `${playbackUrl}${playbackUrl.includes('?') ? '&' : '?'}t=${reloadTrigger}`;
+   }, [playbackUrl, reloadTrigger]);
+
+@@ -2189,6 +2191,7 @@
+   useEffect(() => {
+     if (!playerReady || !playerRef.current) return;
+     const switchEpoch = ++sourceSwitchEpochRef.current;
++    hasSourceRef.current = false;
+     const previousVideo = getTechVideoEl();
+     const previousUrl = previousVideo?.currentSrc || previousVideo?.src || '';
+     sourceMetadataRef.current?.owner?.invalidate();
+@@ -2239,6 +2242,17 @@
+       (playerRef.current as any).__mseCleanup();
+       (playerRef.current as any).__mseCleanup = null;
+     }
++
++    // An empty URL means the next episode has no media attached yet.
++    // Passing it to Video.js leaves the previous source available to play.
++    if (!finalUrl) {
++      getTechVideoEl()?.pause();
++      hlsRef.current?.destroy();
++      hlsRef.current = null;
++      setAutoplayBlocked(false);
++      return;
++    }
++    hasSourceRef.current = true;
+
+     const mime = (type || '').toLowerCase();
+     const isHls =
+@@ -2821,6 +2835,7 @@
+
+     return () => {
+       switchCancelled = true;
++      hasSourceRef.current = false;
+       clearAutoplayRetry();
+       if (sourceMetadataRef.current?.epoch === switchEpoch) sourceMetadataRef.current.owner?.invalidate();
+     };
+@@ -3110,7 +3125,14 @@
+         callbacksRef.current.onTimeUpdate?.(t, d);
+       });
+       player!.on('ended', () => {
+-        if (mountedRef.current) callbacksRef.current.onEnded?.();
++        if (!mountedRef.current || !hasSourceRef.current) return;
++        if (!playbackIsLiveRef.current) {
++          // A load listener or retry for this source must not restart it at EOF.
++          autoplayEpochRef.current += 1;
++          clearAutoplayRetry();
++          clearNativeAutoplayListeners();
++        }
++        callbacksRef.current.onEnded?.();
+       });
+       player!.on('enterpictureinpicture', () => setIsPiPActive(true));
+       player!.on('leavepictureinpicture', () => setIsPiPActive(false));
+@@ -3203,7 +3225,7 @@
+
+   const startBlockedPlayback = () => {
+     const player = playerRef.current;
+-    if (!autoplayBlocked || !player || (player as any).isDisposed?.()) return;
++    if (!hasSourceRef.current || !autoplayBlocked || !player || player.isDisposed()) return;
+     clearAutoplayRetry();
+     const intent = ++playbackIntentRef.current;
+     unlockAudio();
+@@ -3232,6 +3254,7 @@
+   };
+
+   const togglePlay = () => {
++    if (!hasSourceRef.current) return;
+     if (playerRef.current?.paused()) {
+       if (autoplayBlocked) startBlockedPlayback();
+       else {
+@@ -3694,7 +3717,6 @@
+                   aria-label='Next episode'
+                   onClick={() => {
+                     pendingAutoplayRef.current = true;
+-                    tryPlayNow();
+                     onNextEpisode?.();
+                   }}
+                 >
+--- a/src/lib/__tests__/player-source-switch-integration.test.js
++++ b/src/lib/__tests__/player-source-switch-integration.test.js
+@@ -158,6 +158,7 @@
+     currentSourceRef: { current: official.source },
+     currentIdRef: { current: official.id },
+     currentEpisodeIndexRef: { current: 0 },
++    activeVideoUrlRef: { current: '/fixture/episode.mp4' },
+     episodeIntentRef: { current: 0 },
+     detailRef: { current: official },
+     playerRef: { current: null },

@@ -1,0 +1,8 @@
+{
+  "verifiedBaselineFiles": 353,
+  "changedSha256": {
+    "src/app/play/page.tsx": "3426c2a657b0ebcc5e974720a1bb14e667f7863a0578bfde874f95f833bfaef4",
+    "src/components/VideoJsPlayer.tsx": "52c109de461efbf61aa0b92e6a9a2b0375fb7f867d7de9a75ecc1592651d0018",
+    "src/lib/__tests__/player-source-switch-integration.test.js": "9a5fd58f36dfae29273d5b75b82586e05513107fca0ea752e8f6a5190c69edec"
+  }
+}
