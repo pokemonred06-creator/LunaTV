@@ -1386,6 +1386,8 @@ export default function VideoJsPlayer({
   const isSwitchingRef = useRef(false);
   const switchGuardRef = useRef<number | null>(null);
   const autoplayEpochRef = useRef(0);
+  const hasSourceRef = useRef(false);
+  const autoplayRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const nativeAutoplayRef = useRef<{
     video: HTMLVideoElement | null;
     handler: (() => void) | null;
@@ -1619,42 +1621,51 @@ export default function VideoJsPlayer({
     nativeAutoplayRef.current = { video: null, handler: null };
   }, []);
 
-  const tryPlayNow = useCallback(async () => {
-    if (!mountedRef.current || !playerRef.current) return;
-    const p = playerRef.current;
+  const clearAutoplayRetry = useCallback(() => {
+    if (autoplayRetryRef.current !== null) clearTimeout(autoplayRetryRef.current);
+    autoplayRetryRef.current = null;
+  }, []);
 
-    // If already playing or switching, don't force it yet
-    if ((p as any).isDisposed?.() || !p.paused()) {
+  const tryPlayNow = useCallback(async () => {
+    const player = playerRef.current;
+    if (
+      !mountedRef.current ||
+      !hasSourceRef.current ||
+      !player ||
+      player.isDisposed()
+    ) return;
+    const epoch = autoplayEpochRef.current;
+    const ownsAttempt = () =>
+      mountedRef.current &&
+      hasSourceRef.current &&
+      playerRef.current === player &&
+      autoplayEpochRef.current === epoch &&
+      !player.isDisposed();
+
+    clearAutoplayRetry();
+    if (!player.paused()) {
       setAutoplayBlocked(false);
       return;
     }
 
     try {
-      await p.play();
-      if (mountedRef.current) setAutoplayBlocked(false);
-      // Autoplay success
-    } catch (e) {
-      if (debug) console.warn('[Player] Autoplay BLOCKED or failed:', e);
-
-      // Retry once after a short delay (sometimes helpful for race conditions)
-      setTimeout(async () => {
-        if (
-          !mountedRef.current ||
-          !p ||
-          (p as any).isDisposed?.() ||
-          !p.paused()
-        )
-          return;
+      await player.play();
+      if (ownsAttempt()) setAutoplayBlocked(false);
+    } catch (error) {
+      if (!ownsAttempt()) return;
+      if (debug) console.warn('[Player] Autoplay BLOCKED or failed:', error);
+      autoplayRetryRef.current = setTimeout(async () => {
+        autoplayRetryRef.current = null;
+        if (!ownsAttempt() || !player.paused()) return;
         try {
-          await p.play();
-          setAutoplayBlocked(false);
+          await player.play();
+          if (ownsAttempt()) setAutoplayBlocked(false);
         } catch {
-          // If still failing, it's likely a real browser restriction
-          setAutoplayBlocked(true);
+          if (ownsAttempt()) setAutoplayBlocked(true);
         }
       }, 1000);
     }
-  }, [debug]);
+  }, [debug, clearAutoplayRetry]);
 
   useEffect(() => {
     setPlaybackIsLive(inferLiveFromSource());
@@ -1765,7 +1776,7 @@ export default function VideoJsPlayer({
   const initHlsRef = useRef<((videoEl: HTMLVideoElement, sourceUrl: string) => void) | null>(null);
 
   const finalUrl = useMemo(() => {
-    if (!reloadTrigger || reloadTrigger <= 0) return url;
+    if (!url || !reloadTrigger || reloadTrigger <= 0) return url;
     return `${url}${url.includes('?') ? '&' : '?'}t=${reloadTrigger}`;
   }, [url, reloadTrigger]);
 
@@ -1875,6 +1886,7 @@ export default function VideoJsPlayer({
   useEffect(() => {
     if (!playerReady || !playerRef.current) return;
     const switchEpoch = ++sourceSwitchEpochRef.current;
+    hasSourceRef.current = false;
     let switchCancelled = false;
     const isStaleSwitch = () =>
       switchCancelled ||
@@ -1895,6 +1907,7 @@ export default function VideoJsPlayer({
 
     isSwitchingRef.current = true;
     autoplayEpochRef.current += 1;
+    clearAutoplayRetry();
     if (switchGuardRef.current) clearTimeout(switchGuardRef.current);
     switchGuardRef.current = window.setTimeout(() => {
       if (mountedRef.current) isSwitchingRef.current = false;
@@ -1907,6 +1920,17 @@ export default function VideoJsPlayer({
       (playerRef.current as any).__mseCleanup();
       (playerRef.current as any).__mseCleanup = null;
     }
+
+    // An empty URL means the next episode has no media attached yet.
+    // Passing it to Video.js leaves the previous source available to play.
+    if (!finalUrl) {
+      getTechVideoEl()?.pause();
+      hlsRef.current?.destroy();
+      hlsRef.current = null;
+      setAutoplayBlocked(false);
+      return;
+    }
+    hasSourceRef.current = true;
 
     const mime = (type || '').toLowerCase();
     const isHls = mime.includes('mpegurl') || finalUrl.includes('/api/proxy/m3u8') || /\.m3u8(?:\?|$)/i.test(finalUrl);
@@ -2462,6 +2486,8 @@ export default function VideoJsPlayer({
 
     return () => {
       switchCancelled = true;
+      hasSourceRef.current = false;
+      clearAutoplayRetry();
     };
   }, [
     finalUrl,
@@ -2471,6 +2497,7 @@ export default function VideoJsPlayer({
     getTechVideoEl,
     armAutoplay,
     clearNativeAutoplayListeners,
+    clearAutoplayRetry,
     seriesId,
     customHlsLoaderFactory,
     reportPlaybackError,
@@ -2689,7 +2716,14 @@ export default function VideoJsPlayer({
         callbacksRef.current.onTimeUpdate?.(t, d);
       });
       player!.on('ended', () => {
-        if (mountedRef.current) callbacksRef.current.onEnded?.();
+        if (!mountedRef.current || !hasSourceRef.current) return;
+        if (!playbackIsLiveRef.current) {
+          // A load listener or retry for this source must not restart it at EOF.
+          autoplayEpochRef.current += 1;
+          clearAutoplayRetry();
+          clearNativeAutoplayListeners();
+        }
+        callbacksRef.current.onEnded?.();
       });
       player!.on('enterpictureinpicture', () => setIsPiPActive(true));
       player!.on('leavepictureinpicture', () => setIsPiPActive(false));
@@ -2781,6 +2815,7 @@ export default function VideoJsPlayer({
   }, [playerReady]);
 
   const togglePlay = () => {
+    if (!hasSourceRef.current) return;
     if (playerRef.current?.paused())
       playerRef.current.play()?.catch(() => {
         /* empty */
@@ -3059,6 +3094,7 @@ export default function VideoJsPlayer({
                   : {}
               }
               onClick={() => {
+                if (!hasSourceRef.current) return;
                 unlockAudio();
                 playerRef.current?.play()?.catch(() => {});
                 setAutoplayBlocked(false);
@@ -3138,9 +3174,9 @@ export default function VideoJsPlayer({
               {hasNextEpisode && (
                 <button
                   className='control-button'
+                  aria-label='Next episode'
                   onClick={() => {
                     pendingAutoplayRef.current = true;
-                    tryPlayNow();
                     onNextEpisode?.();
                   }}
                 >

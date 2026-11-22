@@ -270,6 +270,7 @@ function PlayPageClient() {
   >('initing');
 
   const totalEpisodes = detail?.episodes?.length || 0;
+  const canStartFromLoadingMask = videoLoadingStage === 'initing' && !!videoUrl;
 
   // --- Effects: 状态同步 ---
   useEffect(() => {
@@ -1272,7 +1273,12 @@ function PlayPageClient() {
 
   const handleEpisodeChange = (episodeNumber: number) => {
     const total = detailRef.current?.episodes?.length || 0;
-    if (episodeNumber < 1 || episodeNumber > total) return;
+    const nextIndex = episodeNumber - 1;
+    if (
+      nextIndex < 0 ||
+      nextIndex >= total ||
+      nextIndex === currentEpisodeIndexRef.current
+    ) return;
 
     const p = playerRef.current;
     if (p && !p.isDisposed()) {
@@ -1284,8 +1290,9 @@ function PlayPageClient() {
     setVideoLoadingStage('sourceChanging');
 
     resumeTimeRef.current = 0;
-
-    setCurrentEpisodeIndex(episodeNumber - 1);
+    pendingResumeTargetRef.current = null;
+    currentEpisodeIndexRef.current = nextIndex;
+    setCurrentEpisodeIndex(nextIndex);
   };
 
   // FIX: Using State (detail/currentEpisodeIndex) directly instead of Refs
@@ -1617,16 +1624,14 @@ function PlayPageClient() {
   };
 
   const handleEnded = () => {
-    // 1. Handle TV Series (Multiple episodes in one source)
     if (
-      detail &&
-      detail.episodes &&
-      currentEpisodeIndex < detail.episodes.length - 1
-    ) {
-      setTimeout(() => {
-        handleEpisodeChange(currentEpisodeIndex + 2);
-      }, 1000);
-      saveCurrentPlayProgress();
+      !videoUrl ||
+      currentEpisodeIndexRef.current !== currentEpisodeIndex
+    ) return;
+
+    saveCurrentPlayProgress();
+    if (currentEpisodeIndex + 1 < (detail?.episodes.length ?? 0)) {
+      handleEpisodeChange(currentEpisodeIndex + 2);
       return;
     }
 
@@ -1642,16 +1647,23 @@ function PlayPageClient() {
     );
 
     if (nextInQueue) {
+      const player = playerRef.current;
       setTimeout(() => {
-        handleSourceChange(
+        if (
+          !player ||
+          player.isDisposed() ||
+          !player.ended() ||
+          currentSourceRef.current !== currentSource ||
+          currentIdRef.current !== currentId ||
+          currentEpisodeIndexRef.current !== currentEpisodeIndex
+        ) return;
+        void handleSourceChange(
           nextInQueue.source,
           nextInQueue.id,
           nextInQueue.title,
         );
       }, 1500);
     }
-
-    saveCurrentPlayProgress();
   };
 
   const handleKeyboardShortcuts = (e: KeyboardEvent) => {
@@ -2036,21 +2048,10 @@ function PlayPageClient() {
                 {/* 加载遮罩 */}
                 {isVideoLoading && (
                   <div
-                    className='absolute inset-0 bg-black/85 backdrop-blur-sm rounded-xl flex items-center justify-center z-500 transition-all duration-300 cursor-pointer active:scale-[0.99] select-none'
-                    onClick={() => {
-                      // GESTURE REFRESH: Clicking here gives us a fresh user gesture context
-                      // so the player can actually auto-play when the URL is ready.
-                      if (playerRef.current) {
-                        try {
-                          playerRef.current.play()?.catch(() => {});
-                        } catch {
-                          /* ignore */
-                        }
-                      }
-                      console.log(
-                        '[Gesture] Refreshing user context via loading mask click',
-                      );
-                    }}
+                    className={`absolute inset-0 bg-black/85 backdrop-blur-sm rounded-xl flex items-center justify-center z-500 transition-all duration-300 select-none ${canStartFromLoadingMask ? 'cursor-pointer active:scale-[0.99]' : ''}`}
+                    onClick={canStartFromLoadingMask
+                      ? () => playerRef.current?.play()?.catch(() => {})
+                      : undefined}
                   >
                     <div className='text-center max-w-md mx-auto px-6 pointer-events-none'>
                       <div className='relative mb-8'>
@@ -2066,7 +2067,7 @@ function PlayPageClient() {
                             : convert('🔄 视频加载中...')}
                         </p>
                         <p className='text-sm text-gray-400 opacity-60'>
-                          {convert('加载中，可点击此处保持唤醒...')}
+                          {convert(canStartFromLoadingMask ? '加载中，可点击此处保持唤醒...' : '加载中...')}
                         </p>
                         {videoDesc && (
                           <div className='max-w-xs mx-auto overflow-hidden relative h-12 flex items-center'>
